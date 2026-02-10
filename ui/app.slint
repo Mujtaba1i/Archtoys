@@ -149,13 +149,14 @@ component ValueRow inherits Rectangle {
         }
 
         // Value
-        LineEdit {
+        TextInput {
             text <=> root.value;
             font-size: 14px;
             horizontal-stretch: 1;
+            color: Skin.text-main;
             
-            edited(text) => { root.edited(text); }
-            accepted(text) => { root.accepted(text); }
+            edited => { root.edited(self.text); }
+            accepted => { root.accepted(self.text); }
         }
         
         // Copy Button
@@ -363,7 +364,7 @@ export component AppWindow inherits Window {
             x: parent.width - 240px - 20px;
             y: 60px;
             width: 240px; 
-            height: 230px;
+            height: 180px;
             background: Skin.content-bg;
             border-radius: 8px;
             border-width: 1px; 
