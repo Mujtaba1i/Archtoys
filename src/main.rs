@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
 use ksni::{MenuItem, Tray, Icon};
-use image::ImageFormat;
+use image::{GenericImageView, ImageFormat};
 
 static PICKER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PICKER_CANCELLED: AtomicBool = AtomicBool::new(false);
