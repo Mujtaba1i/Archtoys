@@ -44,24 +44,20 @@ DESKTOP
 
   if [[ -f packaging/archtoys.png ]]; then
     install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/pixmaps/archtoys.png"
+    ln -sf archtoys.png "$pkgdir/usr/share/pixmaps/archtoys-bin.png"
   fi
-  if [[ -f packaging/archtoys-128.png ]]; then
-    install -Dm644 packaging/archtoys-128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/archtoys.png"
-  fi
-  if [[ -f packaging/archtoys-256.png ]]; then
-    install -Dm644 packaging/archtoys-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
-  elif [[ -f packaging/archtoys.png ]]; then
-    install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
-  fi
-  if [[ -f packaging/archtoys-512.png ]]; then
-    install -Dm644 packaging/archtoys-512.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/archtoys.png"
-  elif [[ -f packaging/archtoys.png ]]; then
-    install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/archtoys.png"
-  fi
+  for size in 16 22 24 32 48 64 128 256 512 1024; do
+    if [[ -f "packaging/archtoys-${size}.png" ]]; then
+      install -Dm644 "packaging/archtoys-${size}.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/archtoys.png"
+      ln -sf archtoys.png "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/archtoys-bin.png"
+    fi
+  done
   if [[ -f packaging/archtoys.png ]]; then
     install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/archtoys.png"
+    ln -sf archtoys.png "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/archtoys-bin.png"
   elif [[ -f image.png ]]; then
     install -Dm644 image.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+    ln -sf archtoys.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys-bin.png"
   fi
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
