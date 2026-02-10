@@ -37,13 +37,28 @@ Comment=System-wide color picker
 Exec=archtoys
 Icon=archtoys
 Terminal=false
+StartupWMClass=archtoys-bin
 Categories=Graphics;Utility;
 DESKTOP
   fi
 
   if [[ -f packaging/archtoys.png ]]; then
+    install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/pixmaps/archtoys.png"
+  fi
+  if [[ -f packaging/archtoys-128.png ]]; then
+    install -Dm644 packaging/archtoys-128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/archtoys.png"
+  fi
+  if [[ -f packaging/archtoys-256.png ]]; then
+    install -Dm644 packaging/archtoys-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+  elif [[ -f packaging/archtoys.png ]]; then
     install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+  fi
+  if [[ -f packaging/archtoys-512.png ]]; then
+    install -Dm644 packaging/archtoys-512.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/archtoys.png"
+  elif [[ -f packaging/archtoys.png ]]; then
     install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/archtoys.png"
+  fi
+  if [[ -f packaging/archtoys.png ]]; then
     install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/archtoys.png"
   elif [[ -f image.png ]]; then
     install -Dm644 image.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"

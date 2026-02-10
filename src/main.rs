@@ -44,7 +44,7 @@ impl Tray for AppTray {
     }
 
     fn icon_name(&self) -> String {
-        "preferences-color".into()
+        "archtoys".into()
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
