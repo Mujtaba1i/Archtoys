@@ -1,0 +1,377 @@
+import { Button, VerticalBox, HorizontalBox, ScrollView, LineEdit, CheckBox, Slider } from "std-widgets.slint";
+
+// --- Global Theme Palettes ---
+global Skin {
+    in-out property <bool> dark-mode: false;
+    
+    out property <brush> bg-color: dark-mode ? #202020 : #f3f3f3;
+    out property <brush> content-bg: dark-mode ? #2d2d2d : #ffffff;
+    out property <brush> text-main: dark-mode ? #eeeeee : #1a1a1a;
+    out property <brush> text-muted: dark-mode ? #aaaaaa : #555555;
+    out property <brush> border: dark-mode ? #444444 : #dcdcdc;
+    out property <brush> icon-tint: dark-mode ? #ffffff : #333333;
+}
+
+// --- Custom Button with Image Icon ---
+component CopyButton inherits Rectangle {
+    in property <image> icon-source;
+    callback clicked;
+    
+    width: 40px; 
+    height: 40px; 
+    border-radius: 4px;
+    background: touch.pressed ? Skin.border : transparent;
+    animate background { duration: 150ms; }
+
+    VerticalLayout {
+        padding: 15px;
+        spacing: 6px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                source: root.icon-source;
+                width: 18px; 
+                height: 18px;
+                colorize: Skin.icon-tint;
+            }
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked() } }
+}
+
+component SettingsButton inherits Rectangle {
+    in property <image> icon-source;
+    callback clicked;
+    
+    width: 32px; 
+    height: 32px; 
+    border-radius: 4px;
+    background: touch.pressed ? Skin.border : transparent;
+    animate background { duration: 150ms; }
+
+    VerticalLayout {
+        padding: 8px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Image {
+                source: root.icon-source;
+                width: 18px; 
+                height: 18px;
+                colorize: Skin.icon-tint;
+            }
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked() } }
+}
+
+// --- The "Pick" Button ---
+component PickButton inherits Rectangle {
+    callback clicked;
+    width: 90px; 
+    height: 36px; 
+    border-radius: 6px;
+    
+    background: touch.pressed ? Skin.border : Skin.content-bg;
+    border-width: 1px; 
+    border-color: Skin.border;
+
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 10px;
+        alignment: center;
+        
+        Image { 
+            source: @image-url("pick.svg");
+            width: 16px; 
+            height: 16px;
+            colorize: Skin.icon-tint;
+        }
+        
+        Text { 
+            text: "Pick";
+            color: Skin.text-main; 
+            font-size: 16px; 
+            font-weight: 800;
+            vertical-alignment: center;
+            horizontal-alignment: center; 
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked() } }
+}
+
+// --- Color Bubble (History) ---
+component ColorBubble inherits Rectangle {
+    in property <color> bubble-color;
+    callback clicked;
+    
+    width: 26px; 
+    height: 26px; 
+    border-radius: 13px;
+    background: bubble-color;
+    border-width: 1px; 
+    border-color: #00000020;
+    
+    TouchArea { clicked => { root.clicked() } }
+}
+
+// --- Data Row (HEX, RGB...) ---
+component ValueRow inherits Rectangle {
+    in property <string> label;
+    in-out property <string> value;
+    in property <image> icon-source: @image-url("copy.svg"); 
+    in property <bool> editable: true;
+    
+    callback edited(string);
+    callback accepted(string);
+    callback copy;
+
+    height: 48px;
+    background: Skin.content-bg;
+    border-radius: 6px;
+    border-width: 1px; 
+    border-color: Skin.border;
+
+    HorizontalLayout {
+        padding-left: 12px; 
+        padding-right: 12px; 
+        spacing: 12px;
+
+        // Label
+        Text { 
+            text: root.label; 
+            color: Skin.text-muted; 
+            font-size: 13px; 
+            font-weight: 500;
+            vertical-alignment: center;
+            width: 40px; 
+        }
+
+        // Value
+        LineEdit {
+            text <=> root.value;
+            font-size: 14px;
+            horizontal-stretch: 1;
+            
+            edited(text) => { root.edited(text); }
+            accepted(text) => { root.accepted(text); }
+        }
+        
+        // Copy Button
+        CopyButton { 
+            icon-source: root.icon-source;
+            clicked => { root.copy(); }
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Color Picker";
+    width: 520px; 
+    height: 350px;
+    background: Skin.bg-color;
+
+    in property <color> current-color: #cbb6ac;
+    in property <[color]> history-model: [#e0e0e0, #4a5a6a, #cbb6ac, #8c8b5c];
+    
+    in-out property <string> val-hex: "cbb6ac";
+    in-out property <string> val-rgb: "rgb(203, 182, 172)";
+    in-out property <string> val-hsl: "hsl(19, 23%, 74%)";
+    in-out property <string> val-hsv: "hsv(19, 15%, 80%)";
+    
+    in-out property <color> shade-lighter-2;
+    in-out property <color> shade-lighter-1;
+    in-out property <color> shade-darker-1;
+    in-out property <color> shade-darker-2;
+
+    in-out property <bool> settings-open: false;
+    in-out property <bool> setting-minimize: false;
+    in-out property <bool> setting-autocopy: false;
+
+    callback pick-color();
+    callback copy-to-clipboard(string);
+    callback history-clicked(int);
+    callback shade-clicked(float);
+    callback value-edited(string, string);
+    callback value-accepted(string, string);
+
+    VerticalBox {
+        padding: 14px; 
+        spacing: 0px;
+
+        // Header
+        HorizontalLayout {
+            height: 50px;
+            spacing: 15px;
+            padding-bottom: 10px;
+
+            HorizontalLayout {
+                spacing: 15px;
+
+                PickButton { clicked => { root.pick-color(); } }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    clip: true;
+                    Flickable {
+                        interactive: true;
+                        viewport-width: (root.history-model.length * 40px);
+                        HorizontalLayout {
+                            spacing: 12px;
+                            padding-top: 5px;
+                            for col[i] in root.history-model : ColorBubble {
+                                bubble-color: col;
+                                clicked => { root.history-clicked(i); }
+                            }
+                            Rectangle { horizontal-stretch: 0;
+                             }
+                        }
+                    }
+                }
+            }
+
+            // --- spacer that pushes settings button to far right ---
+
+            SettingsButton {
+                icon-source: @image-url("settings.svg");
+                clicked => { root.settings-open = !root.settings-open; }
+            }
+        }
+
+        // Divider
+        Rectangle { 
+            height: 2px; 
+            background: Skin.border;
+        }
+        Rectangle { height: 12px; } // Spacing after divider
+
+        // Main Content
+        HorizontalLayout {
+            padding-top: 4px; 
+            spacing: 16px;
+
+            // Shade Bar
+            Rectangle {
+                width: 36px; 
+                vertical-stretch: 1;
+                border-radius: 6px; 
+                clip: true;
+                
+                VerticalLayout {
+                    Rectangle { background: root.shade-lighter-2; vertical-stretch: 1; TouchArea { clicked => { root.shade-clicked(1.5) } } }
+                    Rectangle { background: root.shade-lighter-1; vertical-stretch: 1; TouchArea { clicked => { root.shade-clicked(1.2) } } }
+                    Rectangle { background: root.current-color; vertical-stretch: 1; TouchArea { clicked => { root.shade-clicked(1.0) } } }
+                    Rectangle { background: root.shade-darker-1; vertical-stretch: 1; TouchArea { clicked => { root.shade-clicked(0.7) } } }
+                    Rectangle { background: root.shade-darker-2; vertical-stretch: 1; TouchArea { clicked => { root.shade-clicked(0.5) } } }
+                }
+            }
+
+            // Value Rows
+            VerticalLayout {
+                spacing: 10px; 
+                horizontal-stretch: 1;
+                
+                ValueRow { 
+                    label: "HEX"; 
+                    value <=> root.val-hex; 
+                    copy => { root.copy-to-clipboard(root.val-hex) } 
+                    edited(txt) => { root.value-edited("HEX", txt) }
+                    accepted(txt) => { root.value-accepted("HEX", txt) }
+                }
+                ValueRow { 
+                    label: "RGB"; 
+                    value <=> root.val-rgb; 
+                    copy => { root.copy-to-clipboard(root.val-rgb) } 
+                    edited(txt) => { root.value-edited("RGB", txt) }
+                    accepted(txt) => { root.value-accepted("RGB", txt) }
+                }
+                ValueRow { 
+                    label: "HSL"; 
+                    value <=> root.val-hsl; 
+                    copy => { root.copy-to-clipboard(root.val-hsl) } 
+                    edited(txt) => { root.value-edited("HSL", txt) }
+                    accepted(txt) => { root.value-accepted("HSL", txt) }
+                }
+                ValueRow { 
+                    label: "HSV"; 
+                    value <=> root.val-hsv; 
+                    copy => { root.copy-to-clipboard(root.val-hsv) } 
+                    edited(txt) => { root.value-edited("HSV", txt) }
+                    accepted(txt) => { root.value-accepted("HSV", txt) }
+                }
+            }
+        }
+    }
+
+    // Settings Overlay
+    if root.settings-open : Rectangle {
+        width: 100%; 
+        height: 100%;
+        background: #00000050;
+        TouchArea { clicked => { root.settings-open = false; } }
+
+        Rectangle {
+            x: parent.width - 240px - 20px;
+            y: 60px;
+            width: 240px; 
+            height: 180px;
+            background: Skin.content-bg;
+            border-radius: 8px;
+            border-width: 1px; 
+            border-color: Skin.border;
+            drop-shadow-blur: 12px; 
+            drop-shadow-color: #00000040;
+
+            VerticalLayout {
+                padding: 16px; 
+                spacing: 12px;
+                
+                Text { 
+                    text: "Settings"; 
+                    font-weight: 700; 
+                    color: Skin.text-main; 
+                    font-size: 16px; 
+                }
+                
+                Rectangle { 
+                    height: 1px; 
+                    background: Skin.border; 
+                }
+                
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { 
+                        text: "Dark Mode"; 
+                        color: Skin.text-main; 
+                        vertical-alignment: center; 
+                        horizontal-stretch: 1; 
+                    }
+                    CheckBox { checked <=> Skin.dark-mode; }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { 
+                        text: "Minimize on Pick"; 
+                        color: Skin.text-main; 
+                        vertical-alignment: center; 
+                        horizontal-stretch: 1; 
+                    }
+                    CheckBox { checked <=> root.setting-minimize; }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { 
+                        text: "Auto-Copy"; 
+                        color: Skin.text-main; 
+                        vertical-alignment: center; 
+                        horizontal-stretch: 1; 
+                    }
+                    CheckBox { checked <=> root.setting-autocopy; }
+                }
+            }
+        }
+    }
+}
