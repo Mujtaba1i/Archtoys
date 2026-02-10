@@ -3,7 +3,7 @@ slint::include_modules!();
 use arboard::{Clipboard, SetExtLinux};
 use palette::{Srgb, Hsl, Hsv, FromColor, IntoColor};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use slint::{Color, LogicalPosition, ModelRc, VecModel};
 use std::thread;
 use global_hotkey::GlobalHotKeyManager;
@@ -18,7 +18,8 @@ use std::fs;
 use std::path::PathBuf;
 use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
-use ksni::{MenuItem, Tray};
+use ksni::{MenuItem, Tray, Icon};
+use image::ImageFormat;
 
 static PICKER_ACTIVE: AtomicBool = AtomicBool::new(false);
 static PICKER_CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -29,6 +30,36 @@ const OVERLAY_OFFSET_X: i32 = 20;
 const OVERLAY_OFFSET_Y: i32 = 20;
 
 // (unused) small helper removed in favor of X11 capture via `scrap` in the live picker.
+
+fn tray_icon_pixmap() -> Vec<Icon> {
+    static ICON: OnceLock<Vec<Icon>> = OnceLock::new();
+    ICON
+        .get_or_init(|| {
+            let bytes = include_bytes!("../packaging/archtoys-64.png");
+            let img = match image::load_from_memory_with_format(bytes, ImageFormat::Png) {
+                Ok(img) => img,
+                Err(err) => {
+                    eprintln!("tray: failed to decode embedded icon: {:?}", err);
+                    return vec![];
+                }
+            };
+            let (width, height) = img.dimensions();
+            let mut data = img.into_rgba8().into_vec();
+            if data.len() % 4 != 0 {
+                eprintln!("tray: icon data has invalid length");
+                return vec![];
+            }
+            for pixel in data.chunks_exact_mut(4) {
+                pixel.rotate_right(1); // rgba -> argb
+            }
+            vec![Icon {
+                width: width as i32,
+                height: height as i32,
+                data,
+            }]
+        })
+        .clone()
+}
 
 struct AppTray {
     ui: slint::Weak<AppWindow>,
@@ -45,6 +76,10 @@ impl Tray for AppTray {
 
     fn icon_name(&self) -> String {
         "archtoys".into()
+    }
+
+    fn icon_pixmap(&self) -> Vec<Icon> {
+        tray_icon_pixmap()
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
