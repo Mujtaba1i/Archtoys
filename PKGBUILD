@@ -25,7 +25,25 @@ export SLINT_BACKEND=winit
 exec /usr/lib/archtoys/archtoys-bin "$@"
 WRAP
 
-  install -Dm644 packaging/archtoys.desktop "$pkgdir/usr/share/applications/archtoys.desktop"
-  install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+  if [[ -f packaging/archtoys.desktop ]]; then
+    install -Dm644 packaging/archtoys.desktop "$pkgdir/usr/share/applications/archtoys.desktop"
+  else
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/archtoys.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Archtoys
+Comment=System-wide color picker
+Exec=archtoys
+Icon=archtoys
+Terminal=false
+Categories=Graphics;Utility;
+DESKTOP
+  fi
+
+  if [[ -f packaging/archtoys.png ]]; then
+    install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+  elif [[ -f image.png ]]; then
+    install -Dm644 image.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+  fi
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
