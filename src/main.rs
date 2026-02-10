@@ -546,6 +546,19 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    let history_clear = history_store.clone();
+    let ui_clear = ui_handle.clone();
+    ui.on_clear_history(move || {
+        {
+            let mut guard = history_clear.lock().unwrap();
+            guard.clear();
+        }
+        if let Some(ui) = ui_clear.upgrade() {
+            ui.set_history_model(ModelRc::from(Rc::new(VecModel::from(Vec::<Color>::new()))));
+            persist_config(&ui, &history_clear);
+        }
+    });
+
     let ui_weak = ui_handle.clone();
     let history_shades = history_store.clone();
     ui.on_shade_clicked(move |factor| {

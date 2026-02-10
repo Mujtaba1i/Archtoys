@@ -240,6 +240,7 @@ export component AppWindow inherits Window {
     callback value-edited(string, string);
     callback value-accepted(string, string);
     callback settings-changed();
+    callback clear-history();
     callback close-confirm-close();
     callback close-confirm-minimize();
 
@@ -362,7 +363,7 @@ export component AppWindow inherits Window {
             x: parent.width - 240px - 20px;
             y: 60px;
             width: 240px; 
-            height: 180px;
+            height: 230px;
             background: Skin.content-bg;
             border-radius: 8px;
             border-width: 1px; 
@@ -417,6 +418,11 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1; 
                     }
                     CheckBox { checked <=> root.setting-autocopy; toggled => { root.settings-changed(); } }
+                }
+
+                Button {
+                    text: "Clear History";
+                    clicked => { root.clear-history(); }
                 }
             }
         }
