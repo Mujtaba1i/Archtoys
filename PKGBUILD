@@ -1,5 +1,5 @@
 pkgname=archtoys
-pkgver=0.1.2
+pkgver=0.1.4
 pkgrel=1
 pkgdesc="PowerToys-like color picker for Linux (Slint-based)"
 arch=('x86_64')
@@ -7,6 +7,7 @@ url="https://github.com/Mujtaba1i/Archtoys"
 license=('MIT')
 depends=('glibc')
 makedepends=('cargo' 'git')
+install=archtoys.install
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Mujtaba1i/Archtoys/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
@@ -42,6 +43,8 @@ DESKTOP
 
   if [[ -f packaging/archtoys.png ]]; then
     install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+    install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/archtoys.png"
+    install -Dm644 packaging/archtoys.png "$pkgdir/usr/share/icons/hicolor/1024x1024/apps/archtoys.png"
   elif [[ -f image.png ]]; then
     install -Dm644 image.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/archtoys.png"
   fi
