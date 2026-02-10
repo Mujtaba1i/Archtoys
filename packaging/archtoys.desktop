@@ -1,6 +1,8 @@
 [Desktop Entry]
-Name=ArchToys Color Picker
-Exec=color-picker
-Icon=archtoys
 Type=Application
-Categories=Utility;
+Name=Archtoys
+Comment=System-wide color picker
+Exec=archtoys
+Icon=archtoys
+Terminal=false
+Categories=Graphics;Utility;
