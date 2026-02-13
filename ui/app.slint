@@ -153,6 +153,8 @@ component ValueRow inherits Rectangle {
             text <=> root.value;
             font-size: 14px;
             horizontal-stretch: 1;
+            horizontal-alignment: center;
+            vertical-alignment: center;
             color: Skin.text-main;
             
             edited => { root.edited(self.text); }

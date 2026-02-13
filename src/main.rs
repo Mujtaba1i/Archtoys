@@ -2,6 +2,7 @@ slint::include_modules!();
 
 use arboard::{Clipboard, SetExtLinux};
 use palette::{Srgb, Hsl, Hsv, FromColor, IntoColor};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 use slint::{Color, LogicalPosition, ModelRc, VecModel};
@@ -29,7 +30,44 @@ const OVERLAY_HEIGHT: i32 = 44;
 const OVERLAY_OFFSET_X: i32 = 20;
 const OVERLAY_OFFSET_Y: i32 = 20;
 
+thread_local! {
+    static PICKER_OVERLAY: RefCell<Option<PickerOverlay>> = RefCell::new(None);
+}
+
 // (unused) small helper removed in favor of X11 capture via `scrap` in the live picker.
+
+fn with_picker_overlay<R>(f: impl FnOnce(&mut Option<PickerOverlay>) -> R) -> R {
+    PICKER_OVERLAY.with(|slot| {
+        let mut overlay = slot.borrow_mut();
+        f(&mut overlay)
+    })
+}
+
+fn ensure_picker_overlay() -> Result<slint::Weak<PickerOverlay>, slint::PlatformError> {
+    with_picker_overlay(|slot| {
+        if slot.is_none() {
+            let overlay = PickerOverlay::new()?;
+            overlay.hide().ok();
+            overlay.window().on_close_requested(move || {
+                PICKER_CANCELLED.store(true, Ordering::SeqCst);
+                slint::CloseRequestResponse::HideWindow
+            });
+            *slot = Some(overlay);
+        }
+        Ok(slot
+            .as_ref()
+            .expect("picker overlay must exist")
+            .as_weak())
+    })
+}
+
+fn release_picker_overlay() {
+    with_picker_overlay(|slot| {
+        if let Some(overlay) = slot.take() {
+            overlay.hide().ok();
+        }
+    });
+}
 
 fn tray_icon_pixmap() -> Vec<Icon> {
     static ICON: OnceLock<Vec<Icon>> = OnceLock::new();
@@ -224,25 +262,23 @@ fn overlay_position(x: i32, y: i32, screen_w: i32, screen_h: i32) -> (i32, i32) 
     (pos_x, pos_y)
 }
 
-fn finish_picker(ui_weak: slint::Weak<AppWindow>, overlay_weak: slint::Weak<PickerOverlay>) {
-    PICKER_ACTIVE.store(false, Ordering::SeqCst);
-    slint::invoke_from_event_loop(move || {
-        if let Some(overlay) = overlay_weak.upgrade() {
-            overlay.hide().ok();
+fn finish_picker(ui_weak: slint::Weak<AppWindow>) {
+    if let Err(err) = slint::invoke_from_event_loop(move || {
+        release_picker_overlay();
+        if let Some(ui) = ui_weak.upgrade() {
+            if ui.get_setting_minimize() {
+                ui.window().show().ok();
+            }
         }
-    })
-    .ok();
-
-    let _ = ui_weak.upgrade_in_event_loop(move |ui| {
-        if ui.get_setting_minimize() {
-            ui.window().show().ok();
-        }
-    });
+        PICKER_ACTIVE.store(false, Ordering::SeqCst);
+    }) {
+        eprintln!("finish_picker: invoke_from_event_loop error: {:?}", err);
+        PICKER_ACTIVE.store(false, Ordering::SeqCst);
+    }
 }
 
 fn start_picker(
     ui_weak: slint::Weak<AppWindow>,
-    overlay_weak: slint::Weak<PickerOverlay>,
     history_store: Arc<Mutex<Vec<(u8,u8,u8)>>>,
 ) {
     // Ensure only one picker thread runs at a time
@@ -250,6 +286,14 @@ fn start_picker(
         return;
     }
     PICKER_CANCELLED.store(false, Ordering::SeqCst);
+    let overlay_weak = match ensure_picker_overlay() {
+        Ok(overlay_weak) => overlay_weak,
+        Err(err) => {
+            eprintln!("overlay: failed to create picker window: {:?}", err);
+            PICKER_ACTIVE.store(false, Ordering::SeqCst);
+            return;
+        }
+    };
 
     std::thread::spawn(move || {
         let device = DeviceState::new();
@@ -259,7 +303,7 @@ fn start_picker(
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Could not get primary display: {:?}", e);
-                finish_picker(ui_weak, overlay_weak);
+                finish_picker(ui_weak);
                 return;
             }
         };
@@ -268,7 +312,7 @@ fn start_picker(
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Could not create capturer: {:?}", e);
-                finish_picker(ui_weak, overlay_weak);
+                finish_picker(ui_weak);
                 return;
             }
         };
@@ -418,7 +462,7 @@ fn start_picker(
             std::thread::sleep(Duration::from_millis(16));
         }
 
-        finish_picker(ui_weak, overlay_weak);
+        finish_picker(ui_weak);
     });
 }
 
@@ -448,14 +492,7 @@ fn calculate_shades(r: u8, g: u8, b: u8) -> (Color, Color, Color, Color) {
 
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
-    let overlay = PickerOverlay::new()?;
-    overlay.hide().ok();
-    overlay.window().on_close_requested(move || {
-        PICKER_CANCELLED.store(true, Ordering::SeqCst);
-        slint::CloseRequestResponse::HideWindow
-    });
     let ui_handle = ui.as_weak();
-    let overlay_weak = overlay.as_weak();
 
     let tray = AppTray { ui: ui_handle.clone() };
     let _tray_handle = match tray.spawn() {
@@ -489,23 +526,20 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_history_model(ModelRc::from(Rc::new(init_hist)));
 
     let hk_ui = ui_hotkey.clone();
-    let hk_overlay = overlay_weak.clone();
     let hk_history = history_store.clone();
     std::thread::spawn(move || {
-    let receiver = global_hotkey::GlobalHotKeyEvent::receiver();
+        let receiver = global_hotkey::GlobalHotKeyEvent::receiver();
 
-    while let Ok(event) = receiver.recv() {
-        if event.id == hotkey.id() {
-            let ui_for_hide = hk_ui.clone();
-            slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui_for_hide.upgrade() {
+        while let Ok(event) = receiver.recv() {
+            if event.id == hotkey.id() {
+                let ui_for_pick = hk_ui.clone();
+                let history_for_pick = hk_history.clone();
+                let _ = ui_for_pick.upgrade_in_event_loop(move |ui| {
                     if ui.get_setting_minimize() {
                         ui.window().hide().ok();
                     }
-                }
-            })
-            .ok();
-            start_picker(hk_ui.clone(), hk_overlay.clone(), hk_history.clone());
+                    start_picker(ui.as_weak(), history_for_pick);
+                });
             }
         }
     });
@@ -549,14 +583,13 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let ui_weak = ui_handle.clone();
     let pick_history = history_store.clone();
-    let pick_overlay = overlay_weak.clone();
     ui.on_pick_color(move || {
         let ui = ui_weak.unwrap();
         if ui.get_setting_minimize() {
             ui.window().hide().ok();
         }
         // start the system-wide picker (live preview). Pass history store so selection is recorded.
-        start_picker(ui_weak.clone(), pick_overlay.clone(), pick_history.clone());
+        start_picker(ui.as_weak(), pick_history.clone());
     });
 
     ui.on_copy_to_clipboard(move |text| {
