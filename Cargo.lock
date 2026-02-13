@@ -707,7 +707,7 @@ checksum = "cbd0f76e066e64fdc5631e3bb46381254deab9ef1158292f27c8c57e3bf3fe59"
 
 [[package]]
 name = "color-picker"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "arboard",
  "device_query",
