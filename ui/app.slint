@@ -125,7 +125,14 @@ component ValueRow inherits Rectangle {
     
     callback edited(string);
     callback accepted(string);
+    callback blurred(string);
     callback copy;
+
+    focus-release := FocusScope {
+        enabled: true;
+        width: 1px;
+        height: 1px;
+    }
 
     height: 48px;
     background: Skin.content-bg;
@@ -158,7 +165,15 @@ component ValueRow inherits Rectangle {
             color: Skin.text-main;
             
             edited => { root.edited(self.text); }
-            accepted => { root.accepted(self.text); }
+            accepted => {
+                root.accepted(self.text);
+                focus-release.focus();
+            }
+            changed has-focus => {
+                if !self.has-focus {
+                    root.blurred(self.text);
+                }
+            }
         }
         
         // Copy Button
@@ -212,19 +227,131 @@ export component PickerOverlay inherits Window {
     }
 }
 
+// --- Transparent full-screen input shield (X11 picker session) ---
+export component PickerShieldWindow inherits Window {
+    width: 1px;
+    height: 1px;
+    full-screen: true;
+    no-frame: true;
+    always-on-top: true;
+    background: #00000001;
+    title: "Archtoys Picker Shield";
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #00000001;
+        TouchArea { }
+    }
+}
+
+// --- Wayland screenshot picker window ---
+export component WaylandPickerWindow inherits Window {
+    width: 1px;
+    height: 1px;
+    full-screen: true;
+    no-frame: true;
+    always-on-top: true;
+    background: #000000;
+    title: "Archtoys Screenshot Picker";
+
+    in-out property <image> screenshot-image;
+    in-out property <color> preview-color: #000000;
+    in-out property <string> preview-hex: "#000000";
+    in-out property <int> cursor-x: 0;
+    in-out property <int> cursor-y: 0;
+
+    callback pointer-moved(int, int);
+    callback pick-at(int, int);
+    callback cancel-pick();
+
+    Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.screenshot-image;
+    }
+
+    TouchArea {
+        moved => {
+            root.pointer-moved(
+                Math.round(self.mouse_x / 1px),
+                Math.round(self.mouse_y / 1px)
+            );
+        }
+        clicked => {
+            root.pick-at(
+                Math.round(self.mouse_x / 1px),
+                Math.round(self.mouse_y / 1px)
+            );
+        }
+    }
+
+    FocusScope {
+        enabled: true;
+        focus-on-click: true;
+        init => {
+            self.focus();
+        }
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.cancel-pick();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    Rectangle {
+        width: 150px;
+        height: 46px;
+        x: clamp(root.cursor-x * 1px + 18px, 0px, parent.width - self.width);
+        y: clamp(root.cursor-y * 1px + 18px, 0px, parent.height - self.height);
+        border-radius: 8px;
+        background: #1f1f1fe6;
+        border-width: 1px;
+        border-color: #00000030;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: #00000060;
+
+        HorizontalLayout {
+            padding: 8px;
+            spacing: 8px;
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: 4px;
+                background: root.preview-color;
+                border-width: 1px;
+                border-color: #00000050;
+            }
+            Text {
+                text: root.preview-hex;
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "Color Picker";
-    width: 520px; 
-    height: 350px;
+    preferred-width: 520px;
+    preferred-height: 350px;
+    min-width: 480px;
+    min-height: 320px;
+    max-width: 900px;
+    max-height: 620px;
     background: Skin.bg-color;
 
     in property <color> current-color: #cbb6ac;
     in property <[color]> history-model: [#e0e0e0, #4a5a6a, #cbb6ac, #8c8b5c];
     
-    in-out property <string> val-hex: "cbb6ac";
-    in-out property <string> val-rgb: "rgb(203, 182, 172)";
-    in-out property <string> val-hsl: "hsl(19, 23%, 74%)";
-    in-out property <string> val-hsv: "hsv(19, 15%, 80%)";
+    in-out property <string> val-hex: "#CBB6AC";
+    in-out property <string> val-rgb: "rgb(203,182,172)";
+    in-out property <string> val-hsl: "hsl(19,23%,74%)";
+    in-out property <string> val-hsv: "hsv(19,15%,80%)";
     
     in-out property <color> shade-lighter-2;
     in-out property <color> shade-lighter-1;
@@ -234,6 +361,9 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-open: false;
     in-out property <bool> setting-minimize: false;
     in-out property <bool> setting-autocopy: false;
+    in-out property <bool> setting-autostart: false;
+    in-out property <string> setting-hotkey: "Ctrl+Super+C";
+    in-out property <bool> setting-hotkey-recording: false;
     in-out property <bool> close-confirm-open: false;
 
     callback pick-color();
@@ -242,10 +372,60 @@ export component AppWindow inherits Window {
     callback shade-clicked(float);
     callback value-edited(string, string);
     callback value-accepted(string, string);
+    callback value-blurred(string, string);
+    callback hotkey-captured(string, bool, bool, bool, bool);
     callback settings-changed();
     callback clear-history();
     callback close-confirm-close();
     callback close-confirm-minimize();
+
+    defocus-scope := FocusScope {
+        enabled: true;
+        width: 1px;
+        height: 1px;
+    }
+
+    hotkey-record-scope := FocusScope {
+        enabled: root.setting-hotkey-recording;
+        width: 1px;
+        height: 1px;
+        key-pressed(event) => {
+            if !root.setting-hotkey-recording {
+                return reject;
+            }
+            if event.text == Key.Escape {
+                root.setting-hotkey-recording = false;
+                return accept;
+            }
+            if event.text == Key.Control || event.text == Key.ControlR
+                || event.text == Key.Shift || event.text == Key.ShiftR
+                || event.text == Key.Alt || event.text == Key.AltGr
+                || event.text == Key.Meta || event.text == Key.MetaR {
+                return accept;
+            }
+            if !event.modifiers.control
+                && !event.modifiers.alt
+                && !event.modifiers.shift
+                && !event.modifiers.meta {
+                return accept;
+            }
+            root.hotkey-captured(
+                event.text,
+                event.modifiers.control,
+                event.modifiers.alt,
+                event.modifiers.shift,
+                event.modifiers.meta
+            );
+            root.setting-hotkey-recording = false;
+            return accept;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            defocus-scope.focus();
+        }
+    }
 
     VerticalBox {
         padding: 14px; 
@@ -329,6 +509,7 @@ export component AppWindow inherits Window {
                     copy => { root.copy-to-clipboard(root.val-hex) } 
                     edited(txt) => { root.value-edited("HEX", txt) }
                     accepted(txt) => { root.value-accepted("HEX", txt) }
+                    blurred(txt) => { root.value-blurred("HEX", txt) }
                 }
                 ValueRow { 
                     label: "RGB"; 
@@ -336,6 +517,7 @@ export component AppWindow inherits Window {
                     copy => { root.copy-to-clipboard(root.val-rgb) } 
                     edited(txt) => { root.value-edited("RGB", txt) }
                     accepted(txt) => { root.value-accepted("RGB", txt) }
+                    blurred(txt) => { root.value-blurred("RGB", txt) }
                 }
                 ValueRow { 
                     label: "HSL"; 
@@ -343,6 +525,7 @@ export component AppWindow inherits Window {
                     copy => { root.copy-to-clipboard(root.val-hsl) } 
                     edited(txt) => { root.value-edited("HSL", txt) }
                     accepted(txt) => { root.value-accepted("HSL", txt) }
+                    blurred(txt) => { root.value-blurred("HSL", txt) }
                 }
                 ValueRow { 
                     label: "HSV"; 
@@ -350,6 +533,7 @@ export component AppWindow inherits Window {
                     copy => { root.copy-to-clipboard(root.val-hsv) } 
                     edited(txt) => { root.value-edited("HSV", txt) }
                     accepted(txt) => { root.value-accepted("HSV", txt) }
+                    blurred(txt) => { root.value-blurred("HSV", txt) }
                 }
             }
         }
@@ -360,13 +544,18 @@ export component AppWindow inherits Window {
         width: 100%; 
         height: 100%;
         background: #00000050;
-        TouchArea { clicked => { root.settings-open = false; } }
+        TouchArea {
+            clicked => {
+                defocus-scope.focus();
+                root.settings-open = false;
+            }
+        }
 
         Rectangle {
             x: parent.width - 240px - 20px;
             y: 60px;
             width: 240px; 
-            height: 236px;
+            height: parent.height - 80px;
             background: Skin.content-bg;
             border-radius: 8px;
             border-width: 1px; 
@@ -374,60 +563,100 @@ export component AppWindow inherits Window {
             drop-shadow-blur: 12px; 
             drop-shadow-color: #00000040;
 
-            VerticalLayout {
-                padding: 16px; 
-                spacing: 12px;
-                
-                Text { 
-                    text: "Settings"; 
-                    font-weight: 700; 
-                    color: Skin.text-main; 
-                    font-size: 16px; 
-                }
-                
-                Rectangle { 
-                    height: 1px; 
-                    background: Skin.border; 
-                }
-                
-                HorizontalLayout {
-                    spacing: 10px;
-                    Text { 
-                        text: "Dark Mode"; 
-                        color: Skin.text-main; 
-                        vertical-alignment: center; 
-                        horizontal-stretch: 1; 
-                    }
-                    CheckBox { checked <=> Skin.dark-mode; toggled => { root.settings-changed(); } }
-                }
+            TouchArea { clicked => { } }
 
-                HorizontalLayout {
-                    spacing: 10px;
-                    Text { 
-                        text: "Minimize on Pick"; 
-                        color: Skin.text-main; 
-                        vertical-alignment: center; 
-                        horizontal-stretch: 1; 
-                    }
-                    CheckBox { checked <=> root.setting-minimize; toggled => { root.settings-changed(); } }
-                }
+            ScrollView {
+                width: parent.width;
+                height: parent.height;
 
-                HorizontalLayout {
-                    spacing: 10px;
+                VerticalLayout {
+                    padding: 16px; 
+                    spacing: 12px;
+                    
                     Text { 
-                        text: "Auto Copy"; 
+                        text: "Settings"; 
+                        font-weight: 700; 
                         color: Skin.text-main; 
-                        vertical-alignment: center; 
-                        horizontal-stretch: 1; 
+                        font-size: 16px; 
                     }
-                    CheckBox { checked <=> root.setting-autocopy; toggled => { root.settings-changed(); } }
-                }
+                    
+                    Rectangle { 
+                        height: 1px; 
+                        background: Skin.border; 
+                    }
+                    
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { 
+                            text: "Dark Mode"; 
+                            color: Skin.text-main; 
+                            vertical-alignment: center; 
+                            horizontal-stretch: 1; 
+                        }
+                        CheckBox { checked <=> Skin.dark-mode; toggled => { root.settings-changed(); } }
+                    }
 
-                Button {
-                    text: "Clear History";
-                    height: 34px;
-                    horizontal-stretch: 1;
-                    clicked => { root.clear-history(); }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { 
+                            text: "Minimize on Pick"; 
+                            color: Skin.text-main; 
+                            vertical-alignment: center; 
+                            horizontal-stretch: 1; 
+                        }
+                        CheckBox { checked <=> root.setting-minimize; toggled => { root.settings-changed(); } }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { 
+                            text: "Auto Copy"; 
+                            color: Skin.text-main; 
+                            vertical-alignment: center; 
+                            horizontal-stretch: 1; 
+                        }
+                        CheckBox { checked <=> root.setting-autocopy; toggled => { root.settings-changed(); } }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: "Run on Startup";
+                            color: Skin.text-main;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        CheckBox { checked <=> root.setting-autostart; toggled => { root.settings-changed(); } }
+                    }
+
+                    VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Global Hotkey";
+                            color: Skin.text-main;
+                            horizontal-alignment: left;
+                            vertical-alignment: center;
+                        }
+                        Button {
+                            text: root.setting-hotkey-recording ? "Press keys..." : root.setting-hotkey;
+                            clicked => {
+                                root.setting-hotkey-recording = true;
+                                hotkey-record-scope.focus();
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        background: Skin.border;
+                    }
+
+                    Button {
+                        text: "Clear History";
+                        height: 32px;
+                        horizontal-stretch: 1;
+                        clicked => { root.clear-history(); }
+                    }
                 }
             }
         }

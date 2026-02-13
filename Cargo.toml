@@ -1,11 +1,11 @@
 [package]
 name = "color-picker"
-version = "0.1.9"
+version = "0.2.0"
 edition = "2021"
 
 
 [dependencies]
-slint = { version = "1.15.0", default-features = false, features = ["backend-winit", "renderer-femtovg", "compat-1-2"] }
+slint = { version = "1.15.0", default-features = false, features = ["backend-winit", "renderer-femtovg", "compat-1-2", "unstable-winit-030"] }
 arboard = "3.2"
 rand = "0.8"
 palette = "0.7"
@@ -16,6 +16,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ksni = { version = "0.3.3", default-features = false, features = ["blocking", "async-io"] }
 image = { version = "0.24.7", default-features = false, features = ["png"] }
+x11rb = "0.13.2"
+zbus = "5.13.2"
+url = "2.5.4"
 
 [build-dependencies]
 slint-build = "1.15.0"
