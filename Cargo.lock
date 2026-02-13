@@ -707,7 +707,7 @@ checksum = "cbd0f76e066e64fdc5631e3bb46381254deab9ef1158292f27c8c57e3bf3fe59"
 
 [[package]]
 name = "color-picker"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "device_query",
@@ -721,6 +721,9 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "url",
+ "x11rb",
+ "zbus",
 ]
 
 [[package]]
@@ -4195,6 +4198,7 @@ checksum = "432c306ed799f8ffe365ba90228c5c95f1f02b41a1275ec90274beb2de9bc9b2"
 dependencies = [
  "const-field-offset",
  "i-slint-backend-selector",
+ "i-slint-backend-winit",
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
