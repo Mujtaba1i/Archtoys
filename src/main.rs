@@ -434,6 +434,16 @@ fn apply_native_window_constraints(ui: &AppWindow) {
     });
 }
 
+fn apply_hidden_startup_state(ui: &AppWindow) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    // Keep startup fully tray-only: no visible top-level window/task entry.
+    ui.window().hide().ok();
+    ui.window().with_winit_window(|window| {
+        window.set_visible(false);
+    });
+}
+
 fn normalize_hotkey_text(input: &str) -> String {
     let tokens: Vec<String> = input
         .split('+')
@@ -1229,6 +1239,9 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let ui = AppWindow::new()?;
     apply_native_window_constraints(&ui);
+    if start_hidden {
+        apply_hidden_startup_state(&ui);
+    }
     let ui_handle = ui.as_weak();
 
     let tray = AppTray {
