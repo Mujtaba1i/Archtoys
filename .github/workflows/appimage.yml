@@ -1,0 +1,41 @@
+name: Release AppImage (Linux x86_64)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-appimage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev curl
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build AppImage
+        run: |
+          chmod +x packaging/build-appimage.sh
+          ./packaging/build-appimage.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Upload AppImage to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Archtoys-*-x86_64.AppImage
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
