@@ -1,7 +1,7 @@
 Name:           archtoys
 Version:        0.2.1
 Release:        1%{?dist}
-Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
+Summary:        A fast, system-wide color picker for Linux,  inspired by PowerToys
 
 License:        MIT
 URL:            https://github.com/Mujtaba1i/Archtoys
