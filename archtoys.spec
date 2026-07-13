@@ -13,6 +13,8 @@ BuildRequires:  libX11-devel
 BuildRequires:  libxcb-devel
 BuildRequires:  libXcursor-devel
 BuildRequires:  pipewire-devel
+BuildRequires:  fontconfig-devel
+BuildRequires:  pkgconf-pkg-config
 
 %description
 Archtoys is a fast, system-wide color picker for Linux, inspired by PowerToys 
