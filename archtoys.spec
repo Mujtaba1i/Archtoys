@@ -30,7 +30,7 @@ cargo build --release
 
 %install
 mkdir -p %{buildroot}%{_bindir}
-install -m 0755 target/release/archtoys %{buildroot}%{_bindir}/archtoys
+install -m 0755 target/*/release/archtoys %{buildroot}%{_bindir}/archtoys
 
 %files
 %{_bindir}/archtoys
