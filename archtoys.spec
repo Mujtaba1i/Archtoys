@@ -1,7 +1,7 @@
 Name:           archtoys
 Version:        0.2.1
 Release:        1%{?dist}
-Summary:        A fast, system-wide color picker for Linux,  inspired by PowerToys
+Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
 License:        MIT
 URL:            https://github.com/Mujtaba1i/Archtoys
@@ -30,7 +30,7 @@ cargo build --release
 
 %install
 mkdir -p %{buildroot}%{_bindir}
-install -m 0755 target/*/release/archtoys %{buildroot}%{_bindir}/archtoys
+install -m 0755 target/release/archtoys %{buildroot}%{_bindir}/archtoys
 
 %files
 %{_bindir}/archtoys
@@ -38,5 +38,5 @@ install -m 0755 target/*/release/archtoys %{buildroot}%{_bindir}/archtoys
 %doc README.md
 
 %changelog
-* Tue Jul 14 2026 Mujtaba1i - 0.2.1-1
+* %(date "+%%a %%b %%d %%Y") Mujtaba1i - %{version}-%{release}
 - Initial Fedora Copr release
