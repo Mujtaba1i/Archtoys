@@ -29,6 +29,7 @@ themes, and a color history.
 cargo build --release
 
 %install
+rm -rf %{buildroot}
 mkdir -p %{buildroot}%{_bindir}
 install -m 0755 target/release/archtoys %{buildroot}%{_bindir}/archtoys
 
