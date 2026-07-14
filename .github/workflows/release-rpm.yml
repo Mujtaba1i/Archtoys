@@ -1,0 +1,21 @@
+name: Upload COPR RPMs to GitHub Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  upload-rpms:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch and Upload COPR RPMs
+        uses: karellen/copr-to-gh-release@main
+        with:
+          copr-owner-name: mujtaba1i
+          copr-project-name: archtoys
+          copr-package-name: archtoys
+          clobber-assets: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
