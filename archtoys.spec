@@ -35,7 +35,7 @@ BuildRequires:  wayland-devel
 BuildRequires:  wayland-protocols-devel
 BuildRequires:  libxkbcommon-devel
 
-# --- PipeWire / audio (transitive dep pulled by scrap) ---
+# --- PipeWire (transitive dep pulled by scrap) ---
 BuildRequires:  pipewire-devel
 
 # --- Desktop integration ---
@@ -52,8 +52,20 @@ themes, color history, and a system tray icon.
 %prep
 %autosetup -n Archtoys-%{version}
 
+# Vendor all crate dependencies so the offline mock buildroot can compile
+# without network access.
+cargo vendor --locked vendor
+mkdir -p .cargo
+cat > .cargo/config.toml << 'EOF'
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"
+EOF
+
 %build
-cargo build --release
+cargo build --release --frozen --offline
 
 %install
 rm -rf %{buildroot}
@@ -112,8 +124,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
-* %(date "+%%a %%b %%d %%Y") Mujtaba1i - %{version}-%{release}
+* Wed Jul 16 2026 Mujtaba1i <mujtaba1i@github> - 0.2.2-1
 - Fix StartupWMClass and StartupNotify in .desktop for correct icon in KDE/GNOME
-- Install hicolor icons at all sizes for taskbar/launcher icon display
+- Minimize-to-tray on close (no modal), new setting-minimize-tray toggle
+- Fix ghost taskbar icon on KDE autostart via StartupNotify=false
+- Install hicolor icons at all available sizes
 - Add missing BuildRequires: mesa, dbus, wayland, freetype, libXi, libXrandr
-- Add post/postun scriptlets to refresh desktop database and icon cache
+- Vendor crate dependencies for offline mock buildroot compatibility
+
+* Thu Jun 12 2025 Mujtaba1i <mujtaba1i@github> - 0.2.1-1
+- Initial Fedora Copr release
