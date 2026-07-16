@@ -16,8 +16,8 @@ jobs:
         with:
           copr-owner-name: mujtaba1i
           copr-project-name: archtoys
-          copr-package-name: Archtoys        # Matches the actual capitalized RPM package name
-          tag-regex: '^v(?P<version>.*)$'    # Strips 'v' so tag v0.2.2 correctly maps to RPM version 0.2.2
+          copr-package-name: archtoys
+          tag-to-version-regex: '^v(?P<version>.*)$'
           clobber-assets: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
