@@ -6,8 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Specific tag to process (optional, defaults to latest)'
+        description: 'Specific tag to process (optional, defaults to latest release)'
         required: false
+
+env:
+  COPR_OWNER: mujtaba1i
+  COPR_PROJECT: archtoys
+  COPR_PACKAGE: archtoys
 
 jobs:
   upload-rpms:
@@ -16,15 +21,68 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Fetch and Upload COPR RPMs
-        uses: karellen/copr-to-gh-release@main
-        with:
-          copr-owner-name: mujtaba1i
-          copr-project-name: archtoys
-          copr-package-name: archtoys
-          tag-to-version-regex: '^v(?P<version>.*)$'
-          tag: ${{ github.event.release.tag_name || github.event.inputs.tag }}
-          clobber-assets: true
-          wait-build: true
+      - name: Determine target tag
+        id: target
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release view --json tagName -q .tagName)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install copr-cli
+        run: pip install --break-system-packages --quiet copr-cli rich
+
+      - name: Find matching COPR build (waits for it to finish)
+        id: build
+        run: |
+          VERSION="${{ steps.target.outputs.version }}"
+          echo "Looking for a succeeded build of $COPR_PACKAGE version $VERSION"
+
+          for i in $(seq 1 60); do
+            BUILD_JSON="$(curl -sf "https://copr.fedorainfracloud.org/api_3/build/list?ownername=$COPR_OWNER&projectname=$COPR_PROJECT&packagename=$COPR_PACKAGE" || echo '{}')"
+
+            BUILD_ID="$(echo "$BUILD_JSON" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for b in data.get('items', []):
+    pkg_version = (b.get('source_package') or {}).get('version', '') or ''
+    pkg_version = pkg_version.split(':')[-1]  # strip epoch if present
+    if pkg_version.startswith('$VERSION-') and b.get('state') == 'succeeded':
+        print(b['id'])
+        break
+")"
+
+            if [ -n "$BUILD_ID" ]; then
+              echo "Found succeeded build id $BUILD_ID"
+              echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "No succeeded build for $VERSION yet, waiting 30s (attempt $i/60)..."
+            sleep 30
+          done
+
+          echo "::error::Timed out waiting for a succeeded COPR build for version $VERSION"
+          exit 1
+
+      - name: Download RPMs from COPR
+        run: |
+          mkdir -p rpm-assets
+          copr-cli download-build "${{ steps.build.outputs.build_id }}" --rpms --dest rpm-assets
+          # Flatten into one directory, drop debuginfo/debugsource and src RPMs
+          find rpm-assets -type f -name '*.rpm' \
+            ! -name '*debuginfo*' ! -name '*debugsource*' ! -name '*.src.rpm' \
+            -exec cp {} . \;
+          ls -la *.rpm
+
+      - name: Upload RPMs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.target.outputs.tag }}
+          files: '*.rpm'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
