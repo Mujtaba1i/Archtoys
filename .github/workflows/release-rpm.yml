@@ -77,18 +77,21 @@ jobs:
 
       - name: Download RPMs from COPR
         run: |
-          mkdir -p rpm-assets
+          mkdir -p rpm-assets renamed
           copr-cli download-build "${{ steps.build.outputs.build_id }}" --rpms --dest rpm-assets
-          # Flatten into one directory, drop debuginfo/debugsource and src RPMs
-          find rpm-assets -type f -name '*.rpm' \
-            ! -name '*debuginfo*' ! -name '*debugsource*' ! -name '*.src.rpm' \
-            -exec cp {} . \;
-          ls -la *.rpm
 
-      - name: Upload RPMs to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.target.outputs.tag }}
-          files: '*.rpm'
+          # rpm-assets/<chroot-name>/<pkg>.rpm  ->  renamed/<chroot-name>-<pkg>.rpm
+          # e.g. rpm-assets/fedora-44-x86_64/archtoys-0.2.2-1.fc44.x86_64.rpm
+          #      -> renamed/fedora-44-x86_64-archtoys-0.2.2-1.fc44.x86_64.rpm
+          find rpm-assets -mindepth 2 -type f -name '*.rpm' \
+            ! -name '*debuginfo*' ! -name '*debugsource*' ! -name '*.src.rpm' | while read -r f; do
+            chroot="$(basename "$(dirname "$f")")"
+            cp "$f" "renamed/${chroot}-$(basename "$f")"
+          done
+
+          ls -la renamed/
+
+      - name: Upload RPMs to GitHub Release (replacing any same-named assets)
+        run: gh release upload "${{ steps.target.outputs.tag }}" renamed/*.rpm --clobber
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
