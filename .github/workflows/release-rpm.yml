@@ -3,11 +3,16 @@ name: Upload COPR RPMs to GitHub Release
 on:
   release:
     types: [published]
-  workflow_dispatch: # Allows manual execution from the Actions tab
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Specific tag to process (optional, defaults to latest)'
+        required: false
 
 jobs:
   upload-rpms:
     runs-on: ubuntu-latest
+    timeout-minutes: 480
     permissions:
       contents: write
     steps:
@@ -18,6 +23,8 @@ jobs:
           copr-project-name: archtoys
           copr-package-name: archtoys
           tag-to-version-regex: '^v(?P<version>.*)$'
+          tag: ${{ github.event.release.tag_name || github.event.inputs.tag }}
           clobber-assets: true
+          wait-build: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
