@@ -294,10 +294,18 @@ impl Tray for AppTray {
 struct AppConfig {
     dark_mode: bool,
     setting_minimize: bool,
+    /// Minimize to system tray when the window's [X] close button is clicked.
+    /// Defaults to `true` so the app lives in the tray by default.
+    #[serde(default = "default_true")]
+    setting_minimize_tray: bool,
     setting_autocopy: bool,
     setting_autostart: bool,
     setting_hotkey: String,
     history: Vec<[u8; 3]>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -305,6 +313,7 @@ impl Default for AppConfig {
         Self {
             dark_mode: false,
             setting_minimize: false,
+            setting_minimize_tray: true,
             setting_autocopy: false,
             setting_autostart: false,
             setting_hotkey: DEFAULT_HOTKEY_TEXT.to_string(),
@@ -334,7 +343,7 @@ fn autostart_path() -> PathBuf {
 }
 
 fn autostart_entry_contents() -> &'static str {
-    "[Desktop Entry]\nType=Application\nName=Archtoys\nComment=System-wide color picker\nExec=archtoys --start-hidden\nIcon=archtoys\nTerminal=false\nStartupWMClass=archtoys-bin\nCategories=Graphics;Utility;\nX-GNOME-Autostart-enabled=true\n"
+    "[Desktop Entry]\nType=Application\nName=Archtoys\nComment=System-wide color picker\nExec=archtoys --minimized\nIcon=archtoys\nTerminal=false\nStartupNotify=false\nStartupWMClass=archtoys\nCategories=Graphics;Utility;\nX-GNOME-Autostart-enabled=true\n"
 }
 
 fn sync_autostart_entry(enabled: bool) {
@@ -389,6 +398,7 @@ fn snapshot_config(ui: &AppWindow, history_store: &Arc<Mutex<Vec<(u8, u8, u8)>>>
     AppConfig {
         dark_mode: skin.get_dark_mode(),
         setting_minimize: ui.get_setting_minimize(),
+        setting_minimize_tray: ui.get_setting_minimize_tray(),
         setting_autocopy: ui.get_setting_autocopy(),
         setting_autostart: ui.get_setting_autostart(),
         setting_hotkey: ui.get_setting_hotkey().to_string(),
@@ -400,6 +410,7 @@ fn apply_config(ui: &AppWindow, history_store: &Arc<Mutex<Vec<(u8, u8, u8)>>>, c
     let skin = ui.global::<Skin>();
     skin.set_dark_mode(cfg.dark_mode);
     ui.set_setting_minimize(cfg.setting_minimize);
+    ui.set_setting_minimize_tray(cfg.setting_minimize_tray);
     ui.set_setting_autocopy(cfg.setting_autocopy);
     ui.set_setting_autostart(cfg.setting_autostart);
     ui.set_setting_hotkey(cfg.setting_hotkey.clone().into());
@@ -1235,7 +1246,13 @@ fn start_picker(
 }
 
 fn main() -> Result<(), slint::PlatformError> {
-    let start_hidden = std::env::args().any(|arg| arg == "--start-hidden");
+    let start_hidden = std::env::args()
+        .any(|arg| arg == "--start-hidden" || arg == "--minimized");
+
+    // Set the Wayland app_id / X11 WM_CLASS to "archtoys" so that the
+    // compositor can match the running window to archtoys.desktop and
+    // display the correct icon in the dock/taskbar.
+    std::env::set_var("SLINT_APP_ID", "archtoys");
 
     let ui = AppWindow::new()?;
     apply_native_window_constraints(&ui);
@@ -1530,31 +1547,23 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // Issue 1 fix: no confirmation modal. If "Minimize to tray on close" is
+    // enabled, hide the window and keep the event loop alive (tray stays).
+    // Otherwise, persist config and quit cleanly.
     let ui_close = ui_handle.clone();
-    ui.window().on_close_requested(move || {
-        let _ = ui_close.upgrade_in_event_loop(|ui| {
-            ui.set_close_confirm_open(true);
-        });
-        slint::CloseRequestResponse::KeepWindowShown
-    });
-
-    let close_ui = ui_handle.clone();
     let close_history = history_store.clone();
-    ui.on_close_confirm_close(move || {
-        if let Some(ui) = close_ui.upgrade() {
-            ui.set_close_confirm_open(false);
+    ui.window().on_close_requested(move || {
+        if let Some(ui) = ui_close.upgrade() {
+            if ui.get_setting_minimize_tray() {
+                // Hide the window — the tray icon keeps the app alive.
+                ui.window().hide().ok();
+                return slint::CloseRequestResponse::KeepWindowShown;
+            }
+            // User disabled minimize-to-tray: save and exit.
             persist_config(&ui, &close_history);
         }
         slint::quit_event_loop().ok();
-        std::process::exit(0);
-    });
-
-    let minimize_ui = ui_handle.clone();
-    ui.on_close_confirm_minimize(move || {
-        let _ = minimize_ui.upgrade_in_event_loop(|ui| {
-            ui.set_close_confirm_open(false);
-            ui.window().hide().ok();
-        });
+        slint::CloseRequestResponse::HideWindow
     });
 
     if !start_hidden {

@@ -1,9 +1,12 @@
 [Desktop Entry]
+Version=1.0
 Type=Application
 Name=Archtoys
-Comment=System-wide color picker
-Exec=archtoys
+Comment=System-wide color picker for Linux
+Exec=archtoys %u
 Icon=archtoys
 Terminal=false
-StartupWMClass=archtoys-bin
+StartupNotify=false
+StartupWMClass=archtoys
 Categories=Graphics;Utility;
+Keywords=color;picker;eyedropper;hex;
