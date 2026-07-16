@@ -1,59 +1,72 @@
 # Archtoys
 
-Archtoys is a fast, system-wide color picker for Linux, inspired by PowerToys Color Picker.  
-It is built to feel native on KDE Plasma and targets Arch-based distros first.
+![Archtoys Desktop Screenshot](./ui/screeshot/release-archtoys-v0-2-2.webp)
 
-## Features
-- Configurable hotkey (default: `Ctrl+Super+C`)
-- One-click pick
-- Auto-copy or open details on pick
-- Color history with quick recall
-- Light/Dark theme
-- Autostart toggle
+> *A lightning-fast, system-wide color picker for Linux, inspired by the Microsoft PowerToys Color Picker.*
 
-## Supported Platforms
-- **Linux (X11)** — live cursor preview overlay + global picker.
-- **Linux (Wayland)** — picker works via compositor/portal integration
+Built from the ground up to feel completely native on KDE Plasma, Archtoys provides a seamless workflow for designers and developers. It targets Arch-based and Fedora distributions natively, while offering universal support for other distros via AppImage.
 
-Notes for Wayland:
-- Live per-pixel hover preview overlay near the cursor is generally not available due security limitations.
 
-## Install (Arch-based)
+
+## ✨ Features
+*   **Custom Global Hotkeys:** Instantly summon the picker from anywhere (Default: `Ctrl+Super+C`). Note: Hotkeys must include at least one modifier (`Ctrl`, `Alt`, `Shift`, or `Super`).
+*   **One-Click Capture:** Click any pixel on your screen to instantly select its color.
+*   **Smart Clipboard:** Configure the app to automatically copy the color value to your clipboard or open the details panel immediately after picking.
+*   **Color History:** Keeps a running log of your selected colors for quick recall. (Clearing the history will wipe older entries but retain your currently selected color).
+*   **Quality of Life:** Dedicated Dark Mode toggle, "Minimize on Pick" behavior, and an Autostart toggle for silent background execution on boot.
+
+
+## 🚀 Installation
+
+### 🔴 Fedora (via COPR)
 ```bash
-paru -S archtoys
+sudo dnf copr enable mujtaba1i/archtoys
+sudo dnf install archtoys
 ```
 
-Prebuilt package:
+#### Manual RPM Install:
+If you prefer not to enable the COPR repository, you can download the standalone .rpm packages directly:
+
+1. Go to the Releases page and download the .rpm asset for your Fedora version.
+
+2. Install it locally:
+
+```Bash
+sudo dnf install ./archtoys-<version>.fc*.x86_64.rpm
+```
+### 🔵 Arch Linux (via AUR)
+Precompiled Binary (Fastest):
+
 ```bash
 paru -S archtoys-bin
 ```
+Build from Source:
 
-AppImage (any Linux distro):
-1. Download `Archtoys-<version>-x86_64.AppImage` from Releases.
-2. Run:
+```Bash
+paru -S archtoys
+```
+
+### 📦 Universal (AppImage)
+Works on any Linux distribution.
+
+1.  Download the latest `Archtoys-<version>-x86_64.AppImage` from the Releases page.
+
+2. Make the file executable and run it:
+
 ```bash
 chmod +x Archtoys-<version>-x86_64.AppImage
 ./Archtoys-<version>-x86_64.AppImage
 ```
 
-## Usage
-1. Chose your hotkey (default `Ctrl+Super+C`) or click **Pick**
-2. Click a pixel to select
+### 🖥️ Platform Support & Troubleshooting
+Archtoys operates slightly differently depending on your display server protocol:
 
-## Settings
-- **Dark Mode**
-- **Minimize on Pick**
-- **Auto Copy**
-- **Run on Startup**
-- **Global Hotkey**: click the hotkey button, press your shortcut, and it saves immediately.
-- Hotkeys must include at least one modifier: `Ctrl`, `Alt`, `Shift`, or `Super`.
-- **Clear History**: clears history but keeps the currently selected color as the only history entry.
+#### X11 (Fully Supported)
+Enjoy the full feature set, including a live per-pixel cursor preview overlay that tracks your mouse movements and a global picker API.
 
-## Troubleshooting
-**Wayland picker does nothing / closes**
-- Ensure `xdg-desktop-portal` and a desktop-specific backend are installed and running.
-- On KDE, make sure KWin DBus is available.
-- If your compositor does not expose a picker portal/API, use an X11 session.
+#### Wayland (Supported with Limitations)
+Due to Wayland's strict security policies regarding screen capture, the picker relies on compositor/portal integrations. The live per-pixel hover preview overlay near the cursor is not available on Wayland sessions.
+
 
 ## License
-MIT
+Released under the MIT License.
