@@ -24,7 +24,7 @@ echo "[1/5] Building release binary..."
 cargo build --release --locked
 
 echo "[2/5] Preparing AppDir..."
-install -Dm755 "${ROOT_DIR}/target/release/color-picker" "${APPDIR}/usr/bin/archtoys-bin"
+install -Dm755 "${ROOT_DIR}/target/release/archtoys" "${APPDIR}/usr/bin/archtoys-bin"
 cat > "${APPDIR}/usr/bin/archtoys" <<'SH'
 #!/usr/bin/env sh
 HERE="$(dirname "$(readlink -f "$0")")"
