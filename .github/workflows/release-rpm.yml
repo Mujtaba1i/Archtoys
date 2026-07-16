@@ -36,6 +36,20 @@ jobs:
       - name: Install copr-cli
         run: pip install --break-system-packages --quiet copr-cli rich
 
+      - name: Write build-matching helper script
+        run: |
+          cat > find_build.py << 'PYEOF'
+          import json, sys
+          version = sys.argv[1]
+          data = json.load(sys.stdin)
+          for b in data.get("items", []):
+              pkg_version = (b.get("source_package") or {}).get("version", "") or ""
+              pkg_version = pkg_version.split(":")[-1]  # strip epoch if present
+              if pkg_version.startswith(version + "-") and b.get("state") == "succeeded":
+                  print(b["id"])
+                  break
+          PYEOF
+
       - name: Find matching COPR build (waits for it to finish)
         id: build
         run: |
@@ -43,18 +57,7 @@ jobs:
           echo "Looking for a succeeded build of $COPR_PACKAGE version $VERSION"
 
           for i in $(seq 1 60); do
-            BUILD_JSON="$(curl -sf "https://copr.fedorainfracloud.org/api_3/build/list?ownername=$COPR_OWNER&projectname=$COPR_PROJECT&packagename=$COPR_PACKAGE" || echo '{}')"
-
-            BUILD_ID="$(echo "$BUILD_JSON" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-for b in data.get('items', []):
-    pkg_version = (b.get('source_package') or {}).get('version', '') or ''
-    pkg_version = pkg_version.split(':')[-1]  # strip epoch if present
-    if pkg_version.startswith('$VERSION-') and b.get('state') == 'succeeded':
-        print(b['id'])
-        break
-")"
+            BUILD_ID="$(curl -sf "https://copr.fedorainfracloud.org/api_3/build/list?ownername=$COPR_OWNER&projectname=$COPR_PROJECT&packagename=$COPR_PACKAGE" | python3 find_build.py "$VERSION")"
 
             if [ -n "$BUILD_ID" ]; then
               echo "Found succeeded build id $BUILD_ID"
