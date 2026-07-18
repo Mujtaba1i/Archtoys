@@ -1,0 +1,23 @@
+name: Deploy archtoys-bin to AUR
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  deploy-aur-bin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v3
+        with:
+          pkgname: archtoys-bin
+          pkgbuild: ./packaging/aur-archtoys-bin/PKGBUILD
+          commit_username: Mujtaba1i
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          updpkgsums: true
