@@ -1,40 +1,61 @@
 name: Upload COPR RPMs to GitHub Release
 
+# COPR builds the RPMs itself (its GitHub webhook fires on the tag push).
+# This workflow waits for that COPR build to succeed and attaches the RPMs
+# to the GitHub release.
+#
+# How it runs:
+#   - automatically: called by release.yml after the release is published
+#   - manually: Actions tab -> "Upload COPR RPMs to GitHub Release" -> Run workflow
+#
+# It no longer listens for `release: published`. The release is created by
+# release.yml using GITHUB_TOKEN, and GitHub does not start new workflow runs
+# for events caused by GITHUB_TOKEN, so that trigger would never fire.
+
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to process, e.g. v0.2.3"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Specific tag to process (optional, defaults to latest release)'
+        description: "Specific tag to process (optional, defaults to latest release)"
         required: false
+        type: string
 
 env:
   COPR_OWNER: mujtaba1i
   COPR_PROJECT: archtoys
   COPR_PACKAGE: archtoys
+  # 180 polls x 30 s = 90 min max wait for COPR to finish building
+  POLL_ATTEMPTS: 180
+  POLL_SECONDS: 30
 
 jobs:
   upload-rpms:
     runs-on: ubuntu-latest
-    timeout-minutes: 480
+    timeout-minutes: 120
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Determine target tag
         id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          TAG="$INPUT_TAG"
           if [ -z "$TAG" ]; then
             TAG="$(gh release view --json tagName -q .tagName)"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Processing $TAG"
 
       - name: Install copr-cli
         run: pip install --break-system-packages --quiet copr-cli rich
@@ -43,36 +64,62 @@ jobs:
         run: |
           cat > find_build.py << 'PYEOF'
           import json, sys
+
           version = sys.argv[1]
-          data = json.load(sys.stdin)
+          try:
+              data = json.load(sys.stdin)
+          except json.JSONDecodeError:
+              print("wait")  # COPR API hiccup; try again next poll
+              sys.exit(0)
+
+          matching = []
           for b in data.get("items", []):
-              pkg_version = (b.get("source_package") or {}).get("version", "") or ""
-              pkg_version = pkg_version.split(":")[-1]  # strip epoch if present
-              if pkg_version.startswith(version + "-") and b.get("state") == "succeeded":
-                  print(b["id"])
-                  break
+              v = ((b.get("source_package") or {}).get("version") or "").split(":")[-1]
+              if v.startswith(version + "-"):
+                  matching.append(b)
+
+          for b in matching:
+              if b.get("state") == "succeeded":
+                  print(f"ok {b['id']}")
+                  sys.exit(0)
+
+          finished_bad = {"failed", "canceled", "skipped"}
+          if matching and all(b.get("state") in finished_bad for b in matching):
+              ids = ",".join(str(b["id"]) for b in matching)
+              print(f"failed {ids}")
+          else:
+              print("wait")
           PYEOF
 
       - name: Find matching COPR build (waits for it to finish)
         id: build
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
         run: |
-          VERSION="${{ steps.target.outputs.version }}"
-          echo "Looking for a succeeded build of $COPR_PACKAGE version $VERSION"
+          echo "Looking for a succeeded COPR build of $COPR_PACKAGE $VERSION"
 
-          for i in $(seq 1 60); do
-            BUILD_ID="$(curl -sf "https://copr.fedorainfracloud.org/api_3/build/list?ownername=$COPR_OWNER&projectname=$COPR_PROJECT&packagename=$COPR_PACKAGE" | python3 find_build.py "$VERSION")"
+          for i in $(seq 1 "$POLL_ATTEMPTS"); do
+            RESULT="$(curl -sf "https://copr.fedorainfracloud.org/api_3/build/list?ownername=$COPR_OWNER&projectname=$COPR_PROJECT&packagename=$COPR_PACKAGE" \
+              | python3 find_build.py "$VERSION")"
 
-            if [ -n "$BUILD_ID" ]; then
-              echo "Found succeeded build id $BUILD_ID"
-              echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+            case "$RESULT" in
+              ok\ *)
+                BUILD_ID="${RESULT#ok }"
+                echo "Found succeeded build $BUILD_ID"
+                echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+                exit 0
+                ;;
+              failed\ *)
+                echo "::error::Every COPR build for $VERSION failed or was canceled (build ids: ${RESULT#failed }). Fix/rebuild in COPR, then re-run this workflow manually."
+                exit 1
+                ;;
+            esac
 
-            echo "No succeeded build for $VERSION yet, waiting 30s (attempt $i/60)..."
-            sleep 30
+            echo "No succeeded build for $VERSION yet, waiting ${POLL_SECONDS}s (attempt $i/$POLL_ATTEMPTS)..."
+            sleep "$POLL_SECONDS"
           done
 
-          echo "::error::Timed out waiting for a succeeded COPR build for version $VERSION"
+          echo "::error::Timed out waiting for a succeeded COPR build for $VERSION"
           exit 1
 
       - name: Download RPMs from COPR
@@ -80,7 +127,7 @@ jobs:
           mkdir -p rpm-assets renamed
           copr-cli download-build "${{ steps.build.outputs.build_id }}" --rpms --dest rpm-assets
 
-          # rpm-assets/<chroot-name>/<pkg>.rpm  ->  renamed/<chroot-name>-<pkg>.rpm
+          # rpm-assets/<chroot>/<pkg>.rpm  ->  renamed/<chroot>-<pkg>.rpm
           # e.g. rpm-assets/fedora-44-x86_64/archtoys-0.2.2-1.fc44.x86_64.rpm
           #      -> renamed/fedora-44-x86_64-archtoys-0.2.2-1.fc44.x86_64.rpm
           find rpm-assets -mindepth 2 -type f -name '*.rpm' \
@@ -90,8 +137,13 @@ jobs:
           done
 
           ls -la renamed/
+          if ! ls renamed/*.rpm >/dev/null 2>&1; then
+            echo "::error::COPR build downloaded but contained no binary RPMs"
+            exit 1
+          fi
 
       - name: Upload RPMs to GitHub Release (replacing any same-named assets)
-        run: gh release upload "${{ steps.target.outputs.tag }}" renamed/*.rpm --clobber
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.target.outputs.tag }}
+        run: gh release upload "$TAG" renamed/*.rpm --clobber
