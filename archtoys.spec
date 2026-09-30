@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.2.2
+Version:        0.2.3
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -124,6 +124,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Wed Oct 07 2026 Mujtaba1i <mujtaba1i@github> - 0.2.3-1
 * Wed Jul 16 2026 Mujtaba1i <mujtaba1i@github> - 0.2.2-1
 - Fix StartupWMClass and StartupNotify in .desktop for correct icon in KDE/GNOME
 - Minimize-to-tray on close (no modal), new setting-minimize-tray toggle
