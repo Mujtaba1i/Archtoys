@@ -40,9 +40,35 @@ cat > "${APPDIR}/AppRun" <<'SH'
 #!/usr/bin/env sh
 HERE="$(dirname "$(readlink -f "$0")")"
 export PATH="${HERE}/usr/bin:${PATH}"
+# Bundled libraries in usr/lib are loaded at runtime (dlopen) by winit.
+export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 exec "${HERE}/usr/bin/archtoys" "$@"
 SH
 chmod +x "${APPDIR}/AppRun"
+
+# Libraries the binary loads at runtime with dlopen (winit: keyboard, cursor,
+# input). linuxdeploy only bundles libraries the binary links to directly, so
+# these would be missing on systems without them, and the app would exit with
+# "Failed to open connection to X server". None of them are on the AppImage
+# excludelist, so bundling them is safe. (GL, EGL, X11, xcb, fontconfig and
+# wayland-client must come from the host and are not bundled.)
+RUNTIME_LIBS=(
+  libxkbcommon.so.0
+  libxkbcommon-x11.so.0
+  libXcursor.so.1
+  libXi.so.6
+  libXrender.so.1
+)
+mkdir -p "${APPDIR}/usr/lib"
+for lib in "${RUNTIME_LIBS[@]}"; do
+  path="$(ldconfig -p | awk -v l="${lib}" '$1 == l && /x86-64/ { print $NF; exit }')"
+  if [[ -z "${path}" ]]; then
+    echo "ERROR: ${lib} is not installed on the build machine, cannot bundle it." >&2
+    exit 1
+  fi
+  cp -L "${path}" "${APPDIR}/usr/lib/${lib}"
+  echo "Bundled ${lib} (from ${path})"
+done
 
 cp "${APPDIR}/usr/share/applications/archtoys.desktop" "${APPDIR}/archtoys.desktop"
 cp "${APPDIR}/usr/share/icons/hicolor/256x256/apps/archtoys.png" "${APPDIR}/archtoys.png"
