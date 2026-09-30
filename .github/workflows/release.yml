@@ -60,7 +60,8 @@ jobs:
   build-tarball:
     name: Build binary tarball
     needs: verify-version
-    runs-on: ubuntu-latest
+    # Oldest supported Ubuntu LTS, so the binary runs on older distros too.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -77,6 +78,17 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --locked
+
+      # The AppImage catalog (and older distros) run on Ubuntu 22.04 = glibc 2.35.
+      # Fail here rather than ship a binary that crashes on those systems.
+      - name: Check required glibc (max 2.35)
+        run: |
+          NEED="$(objdump -T target/release/archtoys | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -uV | tail -n 1)"
+          echo "Binary requires glibc $NEED"
+          if [ "$(printf '%s\n' "$NEED" 2.35 | sort -V | tail -n 1)" != "2.35" ]; then
+            echo "::error::Binary needs glibc $NEED, newer than 2.35 (Ubuntu 22.04). Build on ubuntu-22.04."
+            exit 1
+          fi
 
       # Ships the binary plus LICENSE, .desktop and icons, so the archtoys-bin
       # PKGBUILD can take everything from this one download.
@@ -99,7 +111,8 @@ jobs:
   build-appimage:
     name: Build AppImage
     needs: verify-version
-    runs-on: ubuntu-latest
+    # Oldest supported Ubuntu LTS: the AppImage catalog tests on 22.04.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -118,6 +131,17 @@ jobs:
         run: |
           chmod +x packaging/build-appimage.sh
           ./packaging/build-appimage.sh "${{ needs.verify-version.outputs.version }}"
+
+      # The AppImage catalog (and older distros) run on Ubuntu 22.04 = glibc 2.35.
+      # Fail here rather than ship a binary that crashes on those systems.
+      - name: Check required glibc (max 2.35)
+        run: |
+          NEED="$(objdump -T target/release/archtoys | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -uV | tail -n 1)"
+          echo "Binary requires glibc $NEED"
+          if [ "$(printf '%s\n' "$NEED" 2.35 | sort -V | tail -n 1)" != "2.35" ]; then
+            echo "::error::Binary needs glibc $NEED, newer than 2.35 (Ubuntu 22.04). Build on ubuntu-22.04."
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
