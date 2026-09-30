@@ -1,44 +1,212 @@
-name: Release (Linux x86_64)
+# One workflow for the whole tag-driven release, replacing
+# release.yml + appimage.yml + aur-archtoys.yml + aur-archtoys-bin.yml.
+#
+#   verify-version ─┬─ build-tarball ──┐
+#                   └─ build-appimage ─┴─ publish-release ─┬─ aur-bin
+#                                                          ├─ aur-source
+#                                                          └─ rpms (release-rpm.yml)
+#
+# Jobs only start once the things they depend on actually exist, so nothing
+# downloads a release asset before it has been uploaded.
+
+name: Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build-linux:
+  verify-version:
+    name: Check tag matches Cargo.toml and archtoys.spec
     runs-on: ubuntu-latest
-
+    outputs:
+      version: ${{ steps.check.outputs.version }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - id: check
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+          SPEC_VERSION="$(awk '/^Version:/ { print $2; exit }' archtoys.spec)"
+
+          echo "tag:        $TAG_VERSION"
+          echo "Cargo.toml: $CARGO_VERSION"
+          echo "spec:       $SPEC_VERSION"
+
+          fail=0
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error file=Cargo.toml::version is $CARGO_VERSION but the tag is $GITHUB_REF_NAME"
+            fail=1
+          fi
+          if [ "$TAG_VERSION" != "$SPEC_VERSION" ]; then
+            echo "::error file=archtoys.spec::Version is $SPEC_VERSION but the tag is $GITHUB_REF_NAME (COPR would build the wrong version)"
+            fail=1
+          fi
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          exit $fail
+
+  build-tarball:
+    name: Build binary tarball
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
 
       - name: Build release binary
-        run: cargo build --release
+        run: cargo build --release --locked
 
+      # Ships the binary plus LICENSE, .desktop and icons, so the archtoys-bin
+      # PKGBUILD can take everything from this one download.
       - name: Create release archive
         run: |
-          mkdir -p dist
-          cp target/release/archtoys dist/archtoys
-          tar -C dist -czf archtoys-linux-x86_64.tar.gz archtoys
+          mkdir -p staging
+          install -Dm755 target/release/archtoys      staging/archtoys
+          install -Dm644 LICENSE                      staging/LICENSE
+          install -Dm644 packaging/archtoys.desktop   staging/archtoys.desktop
+          cp packaging/archtoys.png packaging/archtoys-*.png staging/
+          (cd staging && tar -czf ../archtoys-linux-x86_64.tar.gz *)
+          tar -tzf archtoys-linux-x86_64.tar.gz
 
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: |
-            archtoys-linux-x86_64.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: tarball
+          path: archtoys-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  build-appimage:
+    name: Build AppImage
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev curl
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+
+      - name: Build AppImage
+        run: |
+          chmod +x packaging/build-appimage.sh
+          ./packaging/build-appimage.sh "${{ needs.verify-version.outputs.version }}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: appimage
+          path: dist/Archtoys-*-x86_64.AppImage
+          if-no-files-found: error
+
+  # The only job that creates/edits the GitHub release, so two jobs can never
+  # race to create it.
+  publish-release:
+    name: Publish GitHub release
+    needs: [build-tarball, build-appimage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - run: ls -la artifacts
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: artifacts/*
+          fail_on_unmatched_files: true
+
+  aur-bin:
+    name: Deploy archtoys-bin to AUR
+    needs: [verify-version, publish-release]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.verify-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set pkgver from tag
+        run: |
+          sed -i -e "s/^pkgver=.*/pkgver=${VERSION}/" -e "s/^pkgrel=.*/pkgrel=1/" \
+            packaging/aur-archtoys-bin/PKGBUILD
+          grep -E '^pkg(ver|rel)=' packaging/aur-archtoys-bin/PKGBUILD
+
+      - uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
+        with:
+          pkgname: archtoys-bin
+          pkgbuild: ./packaging/aur-archtoys-bin/PKGBUILD
+          commit_username: Mujtaba1i
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ env.VERSION }}"
+          updpkgsums: true
+          # Actually runs makepkg on the PKGBUILD before pushing, so a broken
+          # package never reaches the AUR. Cheap here: it only unpacks a tarball.
+          test: true
+
+  aur-source:
+    name: Deploy archtoys to AUR
+    needs: [verify-version, publish-release]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.verify-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set pkgver from tag
+        run: |
+          sed -i -e "s/^pkgver=.*/pkgver=${VERSION}/" -e "s/^pkgrel=.*/pkgrel=1/" \
+            packaging/aur-archtoys/PKGBUILD
+          grep -E '^pkg(ver|rel)=' packaging/aur-archtoys/PKGBUILD
+
+      - uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
+        with:
+          pkgname: archtoys
+          pkgbuild: ./packaging/aur-archtoys/PKGBUILD
+          commit_username: Mujtaba1i
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ env.VERSION }}"
+          updpkgsums: true
+          # To also test-compile before pushing (slower, ~10+ min), uncomment:
+          # test: true
+          # test_flags: --clean --cleanbuild --syncdeps --noconfirm
+
+  rpms:
+    name: Attach COPR RPMs
+    needs: [verify-version, publish-release]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-rpm.yml
+    with:
+      tag: ${{ github.ref_name }}

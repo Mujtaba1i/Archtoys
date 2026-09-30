@@ -1,0 +1,55 @@
+# ONE-TIME workflow: pushes the 0.2.2-2 hotfix PKGBUILDs to the AUR.
+# Run it by hand (Actions -> "AUR hotfix (one-time)" -> Run workflow).
+# After both jobs succeed, delete this file and packaging/aur-hotfix/.
+#
+# Each job test-builds its package on Arch Linux first; if the test build
+# fails, nothing is pushed to the AUR.
+
+name: AUR hotfix (one-time)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archtoys-bin:
+    name: Push archtoys-bin 0.2.2-2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The icons and .desktop file this PKGBUILD needs are already in the
+      # AUR repo, and the action starts from a clone of it, so only PKGBUILD
+      # and .SRCINFO are pushed.
+      - uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
+        with:
+          pkgname: archtoys-bin
+          pkgbuild: ./packaging/aur-hotfix/archtoys-bin/PKGBUILD
+          commit_username: Mujtaba1i
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Fix checksums and 256px icon, add license and dependencies (0.2.2-2)"
+          test: true
+
+  archtoys:
+    name: Push archtoys 0.2.2-2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
+        with:
+          pkgname: archtoys
+          pkgbuild: ./packaging/aur-hotfix/archtoys/PKGBUILD
+          commit_username: Mujtaba1i
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Fix binary name, add dependencies, drop install script (0.2.2-2)"
+          # Full build from source in a clean Arch container (takes ~10-20 min),
+          # installing cargo and the libraries from depends= first.
+          test: true
+          test_flags: --clean --cleanbuild --syncdeps --noconfirm
+          # Remove the no-longer-used install script from the AUR repo.
+          post_process: git rm -q --ignore-unmatch archtoys.install
