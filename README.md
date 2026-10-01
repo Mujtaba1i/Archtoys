@@ -8,7 +8,8 @@ Pick any pixel on your screen, see it magnified, and copy it as HEX, RGB, HSL or
 Works on **Wayland and X11**, built to feel at home on **KDE Plasma**.
 
 [![Latest release](https://img.shields.io/github/v/release/Mujtaba1i/Archtoys?label=release)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
-[![AUR](https://img.shields.io/aur/version/archtoys-bin?label=AUR)](https://aur.archlinux.org/packages/archtoys-bin)
+[![AUR](https://img.shields.io/aur/version/archtoys?label=AUR)](https://aur.archlinux.org/packages/archtoys)
+[![AUR-bin](https://img.shields.io/aur/version/archtoys-bin?label=AUR-bin)](https://aur.archlinux.org/packages/archtoys-bin)
 [![Fedora COPR](https://img.shields.io/badge/Fedora-COPR-51A2DA?logo=fedora&logoColor=white)](https://copr.fedorainfracloud.org/coprs/mujtaba1i/archtoys/)
 [![AppImage](https://img.shields.io/badge/AppImage-any%20distro-informational)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/Mujtaba1i/Archtoys)](LICENSE)
