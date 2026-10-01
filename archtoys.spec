@@ -124,10 +124,18 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
-* Wed Oct 07 2026 Mujtaba1i <mujtaba1i@github> - 0.2.4-1
-* Wed Oct 07 2026 Mujtaba1i <mujtaba1i@github> - 0.2.4-1
-* Wed Oct 07 2026 Mujtaba1i <mujtaba1i@github> - 0.2.3-1
-* Wed Jul 16 2026 Mujtaba1i <mujtaba1i@github> - 0.2.2-1
+* Wed Sep 30 2026 Mujtaba1i <mujtaba1i@github> - 0.2.5-1
+- Bundle runtime libraries in the AppImage and add a smoke test
+
+* Wed Sep 30 2026 Mujtaba1i <mujtaba1i@github> - 0.2.4-1
+- Build release binaries on Ubuntu 22.04
+
+* Wed Sep 30 2026 Mujtaba1i <mujtaba1i@github> - 0.2.3-1
+- Vendor crates and fix spec for offline Copr buildroot
+- Add manual trigger option for release-rpm workflow
+- Consolidate release workflows and fix AUR packaging
+
+* Thu Jul 16 2026 Mujtaba1i <mujtaba1i@github> - 0.2.2-1
 - Fix StartupWMClass and StartupNotify in .desktop for correct icon in KDE/GNOME
 - Minimize-to-tray on close (no modal), new setting-minimize-tray toggle
 - Fix ghost taskbar icon on KDE autostart via StartupNotify=false
