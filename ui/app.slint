@@ -184,42 +184,74 @@ component ValueRow inherits Rectangle {
     }
 }
 
-// --- Live Picker Overlay (cursor-following preview) ---
-export component PickerOverlay inherits Window {
-    width: 140px;
-    height: 44px;
-    background: #00000000;
-    no-frame: true;
-    always-on-top: true;
+// --- Pixel magnifier: 11x11 pixels shown 10x larger, center pixel outlined ---
+component Magnifier inherits Rectangle {
+    in property <image> source;
+    width: 110px;
+    height: 110px;
+    border-radius: 6px;
+    clip: true;
+    background: #000000;
 
-    in-out property <color> preview-color: #ffffff;
-    in-out property <string> preview-hex: "#ffffff";
-
-    Rectangle {
+    Image {
         width: parent.width;
         height: parent.height;
-        border-radius: 8px;
-        background: #1f1f1fe6;
+        source: root.source;
+        image-fit: fill;
+        image-rendering: pixelated;
+    }
+    // outline of the pixel that will be picked
+    Rectangle {
+        x: 49px;
+        y: 49px;
+        width: 12px;
+        height: 12px;
         border-width: 1px;
-        border-color: #00000030;
-        drop-shadow-blur: 10px;
-        drop-shadow-color: #00000060;
+        border-color: #ffffff;
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: 10px;
+            height: 10px;
+            border-width: 1px;
+            border-color: #000000;
+        }
+    }
+}
 
+// --- Preview card: magnifier + swatch + HEX (used by both pickers) ---
+component PreviewCard inherits Rectangle {
+    in property <image> magnifier;
+    in property <color> preview-color;
+    in property <string> preview-hex;
+
+    width: 126px;
+    height: 158px;
+    border-radius: 8px;
+    background: #1f1f1fe6;
+    border-width: 1px;
+    border-color: #00000030;
+    drop-shadow-blur: 10px;
+    drop-shadow-color: #00000060;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 8px;
+        Magnifier { source: root.magnifier; }
         HorizontalLayout {
-            padding: 8px;
             spacing: 8px;
             Rectangle {
-                width: 20px;
-                height: 20px;
+                width: 22px;
+                height: 22px;
                 border-radius: 4px;
                 background: root.preview-color;
                 border-width: 1px;
-                border-color: #00000040;
+                border-color: #ffffff40;
             }
             Text {
                 text: root.preview-hex;
                 color: #ffffff;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: 600;
                 vertical-alignment: center;
             }
@@ -227,71 +259,90 @@ export component PickerOverlay inherits Window {
     }
 }
 
+// --- Live Picker Overlay (X11: follows the cursor) ---
+export component PickerOverlay inherits Window {
+    width: 126px;
+    height: 158px;
+    background: #00000000;
+    no-frame: true;
+    always-on-top: true;
+
+    in-out property <color> preview-color: #ffffff;
+    in-out property <string> preview-hex: "#ffffff";
+    in-out property <image> magnifier;
+
+    PreviewCard {
+        magnifier: root.magnifier;
+        preview-color: root.preview-color;
+        preview-hex: root.preview-hex;
+    }
+}
+
 // --- Transparent full-screen input shield (X11 picker session) ---
+// Fully transparent: even 1/255 opacity darkens picked colors by one step
+// (#FF0000 would read as #FE0000). X11 input doesn't depend on opacity.
 export component PickerShieldWindow inherits Window {
     width: 1px;
     height: 1px;
     full-screen: true;
     no-frame: true;
     always-on-top: true;
-    background: #00000001;
+    background: #00000000;
     title: "Archtoys Picker Shield";
 
     Rectangle {
         width: parent.width;
         height: parent.height;
-        background: #00000001;
+        background: #00000000;
         TouchArea { }
     }
 }
 
-// --- Wayland screenshot picker window ---
-export component WaylandPickerWindow inherits Window {
-    width: 1px;
-    height: 1px;
+// --- Freeze-frame picker: shows a screenshot fullscreen; you pick from it ---
+// No fixed width/height here: `width: 1px` would shrink the *contents* to
+// one pixel even though the window itself is fullscreen.
+export component FreezePickerWindow inherits Window {
     full-screen: true;
     no-frame: true;
     always-on-top: true;
     background: #000000;
-    title: "Archtoys Screenshot Picker";
+    title: "Archtoys Picker";
 
     in-out property <image> screenshot-image;
+    in-out property <image> magnifier;
     in-out property <color> preview-color: #000000;
-    in-out property <string> preview-hex: "#000000";
-    in-out property <int> cursor-x: 0;
-    in-out property <int> cursor-y: 0;
+    in-out property <string> preview-hex: "";
+    in-out property <length> cursor-x: -1000px;
+    in-out property <length> cursor-y: -1000px;
 
-    callback pointer-moved(int, int);
-    callback pick-at(int, int);
+    // logical pixel coordinates inside this window
+    callback pointer-moved(length, length);
+    callback pick-at(length, length);
     callback cancel-pick();
 
     Image {
         width: parent.width;
         height: parent.height;
         source: root.screenshot-image;
+        image-fit: fill;
     }
 
-    TouchArea {
-        moved => {
-            root.pointer-moved(
-                Math.round(self.mouse_x / 1px),
-                Math.round(self.mouse_y / 1px)
-            );
-        }
-        clicked => {
-            root.pick-at(
-                Math.round(self.mouse_x / 1px),
-                Math.round(self.mouse_y / 1px)
-            );
+    area := TouchArea {
+        mouse-cursor: crosshair;
+        // `moved` only fires while a button is held, so watch the position.
+        changed mouse-x => { root.pointer-moved(self.mouse-x, self.mouse-y); }
+        changed mouse-y => { root.pointer-moved(self.mouse-x, self.mouse-y); }
+        clicked => { root.pick-at(self.mouse-x, self.mouse-y); }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                root.cancel-pick();
+            }
         }
     }
 
     FocusScope {
         enabled: true;
-        focus-on-click: true;
-        init => {
-            self.focus();
-        }
+        init => { self.focus(); }
         key-pressed(event) => {
             if event.text == Key.Escape {
                 root.cancel-pick();
@@ -301,42 +352,23 @@ export component WaylandPickerWindow inherits Window {
         }
     }
 
-    Rectangle {
-        width: 150px;
-        height: 46px;
-        x: clamp(root.cursor-x * 1px + 18px, 0px, parent.width - self.width);
-        y: clamp(root.cursor-y * 1px + 18px, 0px, parent.height - self.height);
-        border-radius: 8px;
-        background: #1f1f1fe6;
-        border-width: 1px;
-        border-color: #00000030;
-        drop-shadow-blur: 10px;
-        drop-shadow-color: #00000060;
-
-        HorizontalLayout {
-            padding: 8px;
-            spacing: 8px;
-            Rectangle {
-                width: 22px;
-                height: 22px;
-                border-radius: 4px;
-                background: root.preview-color;
-                border-width: 1px;
-                border-color: #00000050;
-            }
-            Text {
-                text: root.preview-hex;
-                color: #ffffff;
-                font-size: 12px;
-                font-weight: 600;
-                vertical-alignment: center;
-            }
-        }
+    if root.preview-hex != "" : PreviewCard {
+        magnifier: root.magnifier;
+        preview-color: root.preview-color;
+        preview-hex: root.preview-hex;
+        // beside the cursor; flips to the other side near the screen edges
+        x: root.cursor-x + 20px + self.width > root.width ? root.cursor-x - 20px - self.width : root.cursor-x + 20px;
+        y: root.cursor-y + 20px + self.height > root.height ? root.cursor-y - 20px - self.height : root.cursor-y + 20px;
     }
 }
 
 export component AppWindow inherits Window {
-    title: "Color Picker";
+    title: "Archtoys";
+    // During a freeze-frame pick with "Minimize on Pick" off, the window
+    // stays open above the screenshot (X11 needs always-on-top for that).
+    always-on-top: root.keep-on-top;
+    // Used on X11. On Wayland the desktop takes the icon from archtoys.desktop.
+    icon: @image-url("../packaging/archtoys-256.png");
     preferred-width: 520px;
     preferred-height: 350px;
     min-width: 480px;
@@ -365,6 +397,14 @@ export component AppWindow inherits Window {
     in-out property <bool> setting-autostart: false;
     in-out property <string> setting-hotkey: "Ctrl+Super+C";
     in-out property <bool> setting-hotkey-recording: false;
+    // True when the desktop (e.g. KDE) owns the shortcut; it must be changed
+    // in the desktop's settings, and `hotkey-display` shows the real one.
+    in-out property <bool> hotkey-system-managed: false;
+    in-out property <string> hotkey-display: "";
+    // Shown briefly when a typed color can't be understood.
+    in-out property <string> input-error: "";
+    in-out property <bool> keep-on-top: false;
+    in-out property <bool> picking: false;
 
     callback pick-color();
     callback copy-to-clipboard(string);
@@ -375,7 +415,27 @@ export component AppWindow inherits Window {
     callback value-blurred(string, string);
     callback hotkey-captured(string, bool, bool, bool, bool);
     callback settings-changed();
+    callback settings-opened();
+    callback cancel-pick();
+    callback open-hotkey-settings();
     callback clear-history();
+
+    // Esc cancels a pick while this window has the keyboard.
+    pick-scope := FocusScope {
+        enabled: root.picking;
+        width: 1px;
+        height: 1px;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.cancel-pick();
+                return accept;
+            }
+            reject
+        }
+    }
+    public function focus-pick-scope() {
+        pick-scope.focus();
+    }
 
     defocus-scope := FocusScope {
         enabled: true;
@@ -464,7 +524,10 @@ export component AppWindow inherits Window {
 
             SettingsButton {
                 icon-source: @image-url("settings.svg");
-                clicked => { root.settings-open = !root.settings-open; }
+                clicked => {
+                    root.settings-open = !root.settings-open;
+                    if root.settings-open { root.settings-opened(); }
+                }
             }
         }
 
@@ -566,6 +629,8 @@ export component AppWindow inherits Window {
             ScrollView {
                 width: parent.width;
                 height: parent.height;
+                // Fit the width: scroll up/down only, never sideways.
+                viewport-width: self.visible-width;
 
                 VerticalLayout {
                     padding: 16px; 
@@ -646,11 +711,30 @@ export component AppWindow inherits Window {
                             horizontal-alignment: left;
                             vertical-alignment: center;
                         }
-                        Button {
+                        if !root.hotkey-system-managed : Button {
                             text: root.setting-hotkey-recording ? "Press keys..." : root.setting-hotkey;
                             clicked => {
                                 root.setting-hotkey-recording = true;
                                 hotkey-record-scope.focus();
+                            }
+                        }
+                        if root.hotkey-system-managed : VerticalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: root.hotkey-display == "" ? "Not set" : root.hotkey-display;
+                                color: Skin.text-main;
+                                font-weight: 600;
+                                wrap: word-wrap;
+                            }
+                            Button {
+                                text: "Change in System Settings";
+                                clicked => { root.open-hotkey-settings(); }
+                            }
+                            Text {
+                                text: "Your desktop manages this shortcut.";
+                                color: Skin.text-muted;
+                                font-size: 11px;
+                                wrap: word-wrap;
                             }
                         }
                     }
@@ -671,4 +755,24 @@ export component AppWindow inherits Window {
         }
     }
 
+
+    // Error message for invalid input, at the bottom of the window.
+    if root.input-error != "" : Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 12px;
+        width: error-text.preferred-width + 24px;
+        height: 30px;
+        border-radius: 6px;
+        background: #d93636;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000040;
+        error-text := Text {
+            text: root.input-error;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
 }
