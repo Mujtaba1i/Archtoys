@@ -1,13 +1,18 @@
-# One workflow for the whole tag-driven release, replacing
-# release.yml + appimage.yml + aur-archtoys.yml + aur-archtoys-bin.yml.
+# The whole release, started by pushing a tag like v1.2.3. You only:
 #
-#   verify-version ─┬─ build-tarball ──┐
-#                   └─ build-appimage ─┴─ publish-release ─┬─ aur-bin
-#                                                          ├─ aur-source
-#                                                          └─ rpms (release-rpm.yml)
+#     git tag v1.2.3
+#     git push origin main v1.2.3
 #
-# Jobs only start once the things they depend on actually exist, so nothing
-# downloads a release asset before it has been uploaded.
+#   prepare ──┬─ build-tarball ──┐
+#             ├─ build-appimage ─┴─ publish-release ─┬─ aur-bin
+#             │                                      ├─ aur-source
+#             └─ trigger-copr ───────────────────────┴─ rpms (release-rpm.yml)
+#   report (always runs last: summary table; opens an issue if anything failed)
+#
+# "prepare" sets the version in Cargo.toml / Cargo.lock / archtoys.spec,
+# writes the changelog from your commit messages since the previous tag,
+# commits "Release v1.2.3" to main and moves the tag onto that commit.
+# Every later job builds that commit.
 
 name: Release
 
@@ -25,45 +30,36 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Name used in archtoys.spec %changelog entries
+  PACKAGER: "Mujtaba1i <mujtaba1i@github>"
 
 jobs:
-  verify-version:
-    name: Check tag matches Cargo.toml and archtoys.spec
+  prepare:
+    name: Bump version + changelog
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # pushes the "Release vX" commit and moves the tag
     outputs:
-      version: ${{ steps.check.outputs.version }}
+      version: ${{ steps.prepare.outputs.version }}
+      sha: ${{ steps.prepare.outputs.sha }}
+      notes: ${{ steps.prepare.outputs.notes }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0     # full history + tags, for the changelog
 
-      - id: check
-        run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          CARGO_VERSION="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
-          SPEC_VERSION="$(awk '/^Version:/ { print $2; exit }' archtoys.spec)"
-
-          echo "tag:        $TAG_VERSION"
-          echo "Cargo.toml: $CARGO_VERSION"
-          echo "spec:       $SPEC_VERSION"
-
-          fail=0
-          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error file=Cargo.toml::version is $CARGO_VERSION but the tag is $GITHUB_REF_NAME"
-            fail=1
-          fi
-          if [ "$TAG_VERSION" != "$SPEC_VERSION" ]; then
-            echo "::error file=archtoys.spec::Version is $SPEC_VERSION but the tag is $GITHUB_REF_NAME (COPR would build the wrong version)"
-            fail=1
-          fi
-          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
-          exit $fail
+      - id: prepare
+        run: bash .github/scripts/prepare-release.sh
 
   build-tarball:
-    name: Build binary tarball
-    needs: verify-version
+    name: Test + build binary tarball
+    needs: prepare
     # Oldest supported Ubuntu LTS, so the binary runs on older distros too.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Install system dependencies
         run: |
@@ -75,6 +71,9 @@ jobs:
           toolchain: stable
 
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+
+      - name: Run tests
+        run: cargo test --locked
 
       - name: Build release binary
         run: cargo build --release --locked
@@ -109,12 +108,14 @@ jobs:
           if-no-files-found: error
 
   build-appimage:
-    name: Build AppImage
-    needs: verify-version
+    name: Build + smoke-test AppImage
+    needs: prepare
     # Oldest supported Ubuntu LTS: the AppImage catalog tests on 22.04.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Install system dependencies
         run: |
@@ -133,7 +134,7 @@ jobs:
       - name: Build AppImage
         run: |
           chmod +x packaging/build-appimage.sh
-          ./packaging/build-appimage.sh "${{ needs.verify-version.outputs.version }}"
+          ./packaging/build-appimage.sh "${{ needs.prepare.outputs.version }}"
 
       # The AppImage catalog (and older distros) run on Ubuntu 22.04 = glibc 2.35.
       # Checks the binary AND the libraries bundled next to it.
@@ -182,7 +183,7 @@ jobs:
   # race to create it.
   publish-release:
     name: Publish GitHub release
-    needs: [build-tarball, build-appimage]
+    needs: [prepare, build-tarball, build-appimage]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -196,17 +197,44 @@ jobs:
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: Archtoys ${{ github.ref_name }}
+          body: ${{ needs.prepare.outputs.notes }}
           files: artifacts/*
           fail_on_unmatched_files: true
 
+  # Starts COPR's build once the release commit and tag exist. (A GitHub
+  # webhook would fire on the tag push, before the version is bumped.)
+  trigger-copr:
+    name: Start COPR build
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call COPR custom webhook
+        env:
+          COPR_WEBHOOK_URL: ${{ secrets.COPR_WEBHOOK_URL }}
+        run: |
+          if [ -z "$COPR_WEBHOOK_URL" ]; then
+            echo "::error::Secret COPR_WEBHOOK_URL is missing (Settings -> Secrets and variables -> Actions)."
+            exit 1
+          fi
+          CODE="$(curl -sS -o response.txt -w '%{http_code}' -X POST "$COPR_WEBHOOK_URL")"
+          echo "COPR answered HTTP $CODE: $(head -c 300 response.txt)"
+          case "$CODE" in
+            2*) echo "COPR build started." ;;
+            *)  echo "::error::COPR did not accept the webhook (HTTP $CODE). Check the COPR_WEBHOOK_URL secret."; exit 1 ;;
+          esac
+
   aur-bin:
     name: Deploy archtoys-bin to AUR
-    needs: [verify-version, publish-release]
+    needs: [prepare, publish-release]
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ needs.verify-version.outputs.version }}
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set pkgver from tag
         run: |
@@ -229,12 +257,14 @@ jobs:
 
   aur-source:
     name: Deploy archtoys to AUR
-    needs: [verify-version, publish-release]
+    needs: [prepare, publish-release]
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ needs.verify-version.outputs.version }}
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set pkgver from tag
         run: |
@@ -257,9 +287,31 @@ jobs:
 
   rpms:
     name: Attach COPR RPMs
-    needs: [verify-version, publish-release]
+    needs: [prepare, publish-release, trigger-copr]
     permissions:
       contents: write
     uses: ./.github/workflows/release-rpm.yml
     with:
       tag: ${{ github.ref_name }}
+
+  # Always runs last. Writes a summary table on the run page; if anything
+  # failed, opens an issue naming the job + step, with the error log.
+  report:
+    name: Report
+    if: always()
+    needs: [prepare, build-tarball, build-appimage, publish-release, trigger-copr, aur-bin, aur-source, rpms]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read     # read the failed job's log
+      issues: write     # open / close the failure issue
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Summarise and report failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/report.py
