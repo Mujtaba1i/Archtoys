@@ -23,6 +23,7 @@ package() {
 
   install -Dm755 archtoys "${pkgdir}/usr/bin/archtoys"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 colornames-LICENSE.txt "${pkgdir}/usr/share/licenses/${pkgname}/colornames-LICENSE.txt"
   install -Dm644 archtoys.desktop "${pkgdir}/usr/share/applications/archtoys.desktop"
 
   for size in 16 22 24 32 48 64 128 256 512; do

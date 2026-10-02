@@ -109,7 +109,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 /usr/bin/gtk-update-icon-cache -q -t -f %{_datadir}/icons/hicolor &>/dev/null || :
 
 %files
-%license LICENSE
+%license LICENSE data/colornames-LICENSE.txt
 %doc README.md
 %{_bindir}/archtoys
 %{_datadir}/applications/archtoys.desktop

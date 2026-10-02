@@ -34,6 +34,8 @@ SH
 chmod +x "${APPDIR}/usr/bin/archtoys"
 
 install -Dm644 "${ROOT_DIR}/packaging/archtoys.desktop" "${APPDIR}/usr/share/applications/archtoys.desktop"
+install -Dm644 "${ROOT_DIR}/LICENSE" "${APPDIR}/usr/share/licenses/archtoys/LICENSE"
+install -Dm644 "${ROOT_DIR}/data/colornames-LICENSE.txt" "${APPDIR}/usr/share/licenses/archtoys/colornames-LICENSE.txt"
 install -Dm644 "${ROOT_DIR}/packaging/archtoys-256.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/archtoys.png"
 
 cat > "${APPDIR}/AppRun" <<'SH'
