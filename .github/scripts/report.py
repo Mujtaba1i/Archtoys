@@ -12,6 +12,7 @@ NEEDS  = json.loads(os.environ["NEEDS_JSON"])
 SUMMARY = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/stdout")
 ICON = {"success": "✅", "failure": "❌", "cancelled": "⚪", "skipped": "⏭️"}
 ORDER = {  # job id in release.yml -> what it means
+    "wait-for-ci":     "Wait for CI to pass",
     "prepare":         "Bump version + changelog",
     "build-tarball":   "Test + build binary tarball",
     "build-appimage":  "Build + smoke-test AppImage",
@@ -50,6 +51,144 @@ def log_excerpt(job_id):
     tail = lines[-60:]
     clean = lambda ls: "\n".join(l.replace("```", "'''") for l in ls)
     return clean(errors), clean(tail)
+
+# ---- step-by-step recovery instructions for the issue ----------------------
+
+WHAT_HAPPENED = {
+    "wait-for-ci":     "CI didn't pass for the commit you tagged (or never ran for it), so the release stopped at the very start.",
+    "prepare":         "The release stopped while checking the tag and bumping the version. The error lines below say exactly why (for example, the tag isn't on your newest commit).",
+    "build-tarball":   "The app failed to test or build (or failed the glibc check).",
+    "build-appimage":  "The AppImage failed to build, failed the glibc check, or crashed in the smoke test.",
+    "publish-release": "Creating the GitHub release failed.",
+    "trigger-copr":    "COPR refused the webhook (usually a wrong or missing COPR_WEBHOOK_URL secret).",
+    "aur-bin":         "Pushing archtoys-bin to the AUR failed (usually the AUR SSH key or a PKGBUILD problem).",
+    "aur-source":      "Pushing archtoys to the AUR failed (usually the AUR SSH key or a PKGBUILD problem).",
+    "rpms":            "Attaching the COPR RPMs failed (usually the COPR build failed, or took longer than 90 minutes).",
+}
+
+
+def retry_same_tag(tag, bumped):
+    """Commands to delete the tag, fix things and release the same tag again."""
+    pull = (
+        "# 1. Get the \"Release " + tag + "\" commit the bot already made\n"
+        "git pull\n"
+        "git fetch --tags --force\n\n"
+    ) if bumped else (
+        "# 1. Make sure you're up to date\n"
+        "git pull\n\n"
+    )
+    return (
+        "```bash\n"
+        "cd ~/Archtoys\n\n"
+        + pull +
+        "# 2. Delete the tag on your PC and on GitHub (so you can create it again)\n"
+        f"git tag -d {tag}\n"
+        f"git push origin :refs/tags/{tag}\n\n"
+        "# 3. Fix the problem, then save and upload the fix\n"
+        "git add -A\n"
+        "git commit -m \"Describe your fix here\"\n"
+        "git push\n\n"
+        "# 4. Create the same tag again on your newest commit and push it\n"
+        f"git tag {tag}\n"
+        f"git push origin {tag}\n"
+        "```\n"
+    )
+
+
+def recovery_section(tag, failed, results):
+    first = failed[0]
+    bumped = results.get("prepare") == "success"
+    published = results.get("publish-release") == "success"
+
+    out = ["## 🛠️ How to fix it and retry", "", f"**What happened:** {WHAT_HAPPENED.get(first, 'A step failed.')}", ""]
+
+    state = []
+    state.append("✅ the version bump commit (\"Release " + tag + "\") was made and the tag moved onto it" if bumped
+                 else "❌ the version was **not** bumped, nothing was committed")
+    state.append("⚠️ the GitHub release **is published** (people can download it)" if published
+                 else "❌ nothing was published: no GitHub release, AUR or RPM update")
+    out += ["**What was already changed:**", ""] + [f"- {line}" for line in state] + [""]
+
+    if not published:
+        if first == "wait-for-ci":
+            out += [
+                "**First:** open the CI run (link in the error below) and read why it failed. "
+                "If CI never ran, you probably pushed only the tag: just push your commits (`git push`), "
+                "wait for CI to go green, then click **Re-run all jobs** on this release run. "
+                "Otherwise, fix the problem and retry:",
+                "",
+            ]
+        elif first == "prepare":
+            out += ["**First:** read the error lines below; they say what to change. Then retry:", ""]
+        else:
+            out += [
+                "**First:** read the error lines below. If it looks like a one-off hiccup (network, a "
+                "download timing out), just click **Re-run failed jobs** on the run. If something in "
+                "the code needs fixing, retry with the same tag:",
+                "",
+            ]
+        out += [f"**Retry with the same tag ({tag}):**", "", retry_same_tag(tag, bumped)]
+        if bumped:
+            out += [
+                "The version files already say the new version, so the retry won't bump them again, "
+                "and it rewrites this version's changelog entry so your fix is listed too.",
+                "",
+            ]
+        out += ["Then watch the new run in the **Actions** tab. This issue closes itself when it succeeds.", ""]
+        return "\n".join(out)
+
+    # Already published: don't reuse the tag, people may have downloaded it.
+    rerun = "Open this run (link at the top) and click **Re-run failed jobs**. It continues from where it stopped and doesn't publish anything twice."
+    if first == "trigger-copr":
+        steps = [
+            "1. Check the **COPR_WEBHOOK_URL** secret: GitHub → Settings → Secrets and variables → Actions. "
+            "It must be COPR's *custom* webhook URL, ending in `/archtoys/`.",
+            f"2. {rerun}",
+        ]
+    elif first in ("aur-bin", "aur-source"):
+        steps = [
+            "1. If the error mentions `Permission denied (publickey)`: the AUR key in the secret "
+            "**AUR_SSH_PRIVATE_KEY** isn't registered on your AUR account. Add the matching public key "
+            "on aur.archlinux.org → My Account, then go to step 2.",
+            f"2. {rerun}",
+            "3. If the **PKGBUILD itself** needs fixing: fix it, commit and push, then release the **next** "
+            "version (see below). A re-run would still use the old PKGBUILD.",
+        ]
+    elif first == "rpms":
+        steps = [
+            "1. Open your COPR project → **Builds** and look at the build for this version.",
+            "2. If it **failed**: open its log, fix the problem (often in `archtoys.spec`), commit and push, then "
+            "click **Rebuild** on COPR.",
+            "3. If it's **still running** or succeeded later: just wait for it to finish.",
+            f"4. Then attach the RPMs by hand: **Actions → Upload COPR RPMs to GitHub Release → Run workflow**, "
+            f"type `{tag}`, and click **Run workflow**.",
+        ]
+    else:
+        steps = [f"1. {rerun}"]
+
+    out += ["**What to do:**", ""] + steps + [""]
+    next_ver = tag
+    m = re.match(r"^v(\d+)\.(\d+)\.(\d+)$", tag)
+    if m:
+        next_ver = f"v{m.group(1)}.{m.group(2)}.{int(m.group(3)) + 1}"
+    out += [
+        "**If the code needs changing:** because this version is already published, don't reuse "
+        f"{tag}. Fix it and release the next version instead:",
+        "",
+        "```bash\n"
+        "cd ~/Archtoys\n"
+        "git pull\n"
+        "git fetch --tags --force\n"
+        "# fix the problem, then:\n"
+        "git add -A\n"
+        "git commit -m \"Describe your fix here\"\n"
+        f"git tag {next_ver}\n"
+        f"git push origin main {next_ver}\n"
+        "```",
+        "",
+    ]
+    return "\n".join(out)
+
 
 results = {jid: info.get("result", "skipped") for jid, info in NEEDS.items()}
 failed  = [j for j in ORDER if results.get(j) == "failure"]
@@ -90,10 +229,9 @@ for job in jobs:
 title = f"❌ Release {TAG} failed at: {first_where or failed[0]}"
 body = (
     f"The release workflow for **{TAG}** stopped.\n\n"
-    f"**Run:** {RUN_URL}\n\n{table}\n\n" + "\n".join(details) +
-    "\n---\n**What next:** fix the problem, then either click **Re-run failed jobs** on the run "
-    "(if nothing in the code needs to change), or commit the fix and release the next version. "
-    "This issue closes itself when a run for this tag succeeds."
+    f"**Run:** {RUN_URL}\n\n{table}\n\n"
+    + recovery_section(TAG, failed, results)
+    + "\n---\n## 📄 Error details\n\n" + "\n".join(details)
 )
 body = body[:60000]
 with open(SUMMARY, "a") as f:

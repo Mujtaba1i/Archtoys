@@ -3,12 +3,14 @@
 #     git tag v1.2.3
 #     git push origin main v1.2.3
 #
-#   prepare ──┬─ build-tarball ──┐
-#             ├─ build-appimage ─┴─ publish-release ─┬─ aur-bin
-#             │                                      ├─ aur-source
-#             └─ trigger-copr ───────────────────────┴─ rpms (release-rpm.yml)
+#   wait-for-ci ── prepare ──┬─ build-tarball ──┐
+#                            ├─ build-appimage ─┴─ publish-release ─┬─ aur-bin
+#                            │                                      ├─ aur-source
+#                            └─ trigger-copr ───────────────────────┴─ rpms (release-rpm.yml)
 #   report (always runs last: summary table; opens an issue if anything failed)
 #
+# "wait-for-ci" waits until CI has passed for the tagged commit, so you can
+# push commits and the tag together; if CI fails, nothing is changed.
 # "prepare" sets the version in Cargo.toml / Cargo.lock / archtoys.spec,
 # writes the changelog from your commit messages since the previous tag,
 # commits "Release v1.2.3" to main and moves the tag onto that commit.
@@ -34,8 +36,26 @@ env:
   PACKAGER: "Mujtaba1i <mujtaba1i@github>"
 
 jobs:
+  wait-for-ci:
+    name: Wait for CI to pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    permissions:
+      contents: read
+      actions: read     # read the CI run's status
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Wait for CI on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/wait-for-ci.sh
+
   prepare:
     name: Bump version + changelog
+    needs: wait-for-ci
     runs-on: ubuntu-latest
     permissions:
       contents: write   # pushes the "Release vX" commit and moves the tag
@@ -299,7 +319,7 @@ jobs:
   report:
     name: Report
     if: always()
-    needs: [prepare, build-tarball, build-appimage, publish-release, trigger-copr, aur-bin, aur-source, rpms]
+    needs: [wait-for-ci, prepare, build-tarball, build-appimage, publish-release, trigger-copr, aur-bin, aur-source, rpms]
     runs-on: ubuntu-latest
     permissions:
       contents: read
