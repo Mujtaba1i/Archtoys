@@ -116,6 +116,7 @@ jobs:
           mkdir -p staging
           install -Dm755 target/release/archtoys      staging/archtoys
           install -Dm644 LICENSE                      staging/LICENSE
+          install -Dm644 data/colornames-LICENSE.txt  staging/colornames-LICENSE.txt
           install -Dm644 packaging/archtoys.desktop   staging/archtoys.desktop
           cp packaging/archtoys.png packaging/archtoys-*.png staging/
           (cd staging && tar -czf ../archtoys-linux-x86_64.tar.gz *)

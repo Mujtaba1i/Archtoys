@@ -4,7 +4,7 @@
 
 **A fast, system-wide color picker for Linux, inspired by Microsoft PowerToys.**
 
-Pick any pixel on your screen, see it magnified, and copy it as HEX, RGB, HSL or HSV.<br>
+Pick any pixel on your screen, see it magnified, see its name, and copy it in the format you need.<br>
 Works on **Wayland and X11**, built to feel at home on **KDE Plasma**.
 
 [![Latest release](https://img.shields.io/github/v/release/Mujtaba1i/Archtoys?label=release)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
@@ -22,11 +22,12 @@ Works on **Wayland and X11**, built to feel at home on **KDE Plasma**.
 
 - **Pixel magnifier.** While picking, a card next to your cursor shows the surrounding pixels 10× larger, with the exact pixel you'll get outlined. No more guessing on high-resolution screens.
 - **Live preview, on Wayland too.** The color updates as you move the mouse. On Wayland, Archtoys takes one screenshot and lets you pick from it ("freeze frame"), so you get the same preview and magnifier as on X11.
-- **Four formats, always in sync.** HEX, RGB, HSL and HSV, each with a copy button. You can also *type* a color into any field, and the other three convert instantly.
+- **Color names.** Every color gets a name: the official CSS name when there is one ("Hot Pink"), otherwise the closest of about 32,000 named colors ("≈ Barbie Pink"). Works offline.
+- **The formats you need, in your order.** HEX, RGB, HSL and HSV, plus CMYK, HSLA, OKLCH and OKLab (off by default). Turn any of them on or off and reorder them with the sliders button next to ⚙. You can also *type* a color into any field, and the others convert instantly.
 - **Shades at a glance.** A bar of lighter and darker variations of your color. Click one to use it.
 - **Color history.** Every color you pick is kept for quick access, even after a restart.
 - **Global hotkey.** Start picking from anywhere (default `Ctrl+Super+C`). On Wayland it uses your desktop's own shortcut system.
-- **Auto copy.** Optionally copy the color the moment you click, without opening the window.
+- **Auto copy.** Optionally copy the color the moment you click, without opening the window. It copies your **first** format (skipping the name), and that row is highlighted in the picked color, so you always know what you'll get.
 - **Cancel anytime.** `Esc` or right-click cancels a pick and restores the previous color.
 - **Stays out of your way.** System tray icon, run on startup, minimize on pick, light and dark themes.
 
@@ -35,6 +36,8 @@ Works on **Wayland and X11**, built to feel at home on **KDE Plasma**.
 | Light | Dark |
 |:---:|:---:|
 | ![Archtoys main window, light theme](docs/screenshots/main-light.png) | ![Archtoys main window, dark theme](docs/screenshots/main-dark.png) |
+
+![The Customize formats panel: turn formats on or off and change their order](docs/screenshots/formats.png)
 
 </div>
 
@@ -86,6 +89,7 @@ The AppImage runs on any distribution from Ubuntu 22.04 onwards, or anything equ
 | Cancel | `Esc` or right-click (the previous color comes back) |
 | Copy a value | Click the copy icon next to HEX, RGB, HSL or HSV |
 | Enter a color by hand | Type into any field and press `Enter` |
+| Choose and reorder formats | The sliders button, next to ⚙ |
 | Use a lighter/darker shade | Click it in the shade bar |
 | Reuse an old color | Click it in the history row |
 | Change the hotkey, theme, startup… | The ⚙ settings button (on Wayland, the hotkey opens your desktop's shortcut settings) |
@@ -168,6 +172,8 @@ cargo run --release --locked
 src/
 ├── main.rs          startup and wiring
 ├── color.rs         color formats, parsing, shades (unit-tested)
+├── formats.rs       which formats are shown, their order, Auto Copy
+├── names.rs         color names (CSS names + data/colornames.csv)
 ├── config.rs        settings and autostart
 ├── ui_state.rs      updating the main window
 ├── tray.rs          tray icon
@@ -200,6 +206,8 @@ Bug reports, ideas and pull requests are all welcome.
 ## Acknowledgements
 
 Inspired by the Color Picker in [Microsoft PowerToys](https://github.com/microsoft/PowerToys). Archtoys is an independent project and is not affiliated with or endorsed by Microsoft.
+
+Color names come from [meodai/color-names](https://github.com/meodai/color-names) by David Aerne, used under the MIT License (see [`data/colornames-LICENSE.txt`](data/colornames-LICENSE.txt)).
 
 ## License
 

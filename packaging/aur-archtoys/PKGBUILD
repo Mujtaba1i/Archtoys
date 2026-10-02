@@ -54,4 +54,5 @@ WRAP
   ln -sf archtoys.png "${pkgdir}/usr/share/icons/hicolor/1024x1024/apps/archtoys-bin.png"
 
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 data/colornames-LICENSE.txt "${pkgdir}/usr/share/licenses/${pkgname}/colornames-LICENSE.txt"
 }
