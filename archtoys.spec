@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.2.7
+Version:        0.3.0
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -124,6 +124,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Fri Oct 02 2026 Mujtaba1i <mujtaba1i@github> - 0.3.0-1
+- add color names, CMYK, HSLA, OKLCH and OKLab
+- Color name license and readme update
+
 * Fri Oct 02 2026 Mujtaba1i <mujtaba1i@github> - 0.2.7-1
 - Fixing README image missing
 - README added aur link
