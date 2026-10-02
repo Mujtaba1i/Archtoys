@@ -1,6 +1,25 @@
 import { Button, VerticalBox, HorizontalBox, ScrollView, LineEdit, CheckBox, Slider } from "std-widgets.slint";
 
 // --- Global Theme Palettes ---
+// One row in the main window (HEX, RGB, NAME, ...).
+export struct FieldRow {
+    key: string,
+    label: string,
+    value: string,
+    // bumped by the app on every update; the row then shows `value` again
+    rev: int,
+    // the row Auto Copy copies (highlighted)
+    auto-copy: bool,
+    editable: bool,
+}
+
+// One line in the "Customize formats" panel.
+export struct FormatOption {
+    key: string,
+    label: string,
+    enabled: bool,
+}
+
 export global Skin {
     in-out property <bool> dark-mode: false;
     
@@ -119,14 +138,22 @@ component ColorBubble inherits Rectangle {
 // --- Data Row (HEX, RGB...) ---
 component ValueRow inherits Rectangle {
     in property <string> label;
-    in-out property <string> value;
-    in property <image> icon-source: @image-url("copy.svg"); 
+    in property <string> value;
+    // The app bumps `rev` on every update. A text field the user has typed
+    // into no longer follows bindings, so we copy `value` into it ourselves.
+    in property <int> rev;
     in property <bool> editable: true;
-    
+    in property <bool> auto-copy: false;
+    in property <color> accent: Skin.border;
+    in property <image> icon-source: @image-url("copy.svg");
+
     callback edited(string);
     callback accepted(string);
     callback blurred(string);
     callback copy;
+
+    init => { input.text = root.value; }
+    changed rev => { input.text = root.value; }
 
     focus-release := FocusScope {
         enabled: true;
@@ -137,33 +164,33 @@ component ValueRow inherits Rectangle {
     height: 48px;
     background: Skin.content-bg;
     border-radius: 6px;
-    border-width: 1px; 
-    border-color: Skin.border;
+    // The Auto Copy row gets a border in the picked color.
+    border-width: root.auto-copy ? 2px : 1px;
+    border-color: root.auto-copy ? root.accent : Skin.border;
 
     HorizontalLayout {
-        padding-left: 12px; 
-        padding-right: 12px; 
+        padding-left: 12px;
+        padding-right: 12px;
         spacing: 12px;
 
-        // Label
-        Text { 
-            text: root.label; 
-            color: Skin.text-muted; 
-            font-size: 13px; 
+        Text {
+            text: root.label;
+            color: Skin.text-muted;
+            font-size: 13px;
             font-weight: 500;
             vertical-alignment: center;
-            width: 40px; 
+            width: 52px;
         }
 
-        // Value
-        TextInput {
-            text <=> root.value;
+        input := TextInput {
+            read-only: !root.editable;
             font-size: 14px;
             horizontal-stretch: 1;
             horizontal-alignment: center;
             vertical-alignment: center;
             color: Skin.text-main;
-            
+            single-line: true;
+
             edited => { root.edited(self.text); }
             accepted => {
                 root.accepted(self.text);
@@ -175,12 +202,33 @@ component ValueRow inherits Rectangle {
                 }
             }
         }
-        
-        // Copy Button
-        CopyButton { 
+
+        CopyButton {
             icon-source: root.icon-source;
             clicked => { root.copy(); }
         }
+    }
+}
+
+// Small square button with an icon (used for the up/down arrows).
+component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    background: touch.pressed && root.enabled ? Skin.border : transparent;
+    opacity: root.enabled ? 1 : 0.3;
+    Image {
+        source: root.icon;
+        width: 16px;
+        height: 16px;
+        colorize: Skin.icon-tint;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
     }
 }
 
@@ -370,7 +418,8 @@ export component AppWindow inherits Window {
     // Used on X11. On Wayland the desktop takes the icon from archtoys.desktop.
     icon: @image-url("../packaging/archtoys-256.png");
     preferred-width: 520px;
-    preferred-height: 350px;
+    // tall enough for the 5 default rows; more rows scroll
+    preferred-height: 410px;
     min-width: 480px;
     min-height: 320px;
     max-width: 900px;
@@ -379,11 +428,6 @@ export component AppWindow inherits Window {
 
     in property <color> current-color: #cbb6ac;
     in property <[color]> history-model: [#e0e0e0, #4a5a6a, #cbb6ac, #8c8b5c];
-    
-    in-out property <string> val-hex: "#CBB6AC";
-    in-out property <string> val-rgb: "rgb(203,182,172)";
-    in-out property <string> val-hsl: "hsl(19,23%,74%)";
-    in-out property <string> val-hsv: "hsv(19,15%,80%)";
     
     in-out property <color> shade-lighter-2;
     in-out property <color> shade-lighter-1;
@@ -404,6 +448,9 @@ export component AppWindow inherits Window {
     // Shown briefly when a typed color can't be understood.
     in-out property <string> input-error: "";
     in-out property <bool> keep-on-top: false;
+    in property <[FieldRow]> fields;
+    in property <[FormatOption]> format-options;
+    in-out property <bool> formats-open: false;
     in-out property <bool> picking: false;
 
     callback pick-color();
@@ -416,6 +463,8 @@ export component AppWindow inherits Window {
     callback hotkey-captured(string, bool, bool, bool, bool);
     callback settings-changed();
     callback settings-opened();
+    callback format-toggled(string, bool);
+    callback format-moved(string, int);
     callback cancel-pick();
     callback open-hotkey-settings();
     callback clear-history();
@@ -523,8 +572,17 @@ export component AppWindow inherits Window {
             // --- spacer that pushes settings button to far right ---
 
             SettingsButton {
+                icon-source: @image-url("sliders.svg");
+                clicked => {
+                    root.settings-open = false;
+                    root.formats-open = !root.formats-open;
+                }
+            }
+
+            SettingsButton {
                 icon-source: @image-url("settings.svg");
                 clicked => {
+                    root.formats-open = false;
                     root.settings-open = !root.settings-open;
                     if root.settings-open { root.settings-opened(); }
                 }
@@ -559,42 +617,96 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // Value Rows
-            VerticalLayout {
-                spacing: 10px; 
+            // Value Rows (scroll up/down if there are many)
+            ScrollView {
                 horizontal-stretch: 1;
-                
-                ValueRow { 
-                    label: "HEX"; 
-                    value <=> root.val-hex; 
-                    copy => { root.copy-to-clipboard(root.val-hex) } 
-                    edited(txt) => { root.value-edited("HEX", txt) }
-                    accepted(txt) => { root.value-accepted("HEX", txt) }
-                    blurred(txt) => { root.value-blurred("HEX", txt) }
+                viewport-width: self.visible-width;
+                VerticalLayout {
+                    spacing: 10px;
+                    for row in root.fields : ValueRow {
+                        label: row.label;
+                        value: row.value;
+                        rev: row.rev;
+                        editable: row.editable;
+                        auto-copy: row.auto-copy;
+                        accent: root.current-color;
+                        copy => { root.copy-to-clipboard(row.value) }
+                        edited(txt) => { root.value-edited(row.key, txt) }
+                        accepted(txt) => { root.value-accepted(row.key, txt) }
+                        blurred(txt) => { root.value-blurred(row.key, txt) }
+                    }
                 }
-                ValueRow { 
-                    label: "RGB"; 
-                    value <=> root.val-rgb; 
-                    copy => { root.copy-to-clipboard(root.val-rgb) } 
-                    edited(txt) => { root.value-edited("RGB", txt) }
-                    accepted(txt) => { root.value-accepted("RGB", txt) }
-                    blurred(txt) => { root.value-blurred("RGB", txt) }
-                }
-                ValueRow { 
-                    label: "HSL"; 
-                    value <=> root.val-hsl; 
-                    copy => { root.copy-to-clipboard(root.val-hsl) } 
-                    edited(txt) => { root.value-edited("HSL", txt) }
-                    accepted(txt) => { root.value-accepted("HSL", txt) }
-                    blurred(txt) => { root.value-blurred("HSL", txt) }
-                }
-                ValueRow { 
-                    label: "HSV"; 
-                    value <=> root.val-hsv; 
-                    copy => { root.copy-to-clipboard(root.val-hsv) } 
-                    edited(txt) => { root.value-edited("HSV", txt) }
-                    accepted(txt) => { root.value-accepted("HSV", txt) }
-                    blurred(txt) => { root.value-blurred("HSV", txt) }
+            }
+        }
+    }
+
+    // Customize formats overlay
+    if root.formats-open : Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #00000050;
+        TouchArea { clicked => { root.formats-open = false; } }
+
+        Rectangle {
+            x: parent.width - 260px - 20px;
+            y: 60px;
+            width: 260px;
+            height: parent.height - 80px;
+            background: Skin.content-bg;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Skin.border;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000040;
+
+            TouchArea { clicked => { } }
+
+            ScrollView {
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.visible-width;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "Customize formats";
+                        font-weight: 700;
+                        color: Skin.text-main;
+                        font-size: 16px;
+                    }
+                    Text {
+                        text: "Auto Copy uses the top format.";
+                        color: Skin.text-muted;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                    Rectangle { height: 1px; background: Skin.border; }
+
+                    for opt[i] in root.format-options : HorizontalLayout {
+                        spacing: 6px;
+                        CheckBox {
+                            checked: opt.enabled;
+                            toggled => { root.format-toggled(opt.key, self.checked); }
+                        }
+                        Text {
+                            text: opt.label;
+                            color: opt.enabled ? Skin.text-main : Skin.text-muted;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        IconButton {
+                            icon: @image-url("chevron-up.svg");
+                            enabled: i > 0;
+                            clicked => { root.format-moved(opt.key, -1); }
+                        }
+                        IconButton {
+                            icon: @image-url("chevron-down.svg");
+                            enabled: i < root.format-options.length - 1;
+                            clicked => { root.format-moved(opt.key, 1); }
+                        }
+                    }
                 }
             }
         }

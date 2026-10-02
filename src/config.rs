@@ -2,6 +2,7 @@
 //! autostart entry (~/.config/autostart/archtoys.desktop).
 
 use crate::color::Rgb;
+use crate::formats::{FormatEntry, FormatList};
 use crate::hotkey::DEFAULT_HOTKEY_TEXT;
 use crate::{AppWindow, Skin};
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,10 @@ pub struct AppConfig {
     pub setting_autostart: bool,
     pub setting_hotkey: String,
     pub history: Vec<[u8; 3]>,
+    /// Shown formats and their order (empty = defaults).
+    pub formats: Vec<FormatEntry>,
+    /// The color shown when the app was last used, restored at startup.
+    pub last_color: Option<[u8; 3]>,
 }
 
 fn default_true() -> bool {
@@ -42,6 +47,8 @@ impl Default for AppConfig {
             setting_autostart: false,
             setting_hotkey: DEFAULT_HOTKEY_TEXT.to_string(),
             history: vec![],
+            formats: vec![],
+            last_color: None,
         }
     }
 }
@@ -126,6 +133,11 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         setting_autostart: ui.get_setting_autostart(),
         setting_hotkey: ui.get_setting_hotkey().to_string(),
         history,
+        formats: crate::ui_state::formats().to_saved(),
+        last_color: {
+            let (r, g, b) = crate::ui_state::committed_rgb();
+            Some([r, g, b])
+        },
     }
 }
 
@@ -137,6 +149,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     ui.set_setting_autocopy(cfg.setting_autocopy);
     ui.set_setting_autostart(cfg.setting_autostart);
     ui.set_setting_hotkey(cfg.setting_hotkey.clone().into());
+    crate::ui_state::set_formats(ui, FormatList::from_saved(&cfg.formats));
 
     if !cfg.history.is_empty() {
         let mut guard = history_store.lock().unwrap();
