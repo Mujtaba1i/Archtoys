@@ -49,12 +49,15 @@ fn apply_hidden_startup_state(ui: &AppWindow) {
 fn main() -> Result<(), slint::PlatformError> {
     let start_hidden = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
 
-    // Set the Wayland app_id / X11 WM_CLASS to "archtoys" so that the
-    // compositor can match the running window to archtoys.desktop and
-    // display the correct icon in the dock/taskbar.
-    std::env::set_var("SLINT_APP_ID", "archtoys");
-
     let ui = AppWindow::new()?;
+
+    // The Wayland app_id / X11 WM_CLASS. It must match archtoys.desktop, or
+    // the desktop can't find our icon and shows a generic one instead.
+    // (Slint doesn't read a SLINT_APP_ID variable; this is the real API, and
+    // it must run after AppWindow::new() and before the window is shown.)
+    if let Err(err) = slint::set_xdg_app_id("archtoys") {
+        eprintln!("app id: couldn't set it: {err:?}");
+    }
     apply_native_window_constraints(&ui);
     if start_hidden {
         apply_hidden_startup_state(&ui);
