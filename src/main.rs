@@ -2,7 +2,9 @@ slint::include_modules!();
 
 mod color;
 mod config;
+mod formats;
 mod hotkey;
+mod names;
 mod picker;
 mod portal;
 mod tray;
@@ -18,7 +20,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use ui_state::{
     clear_input_error, committed_rgb, copy_text_async, current_rgb, push_history, show_input_error,
-    sync_history_model, update_ui_colors, update_ui_preview_except_field,
+    show_message, sync_history_model, update_ui_colors, update_ui_preview_except_field,
 };
 
 const WINDOW_MIN_WIDTH: f64 = 480.0;
@@ -74,9 +76,15 @@ fn main() -> Result<(), slint::PlatformError> {
     };
 
     let history_store: HistoryStore = Arc::new(Mutex::new(vec![(203, 182, 172), (85, 85, 85)]));
+    ui_state::install_models(&ui);
 
+    // The color to show at startup: the last one used, if saved.
+    let mut start_color = (203, 182, 172);
     if let Some(cfg) = load_config() {
         apply_config(&ui, &history_store, &cfg);
+        if let Some([r, g, b]) = cfg.last_color {
+            start_color = (r, g, b);
+        }
     }
     if ui.get_setting_hotkey().trim().is_empty() {
         ui.set_setting_hotkey(DEFAULT_HOTKEY_TEXT.into());
@@ -114,12 +122,13 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_setting_hotkey(hotkey_text.into());
 
     sync_history_model(&ui, &history_store);
-    update_ui_colors(&ui, (203, 182, 172));
+    update_ui_colors(&ui, start_color);
 
     let settings_ui = ui_handle.clone();
     let settings_history = history_store.clone();
     ui.on_settings_changed(move || {
         if let Some(ui) = settings_ui.upgrade() {
+            ui_state::refresh_rows(&ui); // Auto Copy moves the highlight
             persist_config(&ui, &settings_history);
             sync_autostart_entry(ui.get_setting_autostart());
         }
@@ -164,7 +173,30 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     ui.on_copy_to_clipboard(move |text| {
-        copy_text_async(text.to_string());
+        // near names are shown as "≈ Name"; copy just the name
+        copy_text_async(text.trim_start_matches("≈ ").to_string());
+    });
+
+    let toggle_ui = ui_handle.clone();
+    let toggle_history = history_store.clone();
+    ui.on_format_toggled(move |key, on| {
+        let (Some(ui), Some(field)) = (toggle_ui.upgrade(), ColorField::from_ui_label(&key)) else {
+            return;
+        };
+        match ui_state::toggle_format(&ui, field, on) {
+            Ok(()) => persist_config(&ui, &toggle_history),
+            Err(message) => show_message(&ui, message),
+        }
+    });
+
+    let move_ui = ui_handle.clone();
+    let move_history = history_store.clone();
+    ui.on_format_moved(move |key, delta| {
+        let (Some(ui), Some(field)) = (move_ui.upgrade(), ColorField::from_ui_label(&key)) else {
+            return;
+        };
+        ui_state::move_format(&ui, field, delta);
+        persist_config(&ui, &move_history);
     });
 
     let history_click_ui = ui_handle.clone();
@@ -174,6 +206,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let picked = history_click_store.lock().unwrap().get(index as usize).copied();
             if let Some(rgb) = picked {
                 update_ui_colors(&ui, rgb);
+                persist_config(&ui, &history_click_store); // remember it for next start
             }
         }
     });

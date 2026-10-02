@@ -16,7 +16,8 @@ use device_query::{DeviceQuery, DeviceState, Keycode};
 use slint::{Color, ComponentHandle, LogicalPosition};
 use std::cell::RefCell;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use x11rb::connection::Connection as _;
@@ -299,6 +300,13 @@ fn run_live(
     let (_, _, mut prev_left, mut prev_right) = sampler.pointer()?;
     let mut last: Option<(i32, i32, Vec<u8>)> = None;
 
+    // The newest hover state, and whether the UI already has an update
+    // queued. If the UI is busy we just replace the data instead of queuing
+    // another update, so updates can't pile up and lag behind the mouse.
+    type Hover = (crate::color::Rgb, Vec<u8>, i32, i32);
+    let newest: Arc<Mutex<Option<Hover>>> = Arc::new(Mutex::new(None));
+    let queued = Arc::new(AtomicBool::new(false));
+
     loop {
         if PICKER_CANCELLED.load(Ordering::SeqCst) {
             return Ok(PickOutcome::Cancelled);
@@ -330,10 +338,21 @@ fn run_live(
             .unwrap_or(true);
         if changed {
             let (pos_x, pos_y) = overlay_position(x, y, sampler.width, sampler.height);
+            *newest.lock().unwrap() = Some((rgb, area.clone(), pos_x, pos_y));
+            if queued.swap(true, Ordering::SeqCst) {
+                last = Some((x, y, area));
+                thread::sleep(Duration::from_millis(16));
+                continue; // the queued update will pick up the newest data
+            }
             let ui_weak = ui_weak.clone();
             let overlay_weak = overlay_weak.clone();
-            let area_for_ui = area.clone();
+            let newest = newest.clone();
+            let queued = queued.clone();
             let _ = slint::invoke_from_event_loop(move || {
+                queued.store(false, Ordering::SeqCst);
+                let Some((rgb, area_for_ui, pos_x, pos_y)) = newest.lock().unwrap().take() else {
+                    return;
+                };
                 if PICKER_CANCELLED.load(Ordering::SeqCst) {
                     return;
                 }

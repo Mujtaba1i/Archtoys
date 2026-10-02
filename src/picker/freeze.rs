@@ -202,7 +202,11 @@ pub(crate) fn show(
         let weak = window.as_weak();
         let ui_weak = ui_weak.clone();
         let pixel_at = pixel_at.clone();
-        window.on_pointer_moved(move |x, y| {
+        // A mouse move reports x and y separately, and moves come in bursts.
+        // Keep only the newest position and update once per event-loop turn,
+        // so the work never piles up (that's what made hovering choppy).
+        let latest: Rc<Cell<Option<(f32, f32)>>> = Rc::new(Cell::new(None));
+        let update = Rc::new(move |x: f32, y: f32| {
             let (Some(w), Some((area, rgb))) = (weak.upgrade(), pixel_at(x, y)) else {
                 return;
             };
@@ -214,6 +218,19 @@ pub(crate) fn show(
             if let Some(ui) = ui_weak.upgrade() {
                 show_hover(&ui, rgb);
             }
+        });
+        window.on_pointer_moved(move |x, y| {
+            let already_scheduled = latest.replace(Some((x, y))).is_some();
+            if already_scheduled {
+                return;
+            }
+            let latest = latest.clone();
+            let update = update.clone();
+            slint::Timer::single_shot(Duration::ZERO, move || {
+                if let Some((x, y)) = latest.take() {
+                    update(x, y);
+                }
+            });
         });
     }
     {
