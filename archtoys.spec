@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.2.6
+Version:        0.2.7
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -124,6 +124,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Fri Oct 02 2026 Mujtaba1i <mujtaba1i@github> - 0.2.7-1
+- Fixing README image missing
+- README added aur link
+- fix app icon wayland
+- making releases wait for CI
+
 * Thu Oct 01 2026 Mujtaba1i <mujtaba1i@github> - 0.2.6-1
 - Automate version bump, changelog and failure reports on release
 - Add pixel magnifier and live preview on Wayland, desktop-managed hotkey, input validation, and fix color accuracy and crash bugs
