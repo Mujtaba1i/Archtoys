@@ -65,9 +65,18 @@ PY
 
 # --- archtoys.spec: Version, Release, and a new %changelog entry ------------
 sed -i -E "s/^(Version:[[:space:]]+).*/\1${VERSION}/; s/^(Release:[[:space:]]+)[0-9]+/\11/" archtoys.spec
+# A retry of the same tag (after a failed attempt) replaces that version's
+# entry, so fixes made in between are listed too.
 if grep -qE "^\* .* - ${VERSION//./\\.}-1$" archtoys.spec; then
-  echo "archtoys.spec already has a changelog entry for $VERSION; leaving it."
-else
+  echo "archtoys.spec already has an entry for $VERSION (earlier attempt); rewriting it."
+  awk -v ver="- ${VERSION}-1" '
+    skip && /^[[:space:]]*$/ { skip = 0; next }
+    skip { next }
+    index($0, "* ") == 1 && substr($0, length($0) - length(ver) + 1) == ver { skip = 1; next }
+    { print }' archtoys.spec > spec.new
+  mv spec.new archtoys.spec
+fi
+{
   DATE="$(LC_ALL=C date -u '+%a %b %d %Y')"
   {
     echo "* $DATE $PACKAGER - ${VERSION}-1"
@@ -79,7 +88,7 @@ else
        /^%changelog[[:space:]]*$/ && !done { printf "%s", e; done = 1 }' entry.txt archtoys.spec > spec.new
   mv spec.new archtoys.spec
   rm entry.txt
-fi
+}
 
 git --no-pager diff --stat
 if git diff --quiet; then
