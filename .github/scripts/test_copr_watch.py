@@ -2,6 +2,8 @@
 
 Run:  python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
 """
+import contextlib
+import io
 import os
 import sys
 import unittest
@@ -31,6 +33,14 @@ def plan_for(per_build, attached=(), now=NOW, wrong=(), cfg=CFG):
     mine = [b for b, _ in per_build]
     chroots = cw.consolidate(per_build)
     return cw.decide(cfg, now, SINCE, mine, list(wrong), chroots, set(attached))
+
+
+def quiet(fn, *args):
+    """Run fn without letting its output reach the log. The script prints GitHub
+    workflow commands such as ::error::, and GitHub would show those as red
+    annotations on the CI run even though the test passes."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return fn(*args)
 
 
 def keys(plan):
@@ -174,7 +184,7 @@ class Trigger(unittest.TestCase):
              mock.patch.object(cw, "commit_epoch", return_value=SINCE + 60), \
              mock.patch.object(cw, "list_builds", return_value=builds), \
              mock.patch.object(cw, "post_webhook", return_value=(webhook_status, "")) as hook:
-            code = cw.trigger(cw.Cfg(os.environ))
+            code = quiet(cw.trigger, cw.Cfg(os.environ))
         return code, hook.called
 
     def test_nothing_running_sends_the_webhook(self):
@@ -201,7 +211,7 @@ class Trigger(unittest.TestCase):
              mock.patch.object(cw, "commit_epoch", return_value=SINCE), \
              mock.patch.object(cw, "list_builds", side_effect=cw.CoprUnavailable("down")), \
              mock.patch.object(cw, "post_webhook", return_value=(200, "")) as hook:
-            self.assertEqual(cw.trigger(cw.Cfg(os.environ)), 0)
+            self.assertEqual(quiet(cw.trigger, cw.Cfg(os.environ)), 0)
         self.assertTrue(hook.called)
 
 
