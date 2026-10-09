@@ -46,3 +46,8 @@ jobs:
         run: |
           bash -n packaging/aur-archtoys/PKGBUILD
           bash -n packaging/aur-archtoys-bin/PKGBUILD
+
+      - name: Test the release scripts
+        run: |
+          for f in .github/scripts/*.sh; do bash -n "$f"; done
+          python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'

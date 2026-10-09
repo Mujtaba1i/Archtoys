@@ -16,3 +16,5 @@ image.png
 /PKGBUILD
 /archtoys.install
 /Archtoys.png
+
+__pycache__/

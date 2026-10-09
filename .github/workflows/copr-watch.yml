@@ -1,0 +1,69 @@
+# Follows COPR's build of a release and attaches the RPMs to the GitHub
+# release. COPR can queue for hours and cannot call us back, so this asks it
+# every 2 minutes. One run lasts under an hour; if COPR is still busy it starts
+# a fresh run for the same tag, up to 7 hours in total.
+#
+# Started by release.yml. You can also run it by hand (Actions, COPR watcher,
+# Run workflow, enter the tag) after you rebuilt something on COPR.
+#
+# It opens ONE issue per tag only when COPR needs your attention (a failed or
+# cancelled build, no build at all, COPR unreachable, a give-up), explains what
+# to do, and closes the issue itself once every RPM is attached.
+
+name: COPR watcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to follow, for example v0.3.1"
+        required: true
+        type: string
+      sha:
+        description: "Set by the release itself. Leave empty when you run this by hand."
+        required: false
+        default: ""
+        type: string
+      started:
+        description: "Set by the release itself. Leave empty when you run this by hand."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+# Only the newest run for a tag keeps going: a manual run, or the fresh run a
+# watcher starts for itself, replaces the one before it.
+concurrency:
+  group: copr-watch-${{ inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: Follow COPR
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    permissions:
+      contents: write   # attach the RPMs to the release
+      issues: write     # tell you when COPR needs attention
+      actions: write    # start the next run of this watcher
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      SHA: ${{ inputs.sha }}
+      STARTED: ${{ inputs.started }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Install copr-cli
+        run: pip install --break-system-packages --quiet copr-cli
+
+      - name: Follow COPR
+        run: python3 .github/scripts/copr_watch.py watch
+
+      - name: Tell me if the watcher itself crashed
+        if: failure()
+        run: python3 .github/scripts/copr_watch.py crashed
