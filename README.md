@@ -11,6 +11,7 @@ Works on **Wayland and X11**, built to feel at home on **KDE Plasma**.
 [![AUR](https://img.shields.io/aur/version/archtoys?label=AUR)](https://aur.archlinux.org/packages/archtoys)
 [![AUR-bin](https://img.shields.io/aur/version/archtoys-bin?label=AUR-bin)](https://aur.archlinux.org/packages/archtoys-bin)
 [![Fedora COPR](https://img.shields.io/badge/Fedora-COPR-51A2DA?logo=fedora&logoColor=white)](https://copr.fedorainfracloud.org/coprs/mujtaba1i/archtoys/)
+[![Debian / Ubuntu](https://img.shields.io/badge/Debian%20%2F%20Ubuntu-.deb-A81D33?logo=debian&logoColor=white)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
 [![AppImage](https://img.shields.io/badge/AppImage-any%20distro-informational)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/Mujtaba1i/Archtoys)](LICENSE)
 
@@ -68,6 +69,16 @@ paru -S archtoys       # build from source
 ```
 
 `yay` works the same way.
+
+### Debian, Ubuntu, Linux Mint and derivatives (.deb)
+
+Download `archtoys_<version>_amd64.deb` from the [Releases page](https://github.com/Mujtaba1i/Archtoys/releases/latest), then:
+
+```bash
+sudo apt install ./archtoys_*_amd64.deb
+```
+
+apt installs the dependencies for you. It works on Ubuntu 22.04 and newer, and Debian 12 and newer. There are no automatic updates yet, so download the new file for each version.
 
 ### Any distribution (AppImage)
 
