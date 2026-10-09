@@ -6,8 +6,14 @@
 #   wait-for-ci ── prepare ──┬─ build-tarball ──┐
 #                            ├─ build-appimage ─┴─ publish-release ─┬─ aur-bin
 #                            │                                      ├─ aur-source
-#                            └─ trigger-copr ───────────────────────┴─ rpms (release-rpm.yml)
+#                            ├─ trigger-copr ───────────────────────┴─ copr-watch
+#                            └─ build-deb ── (optional) ─ attach-deb (after publish-release)
 #   report (always runs last: summary table; opens an issue if anything failed)
+#
+# Required parts stop the release if they fail. Optional parts (the .deb) never
+# do: the release is still published, and the report tells you what is missing.
+# COPR can queue for hours, so "copr-watch" only starts a separate workflow
+# (copr-watch.yml) that follows COPR's build and attaches the RPMs by itself.
 #
 # "wait-for-ci" waits until CI has passed for the tagged commit, so you can
 # push commits and the tag together; if CI fails, nothing is changed.
@@ -72,7 +78,7 @@ jobs:
         run: bash .github/scripts/prepare-release.sh
 
   build-tarball:
-    name: Test + build binary tarball
+    name: Build binary tarball
     needs: prepare
     # Oldest supported Ubuntu LTS, so the binary runs on older distros too.
     runs-on: ubuntu-22.04
@@ -90,11 +96,14 @@ jobs:
         with:
           toolchain: stable
 
+      # A release runs on a tag, and a tag can never read an earlier tag's cache, so
+      # saving one here only fills GitHub's 10 GB cache storage.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          save-if: false
 
-      - name: Run tests
-        run: cargo test --locked
-
+      # No `cargo test` here: CI already ran the tests on this code, and the
+      # release waits for CI to pass first (the wait-for-ci job).
       - name: Build release binary
         run: cargo build --release --locked
 
@@ -150,7 +159,11 @@ jobs:
         with:
           toolchain: stable
 
+      # A release runs on a tag, and a tag can never read an earlier tag's cache, so
+      # saving one here only fills GitHub's 10 GB cache storage.
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          save-if: false
 
       - name: Build AppImage
         run: |
@@ -200,6 +213,97 @@ jobs:
           path: dist/Archtoys-*-x86_64.AppImage
           if-no-files-found: error
 
+  # OPTIONAL. If anything in here fails, the release is still published and the
+  # report says only the .deb is missing. Every step has its own name because
+  # the failure report explains each one.
+  build-deb:
+    name: Build + test the .deb (optional)
+    needs: prepare
+    # Oldest supported Ubuntu LTS, so one .deb works on Ubuntu 22.04+ and Debian 12+.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      # A release runs on a tag, and a tag can never read an earlier tag's cache, so
+      # saving one here only fills GitHub's 10 GB cache storage.
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          save-if: false
+
+      - name: Install the packaging tool
+        run: cargo install cargo-deb --locked --version 3.8.0
+
+      - name: Build the app
+        run: cargo build --release --locked
+
+      # Same rule as the other builds: nothing newer than Ubuntu 22.04's glibc.
+      - name: Check required glibc (max 2.35)
+        run: |
+          NEED="$(objdump -T target/release/archtoys | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -uV | tail -n 1)"
+          echo "Binary requires glibc $NEED"
+          if [ "$(printf '%s\n' "$NEED" 2.35 | sort -V | tail -n 1)" != "2.35" ]; then
+            echo "::error::Binary needs glibc $NEED, newer than 2.35 (Ubuntu 22.04)."
+            exit 1
+          fi
+
+      - name: Create the .deb
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          cargo deb --no-build --deb-revision "" --output "archtoys_${VERSION}_amd64.deb"
+          ls -la archtoys_*.deb
+
+      - name: Check dependencies and files
+        run: bash .github/scripts/check-deb.sh archtoys_*.deb
+
+      # A clean Ubuntu with nothing installed, like a new user's machine.
+      - name: Install on a clean Ubuntu
+        run: |
+          docker run -d --name clean ubuntu:22.04 sleep 3600
+          docker cp archtoys_*.deb clean:/tmp/archtoys.deb
+          docker exec clean bash -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/archtoys.deb xvfb'
+
+      # The installed app must still be running after 10 seconds, like the
+      # AppImage smoke test.
+      - name: Start the installed app
+        run: |
+          docker exec clean bash -c '
+            export HOME="$(mktemp -d)"
+            Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 &
+            sleep 2
+            DISPLAY=:99 archtoys > /tmp/smoke.log 2>&1 &
+            APP=$!
+            sleep 10
+            if kill -0 "$APP" 2>/dev/null; then
+              echo "The installed app is still running after 10 s: OK"
+            else
+              echo "::error::The installed app exited within 10 seconds. Its output:"
+              cat /tmp/smoke.log
+              exit 1
+            fi
+            cat /tmp/smoke.log'
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f clean || true
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deb
+          path: archtoys_*.deb
+          if-no-files-found: error
+
   # The only job that creates/edits the GitHub release, so two jobs can never
   # race to create it.
   publish-release:
@@ -224,27 +328,47 @@ jobs:
           files: artifacts/*
           fail_on_unmatched_files: true
 
-  # Starts COPR's build once the release commit and tag exist. (A GitHub
-  # webhook would fire on the tag push, before the version is bumped.)
+  # OPTIONAL. Adds the .deb to the release once it exists. Skipped when the
+  # .deb failed to build.
+  attach-deb:
+    name: Attach the .deb to the release (optional)
+    needs: [publish-release, build-deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: deb
+          path: deb
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" deb/*.deb --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Starts COPR's build once the release commit and tag exist. It first looks
+  # at COPR's queue: a build of this release that is already queued or running
+  # (for example you pressed Rebuild yourself) means no second build is sent, and
+  # an older build still in the queue is named in the summary.
   trigger-copr:
     name: Start COPR build
     needs: prepare
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - name: Call COPR custom webhook
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Check COPR's queue, then send the webhook
         env:
           COPR_WEBHOOK_URL: ${{ secrets.COPR_WEBHOOK_URL }}
-        run: |
-          if [ -z "$COPR_WEBHOOK_URL" ]; then
-            echo "::error::Secret COPR_WEBHOOK_URL is missing (Settings -> Secrets and variables -> Actions)."
-            exit 1
-          fi
-          CODE="$(curl -sS -o response.txt -w '%{http_code}' -X POST "$COPR_WEBHOOK_URL")"
-          echo "COPR answered HTTP $CODE: $(head -c 300 response.txt)"
-          case "$CODE" in
-            2*) echo "COPR build started." ;;
-            *)  echo "::error::COPR did not accept the webhook (HTTP $CODE). Check the COPR_WEBHOOK_URL secret."; exit 1 ;;
-          esac
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: python3 .github/scripts/copr_watch.py trigger
 
   aur-bin:
     name: Deploy archtoys-bin to AUR
@@ -306,21 +430,31 @@ jobs:
           # test: true
           # test_flags: --clean --cleanbuild --syncdeps --noconfirm
 
-  rpms:
-    name: Attach COPR RPMs
+  # Hands the RPMs over to the COPR watcher, a separate workflow: COPR can queue
+  # for hours, and waiting in here would keep this whole run open.
+  copr-watch:
+    name: Start the COPR watcher
     needs: [prepare, publish-release, trigger-copr]
+    runs-on: ubuntu-latest
     permissions:
-      contents: write
-    uses: ./.github/workflows/release-rpm.yml
-    with:
-      tag: ${{ github.ref_name }}
+      actions: write    # start another workflow
+    steps:
+      - name: Start the watcher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          gh workflow run copr-watch.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f tag="$TAG" -f sha="$SHA" -f started="$(date +%s)"
+          echo "COPR watcher started for $TAG. It follows COPR's build, attaches the RPMs by itself, and opens an issue only if COPR needs your attention." >> "$GITHUB_STEP_SUMMARY"
 
   # Always runs last. Writes a summary table on the run page; if anything
   # failed, opens an issue naming the job + step, with the error log.
   report:
     name: Report
     if: always()
-    needs: [wait-for-ci, prepare, build-tarball, build-appimage, publish-release, trigger-copr, aur-bin, aur-source, rpms]
+    needs: [wait-for-ci, prepare, build-tarball, build-appimage, build-deb, publish-release, trigger-copr, aur-bin, aur-source, copr-watch, attach-deb]
     runs-on: ubuntu-latest
     permissions:
       contents: read
