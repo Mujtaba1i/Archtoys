@@ -2,6 +2,10 @@
 name = "archtoys"
 version = "0.3.0"
 edition = "2021"
+description = "System-wide color picker for Linux, inspired by Microsoft PowerToys"
+license = "MIT"
+repository = "https://github.com/Mujtaba1i/Archtoys"
+readme = "README.md"
 
 
 [dependencies]
@@ -20,3 +24,36 @@ url = "2.5.4"
 
 [build-dependencies]
 slint-build = "1.15.0"
+
+# How the .deb is built (cargo-deb). Used by the optional "Build + test the .deb"
+# job of .github/workflows/release.yml. Keep "depends" in step with
+# .github/scripts/check-deb.sh.
+[package.metadata.deb]
+maintainer = "Mujtaba1i <Mujtaba1i@users.noreply.github.com>"
+copyright = "2026, Mujtaba1i"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Archtoys picks any pixel on your screen, shows it magnified, names it, and \
+copies it as HEX, RGB, HSL, HSV and more. It works on Wayland and X11 and is \
+inspired by the Color Picker in Microsoft PowerToys."""
+section = "graphics"
+priority = "optional"
+# $auto = the libraries the program links to; the rest are loaded while it runs.
+depends = "$auto, libxkbcommon0, libxkbcommon-x11-0, libxcursor1, libxi6, libxrender1, libgl1, libegl1, libwayland-client0, libwayland-egl1"
+recommends = "xdg-desktop-portal, hicolor-icon-theme"
+assets = [
+    ["target/release/archtoys", "usr/bin/archtoys", "755"],
+    ["packaging/archtoys.desktop", "usr/share/applications/archtoys.desktop", "644"],
+    ["packaging/archtoys-16.png", "usr/share/icons/hicolor/16x16/apps/archtoys.png", "644"],
+    ["packaging/archtoys-22.png", "usr/share/icons/hicolor/22x22/apps/archtoys.png", "644"],
+    ["packaging/archtoys-24.png", "usr/share/icons/hicolor/24x24/apps/archtoys.png", "644"],
+    ["packaging/archtoys-32.png", "usr/share/icons/hicolor/32x32/apps/archtoys.png", "644"],
+    ["packaging/archtoys-48.png", "usr/share/icons/hicolor/48x48/apps/archtoys.png", "644"],
+    ["packaging/archtoys-64.png", "usr/share/icons/hicolor/64x64/apps/archtoys.png", "644"],
+    ["packaging/archtoys-128.png", "usr/share/icons/hicolor/128x128/apps/archtoys.png", "644"],
+    ["packaging/archtoys-256.png", "usr/share/icons/hicolor/256x256/apps/archtoys.png", "644"],
+    ["packaging/archtoys-512.png", "usr/share/icons/hicolor/512x512/apps/archtoys.png", "644"],
+    ["packaging/archtoys.png", "usr/share/icons/hicolor/1024x1024/apps/archtoys.png", "644"],
+    ["data/colornames-LICENSE.txt", "usr/share/doc/archtoys/colornames-LICENSE.txt", "644"],
+    ["README.md", "usr/share/doc/archtoys/README.md", "644"],
+]
