@@ -43,6 +43,21 @@ BuildRequires:  desktop-file-utils
 
 Requires:       hicolor-icon-theme
 
+# Libraries the app opens by name while it runs (winit and the renderer load
+# them), so rpmbuild cannot see them in the binary. Written as sonames, so the
+# package names do not matter. Without them a minimal install fails to start.
+Requires:       libxkbcommon.so.0()(64bit)
+Requires:       libxkbcommon-x11.so.0()(64bit)
+Requires:       libXcursor.so.1()(64bit)
+Requires:       libXi.so.6()(64bit)
+Requires:       libXrender.so.1()(64bit)
+Requires:       libwayland-client.so.0()(64bit)
+Requires:       libwayland-egl.so.1()(64bit)
+Requires:       libEGL.so.1()(64bit)
+Requires:       libGL.so.1()(64bit)
+Recommends:     xdg-desktop-portal
+Recommends:     mesa-dri-drivers
+
 %description
 Archtoys is a fast, system-wide color picker for Linux, inspired by PowerToys
 Color Picker. It is built to feel native on KDE Plasma and targets both Wayland
