@@ -32,6 +32,7 @@ from pathlib import Path
 ACTIVE = {"pending", "starting", "running", "importing", "waiting"}
 GOOD = {"succeeded", "forked"}
 RELAY_WORKFLOW = "copr-watch.yml"
+CHECK_WORKFLOW = "package-check.yml"
 
 
 class Cfg:
@@ -465,6 +466,17 @@ def dispatch_next(cfg, sha):
     gh(args)
 
 
+def start_package_check(cfg):
+    """Every package exists now, so test them on clean systems."""
+    try:
+        gh(["workflow", "run", CHECK_WORKFLOW, "--repo", cfg.repo, "--ref", os.environ.get("RELAY_REF", "main"),
+            "-f", f"tag={cfg.tag}"])
+        summary(f"Started the package check for {cfg.tag}.")
+    except GhError as err:
+        summary(f"Could not start the package check ({err}). Run **Actions, Package check, Run workflow** "
+                f"with `{cfg.tag}`.")
+
+
 def watch(cfg):
     run_start = time.time()
     issue = Issue(cfg)
@@ -541,6 +553,7 @@ def watch(cfg):
                                         f"as a reminder. After a good rebuild, run **Actions, COPR watcher, "
                                         f"Run workflow** with `{cfg.tag}` to attach it and close this."})
                     summary(f"Required RPMs for {cfg.tag} are attached; optional missing: {missing}.")
+                start_package_check(cfg)
                 return 0
 
             states = ", ".join(f"{n}={c['kind']}" for n, c in sorted(chroots.items())) or "no build yet"
