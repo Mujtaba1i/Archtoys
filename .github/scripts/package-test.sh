@@ -125,7 +125,7 @@ start() {
   cat /tmp/second.log
   local copies=0 dir name
   for dir in /proc/[0-9]*; do
-    name = "$(cat "$dir/comm" 2>/dev/null || true)"
+    name="$(cat "$dir/comm" 2>/dev/null || true)"
     case "$name" in
         archtoys|archtoys-bin) copies=$((copies + 1));;
     esac
