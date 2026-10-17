@@ -123,9 +123,12 @@ start() {
   # One copy at a time: a second launch must end by itself and leave exactly one.
   timeout 30 "${app[@]}" > /tmp/second.log 2>&1 || { cat /tmp/second.log; fail "a second launch did not end by itself"; }
   cat /tmp/second.log
-  local copies=0 dir
+  local copies=0 dir name
   for dir in /proc/[0-9]*; do
-    [ "$(cat "$dir/comm" 2>/dev/null)" = archtoys ] && copies=$((copies + 1))
+    name = "$(cat "$dir/comm" 2>/dev/null || true)"
+    case "$name" in
+        archtoys|archtoys-bin) copies=$((copies + 1));;
+    esac
   done
   [ "$copies" = 1 ] || fail "after a second launch $copies copies of archtoys are running; it must be exactly 1"
   echo "A second launch left exactly one copy running: OK"
