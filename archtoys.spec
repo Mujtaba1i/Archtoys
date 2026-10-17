@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.3.2
+Version:        0.3.3
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -139,6 +139,11 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Sat Oct 17 2026 Mujtaba1i <mujtaba1i@github> - 0.3.3-1
+- The Fedora package now requires the libraries Archtoys loads while it runs
+- Say so when no fonts or no browser are available, and keep the AppImage's libraries away from the browser
+- Package checks now confirm a window appears and a second launch leaves one copy
+
 * Sat Oct 17 2026 Mujtaba1i <mujtaba1i@github> - 0.3.2-1
 - fixed a bug with copr watcher in the CI
 - new testing and releasing methods
