@@ -1,0 +1,101 @@
+# Installs the published packages of a release on clean systems and starts the
+# app, so a package that cannot be installed is found by us before a user
+# finds it. Each channel and distro is its own job, so one broken channel never
+# hides the others.
+#
+# Started by the COPR watcher once every package exists. You can also run it by
+# hand: Actions, Package check, Run workflow, enter the tag.
+#
+# A package that fails to install points to the pipeline; one that installs but
+# does not start points to the app. It cannot test Wayland behaviour (the
+# screenshot permission, the hotkey, the freeze frame): it only proves that
+# each package installs and starts. One issue per release says what failed; a
+# later run that passes closes it.
+
+name: Package check
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to check, for example v0.3.2"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-check-${{ inputs.tag }}
+  cancel-in-progress: true
+
+env:
+  TAG: ${{ inputs.tag }}
+
+jobs:
+  plan:
+    name: List the packages to check
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MATRIX="$(python3 .github/scripts/package_check.py plan)"
+          echo "$MATRIX"
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  check:
+    name: ${{ matrix.name }}
+    needs: plan
+    runs-on: ubuntu-latest
+    # The rpm job waits up to 15 minutes for COPR's repository, and the AUR
+    # source package compiles for about 15 minutes.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Start a clean container
+        run: |
+          docker run -d --name clean -e VERSION="${TAG#v}" -e REPO="$GITHUB_REPOSITORY" \
+            -v "$PWD/.github/scripts:/scripts:ro" "${{ matrix.image }}" sleep 7200
+
+      - name: Install the package
+        run: docker exec clean bash /scripts/package-test.sh install "${{ matrix.channel }}"
+
+      - name: Start the app
+        run: docker exec clean bash /scripts/package-test.sh start "${{ matrix.channel }}"
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f clean || true
+
+  report:
+    name: Report
+    if: always()
+    needs: [plan, check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read     # read the failed jobs' logs
+      issues: write     # open / close the issue
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Summarise and report failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/package_check.py report
