@@ -2,11 +2,13 @@ slint::include_modules!();
 
 mod color;
 mod config;
+mod diagnostics;
 mod formats;
 mod hotkey;
 mod names;
 mod picker;
 mod portal;
+mod single_instance;
 mod tray;
 mod ui_state;
 
@@ -18,6 +20,7 @@ use picker::{start_picker, PickerSource};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use ui_state::{
     clear_input_error, committed_rgb, copy_text_async, current_rgb, push_history, show_input_error,
     show_message, sync_history_model, update_ui_colors, update_ui_preview_except_field,
@@ -48,8 +51,49 @@ fn apply_hidden_startup_state(ui: &AppWindow) {
     });
 }
 
+/// Shows the window in any state (tray, minimized, behind others, another
+/// desktop). Where the desktop refuses to raise it, the taskbar entry flashes.
+fn bring_to_front(ui: &AppWindow) {
+    use slint::winit_030::{winit, WinitWindowAccessor};
+
+    if picker::PICKER_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) {
+        return; // a pick in progress wins
+    }
+    ui.window().show().ok();
+    ui.window().with_winit_window(|window| {
+        window.set_minimized(false);
+        window.focus_window();
+    });
+    let ui_weak = ui.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(300), move || {
+        let Some(ui) = ui_weak.upgrade() else { return };
+        ui.window().with_winit_window(|window| {
+            if !window.has_focus() {
+                window.request_user_attention(Some(winit::window::UserAttentionType::Informational));
+            }
+        });
+    });
+}
+
 fn main() -> Result<(), slint::PlatformError> {
-    let start_hidden = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
+    let autostart = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
+    let pick_now = std::env::args().any(|arg| arg == "--pick");
+
+    let _instance_lock = match single_instance::acquire() {
+        single_instance::Lock::TakenByAnother => {
+            // An autostart launch while a copy is running exits quietly.
+            if !autostart {
+                let method = if pick_now { "Pick" } else { "Show" };
+                if let Err(err) = single_instance::send(method) {
+                    eprintln!("Archtoys is already running, but it didn't answer: {err}");
+                }
+            }
+            return Ok(());
+        }
+        lock => lock,
+    };
+    // `archtoys --pick` with no copy running starts in the tray and picks, like the hotkey.
+    let start_hidden = autostart || pick_now;
 
     let ui = AppWindow::new()?;
 
@@ -109,14 +153,30 @@ fn main() -> Result<(), slint::PlatformError> {
         Arc::new(move |status: HotkeyStatus| {
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(move |ui| match status {
                 HotkeyStatus::SystemManaged(description) => {
+                    diagnostics::set_hotkey("desktop portal (GlobalShortcuts)");
                     ui.set_hotkey_system_managed(true);
                     ui.set_hotkey_display(description.into());
                 }
-                HotkeyStatus::AppManaged => ui.set_hotkey_system_managed(false),
+                HotkeyStatus::AppManaged => {
+                    diagnostics::set_hotkey("X11 (global-hotkey)");
+                    ui.set_hotkey_system_managed(false);
+                }
             });
         })
     };
-    let (hotkey_service, hotkey_text) = HotkeyService::start(&ui.get_setting_hotkey(), trigger, on_status);
+    let (hotkey_service, hotkey_text) = HotkeyService::start(&ui.get_setting_hotkey(), trigger.clone(), on_status);
+
+    // Later launches ask this copy to show itself, or to pick (`--pick`).
+    let show: hotkey::Trigger = {
+        let ui_weak = Mutex::new(ui_handle.clone());
+        Arc::new(move || {
+            let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| bring_to_front(&ui));
+        })
+    };
+    let _remote = single_instance::serve(show, trigger.clone());
+    if pick_now {
+        trigger();
+    }
     let hotkey_service = Rc::new(hotkey_service);
     let active_hotkey_text = Rc::new(RefCell::new(hotkey_text.clone()));
     ui.set_setting_hotkey(hotkey_text.into());
@@ -171,6 +231,8 @@ fn main() -> Result<(), slint::PlatformError> {
             start_picker(&ui, pick_history.clone(), PickerSource::Button);
         }
     });
+
+    ui.on_report_problem(diagnostics::open_issue_page);
 
     ui.on_copy_to_clipboard(move |text| {
         // near names are shown as "≈ Name"; copy just the name

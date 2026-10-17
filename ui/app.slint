@@ -1,4 +1,4 @@
-import { Button, VerticalBox, HorizontalBox, ScrollView, LineEdit, CheckBox, Slider } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, ScrollView, LineEdit, CheckBox, Slider } from "std-widgets.slint";
 
 // --- Global Theme Palettes ---
 // One row in the main window (HEX, RGB, NAME, ...).
@@ -83,6 +83,32 @@ component SettingsButton inherits Rectangle {
         }
     }
     touch := TouchArea { clicked => { root.clicked() } }
+}
+
+// --- Text button in the app's theme (std Button follows the system theme
+// instead of Dark Mode, so its text could be white on white) ---
+component SkinButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+
+    height: 32px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Skin.border;
+    background: touch.pressed ? Skin.border : touch.has-hover ? Skin.bg-color : Skin.content-bg;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: Skin.text-main;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
 }
 
 // --- The "Pick" Button ---
@@ -468,6 +494,7 @@ export component AppWindow inherits Window {
     callback cancel-pick();
     callback open-hotkey-settings();
     callback clear-history();
+    callback report-problem();
 
     // Esc cancels a pick while this window has the keyboard.
     pick-scope := FocusScope {
@@ -823,7 +850,7 @@ export component AppWindow inherits Window {
                             horizontal-alignment: left;
                             vertical-alignment: center;
                         }
-                        if !root.hotkey-system-managed : Button {
+                        if !root.hotkey-system-managed : SkinButton {
                             text: root.setting-hotkey-recording ? "Press keys..." : root.setting-hotkey;
                             clicked => {
                                 root.setting-hotkey-recording = true;
@@ -838,7 +865,7 @@ export component AppWindow inherits Window {
                                 font-weight: 600;
                                 wrap: word-wrap;
                             }
-                            Button {
+                            SkinButton {
                                 text: "Change in System Settings";
                                 clicked => { root.open-hotkey-settings(); }
                             }
@@ -856,11 +883,41 @@ export component AppWindow inherits Window {
                         background: Skin.border;
                     }
 
-                    Button {
+                    SkinButton {
                         text: "Clear History";
                         height: 32px;
                         horizontal-stretch: 1;
                         clicked => { root.clear-history(); }
+                    }
+
+                    // Opens GitHub's new-issue page with the details filled in.
+                    Rectangle {
+                        height: 32px;
+                        border-radius: 4px;
+                        background: report-touch.pressed ? #b02a2a : report-touch.has-hover ? #c43030 : #d93636;
+                        accessible-role: button;
+                        accessible-label: "Report a problem";
+                        accessible-action-default => { root.report-problem(); }
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    source: @image-url("report.svg");
+                                    width: 16px;
+                                    height: 16px;
+                                    colorize: #ffffff;
+                                }
+                            }
+                            Text {
+                                text: "Report a problem";
+                                color: #ffffff;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                        report-touch := TouchArea { clicked => { root.report-problem(); } }
                     }
                 }
             }

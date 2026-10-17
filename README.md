@@ -104,16 +104,19 @@ The AppImage runs on any distribution from Ubuntu 22.04 onwards, or anything equ
 | Use a lighter/darker shade | Click it in the shade bar |
 | Reuse an old color | Click it in the history row |
 | Change the hotkey, theme, startup… | The ⚙ settings button (on Wayland, the hotkey opens your desktop's shortcut settings) |
+| Pick from a terminal or a custom shortcut | `archtoys --pick` (starts Archtoys if it isn't running) |
+| Report a problem | **Report a problem** in the ⚙ settings |
 
 ## Desktop support
 
 | | KDE Plasma (Wayland) | GNOME (Wayland) | X11 (any desktop) |
 |---|:---:|:---:|:---:|
 | Picker with live preview and magnifier | ✅ freeze frame | ✅ freeze frame | ✅ live |
-| Global hotkey | ✅ | ✅ GNOME 48+ · ⚠️ older: limited | ✅ |
+| Global hotkey | ✅ | ✅ GNOME 48+ · ⚠️ older: use `archtoys --pick`² | ✅ |
 | Tray icon | ✅ | ✅ with the AppIndicator extension¹ | ✅ |
 
-¹ Ubuntu enables it by default. On other GNOME setups, install the *AppIndicator and KStatusNotifierItem Support* extension.
+¹ Ubuntu enables it by default. On other GNOME setups, install the *AppIndicator and KStatusNotifierItem Support* extension.<br>
+² GNOME before 48 (including Ubuntu 22.04 and 24.04) can't register a global hotkey. Add your own instead: **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts**, with the command `archtoys --pick`.
 
 **How picking works on Wayland:** Wayland doesn't let apps watch the screen, which is good for your privacy. So when you start picking, Archtoys asks your desktop for **one screenshot** and shows it fullscreen while you choose. That's why moving content like videos pauses during a pick. The screenshot is deleted from disk as soon as it has been loaded, and nothing is ever saved.
 
@@ -145,7 +148,9 @@ The freeze frame currently supports one monitor. With several, Archtoys falls ba
 <details>
 <summary><b>Something else is wrong</b></summary>
 
-Run `archtoys` from a terminal. It prints which picker and hotkey method it's using, and why it fell back if it did. Please include that output when you [open an issue](https://github.com/Mujtaba1i/Archtoys/issues).
+Open the ⚙ settings and click **Report a problem**. It opens a new GitHub issue with your version, distro, desktop and the picker and hotkey methods already filled in, so you only describe what's broken. Archtoys sends nothing itself, and no file paths, user names or colors are included.
+
+Running `archtoys` from a terminal also prints which picker and hotkey method it's using, and why it fell back if it did.
 </details>
 
 ## Building from source
@@ -185,7 +190,9 @@ src/
 ├── color.rs         color formats, parsing, shades (unit-tested)
 ├── formats.rs       which formats are shown, their order, Auto Copy
 ├── names.rs         color names (CSS names + data/colornames.csv)
-├── config.rs        settings and autostart
+├── config.rs        settings (saved safely) and autostart
+├── single_instance.rs  one copy at a time, archtoys --pick
+├── diagnostics.rs   Report a problem
 ├── ui_state.rs      updating the main window
 ├── tray.rs          tray icon
 ├── portal.rs        talking to the desktop portal
