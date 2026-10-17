@@ -142,7 +142,9 @@ pub(super) fn open_desktop_shortcut_settings() {
         &[&["systemsettings", "kcm_keys"], &["gnome-control-center", "keyboard"]]
     };
     for cmd in attempts {
-        if std::process::Command::new(cmd[0]).args(&cmd[1..]).spawn().is_ok() {
+        let mut command = crate::launch::outside_command(cmd[0]);
+        command.args(&cmd[1..]);
+        if crate::launch::spawn_and_reap(command).is_ok() {
             return;
         }
     }

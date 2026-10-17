@@ -8,7 +8,7 @@
 
 use crate::hotkey::Trigger;
 use std::fs::{File, TryLockError};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 use zbus::blocking::Connection;
@@ -25,11 +25,26 @@ pub enum Lock {
     Unavailable,
 }
 
+fn user_id() -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata("/proc/self").map(|m| m.uid()).unwrap_or(0)
+}
+
+fn lock_path() -> PathBuf {
+    match std::env::var_os("XDG_RUNTIME_DIR") {
+        Some(dir) => PathBuf::from(dir).join("archtoys.lock"),
+        // No private runtime folder: /tmp is shared by every user, so the
+        // user id is part of the name and users never lock each other out.
+        None => std::env::temp_dir().join(format!("archtoys-{}.lock", user_id())),
+    }
+}
+
 pub fn acquire() -> Lock {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let file = match File::options().create(true).truncate(false).write(true).open(dir.join("archtoys.lock")) {
+    acquire_at(&lock_path())
+}
+
+fn acquire_at(path: &Path) -> Lock {
+    let file = match File::options().create(true).truncate(false).write(true).open(path) {
         Ok(file) => file,
         Err(err) => {
             eprintln!("single instance: can't open the lock file: {err}");
@@ -58,6 +73,28 @@ pub fn send(method: &str) -> Result<(), String> {
             Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(100)),
             Err(err) => return Err(err.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_launch_finds_the_lock_taken_until_the_first_one_ends() {
+        let path = std::env::temp_dir().join(format!("archtoys-lock-test-{}.lock", std::process::id()));
+        let first = acquire_at(&path);
+        assert!(matches!(first, Lock::Held(_)));
+        assert!(matches!(acquire_at(&path), Lock::TakenByAnother));
+        drop(first); // the first copy ends: the system frees the lock
+        assert!(matches!(acquire_at(&path), Lock::Held(_)));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn without_a_runtime_folder_the_name_carries_the_user_id() {
+        let name = std::env::temp_dir().join(format!("archtoys-{}.lock", user_id()));
+        assert!(name.to_string_lossy().contains("archtoys-"));
     }
 }
 

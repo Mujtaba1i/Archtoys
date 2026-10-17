@@ -42,6 +42,9 @@ cat > "${APPDIR}/AppRun" <<'SH'
 #!/usr/bin/env sh
 HERE="$(dirname "$(readlink -f "$0")")"
 export PATH="${HERE}/usr/bin:${PATH}"
+# Programs the app starts (a browser) must not load our bundled libraries. The
+# app hands them back the library path this AppImage was started with.
+if [ "${LD_LIBRARY_PATH+set}" = set ]; then export ARCHTOYS_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH}"; fi
 # Bundled libraries in usr/lib are loaded at runtime (dlopen) by winit.
 export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 exec "${HERE}/usr/bin/archtoys" "$@"
