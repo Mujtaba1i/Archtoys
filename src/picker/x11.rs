@@ -397,6 +397,7 @@ pub(super) fn start_freeze(
             }
             Err(err) => {
                 eprintln!("freeze picker: {err}; using the live picker");
+                crate::diagnostics::set_picker("live (X11)");
                 start(ui_weak, history_store, context);
             }
         });

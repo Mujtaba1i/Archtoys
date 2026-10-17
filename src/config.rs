@@ -8,8 +8,8 @@ use crate::{AppWindow, Skin};
 use serde::{Deserialize, Serialize};
 use slint::ComponentHandle;
 use std::fs;
-use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 pub type HistoryStore = Arc<Mutex<Vec<Rgb>>>;
@@ -111,12 +111,22 @@ fn save_config(cfg: &AppConfig) {
     }
     match serde_json::to_string_pretty(cfg) {
         Ok(data) => {
-            if let Err(err) = fs::write(path, data) {
+            if let Err(err) = write_atomic(&path, data.as_bytes()) {
                 eprintln!("config: write failed: {err:?}");
             }
         }
         Err(err) => eprintln!("config: serialize failed: {err:?}"),
     }
+}
+
+/// Writes a temporary file next to `path`, then renames it over `path`, so a
+/// crash or power cut mid-save leaves either the old file or the new one.
+fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    let mut file = fs::File::create(&tmp)?;
+    file.write_all(data)?;
+    file.sync_all()?;
+    fs::rename(&tmp, path)
 }
 
 fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
@@ -162,4 +172,25 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
 
 pub fn persist_config(ui: &AppWindow, history_store: &HistoryStore) {
     save_config(&snapshot_config(ui, history_store));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atomic_write_replaces_the_file_and_leaves_no_temp_file() {
+        let dir = std::env::temp_dir().join(format!("archtoys-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        fs::write(&path, "old").unwrap();
+        // A save that died after writing the temp file must not touch the real one.
+        fs::write(path.with_extension("json.tmp"), "half-writ").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "old");
+
+        write_atomic(&path, b"{\"dark_mode\":true}").unwrap();
+        assert!(serde_json::from_str::<AppConfig>(&fs::read_to_string(&path).unwrap()).unwrap().dark_mode);
+        assert!(!path.with_extension("json.tmp").exists());
+        fs::remove_dir_all(&dir).ok();
+    }
 }

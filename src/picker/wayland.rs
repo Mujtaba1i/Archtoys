@@ -87,10 +87,12 @@ fn start_legacy(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore, co
 }
 
 fn run_legacy(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore, context: PickerContext) {
+    crate::diagnostics::set_picker("KWin's picker");
     let result = match pick_color_via_kwin() {
         Ok(picked) => Ok(picked),
         Err(kwin_err) => {
             eprintln!("wayland picker: kwin picker unavailable ({kwin_err}), trying portal");
+            crate::diagnostics::set_picker("the portal's picker");
             pick_color_via_portal()
         }
     };

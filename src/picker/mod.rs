@@ -14,6 +14,7 @@ mod x11;
 
 use crate::color::Rgb;
 use crate::config::HistoryStore;
+use crate::diagnostics;
 use crate::ui_state::{apply_selected_color, current_rgb, update_ui_colors};
 use crate::AppWindow;
 use slint::ComponentHandle;
@@ -96,11 +97,18 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
 
     match detect_session_type() {
         SessionType::Wayland if force_system => wayland::start_system(ui_weak, history_store, context),
-        SessionType::Wayland => wayland::start(ui_weak, history_store, context, hid_window),
+        SessionType::Wayland => {
+            diagnostics::set_picker("freeze frame (Wayland)");
+            wayland::start(ui_weak, history_store, context, hid_window)
+        }
         SessionType::X11 | SessionType::Unknown if force_freeze => {
+            diagnostics::set_picker("freeze frame (X11)");
             x11::start_freeze(ui_weak, history_store, context, hid_window)
         }
-        SessionType::X11 | SessionType::Unknown => x11::start(ui_weak, history_store, context),
+        SessionType::X11 | SessionType::Unknown => {
+            diagnostics::set_picker("live (X11)");
+            x11::start(ui_weak, history_store, context)
+        }
     }
 }
 
