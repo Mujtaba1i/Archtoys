@@ -3,6 +3,8 @@
 # every 2 minutes. One run lasts under an hour; if COPR is still busy it starts
 # a fresh run for the same tag, up to 7 hours in total.
 #
+# When every RPM is attached it starts package-check.yml.
+#
 # Started by release.yml. You can also run it by hand (Actions, COPR watcher,
 # Run workflow, enter the tag) after you rebuilt something on COPR.
 #
