@@ -27,15 +27,18 @@ pkgs() {
 # Libraries the AppImage expects the host to have (see packaging/build-appimage.sh).
 appimage_host_libs() {
   case "$ID" in
-    ubuntu|debian) pkgs curl ca-certificates xvfb libgl1 libegl1 libgl1-mesa-dri libfontconfig1 libx11-6 libx11-xcb1 libxcb1 libwayland-client0 ;;
-    fedora) pkgs curl xorg-x11-server-Xvfb mesa-libGL mesa-libEGL mesa-dri-drivers fontconfig libX11 libX11-xcb libxcb libwayland-client ;;
-    arch) pkgs curl xorg-server-xvfb libglvnd mesa fontconfig libx11 libxcb wayland ;;
+    ubuntu|debian) pkgs curl ca-certificates xvfb xdotool libgl1 libegl1 libgl1-mesa-dri libfontconfig1 libx11-6 libx11-xcb1 libxcb1 libwayland-client0 ;;
+    fedora) pkgs curl xorg-x11-server-Xvfb xdotool mesa-libGL mesa-libEGL mesa-dri-drivers fontconfig libX11 libX11-xcb libxcb libwayland-client ;;
+    # Arch's fontconfig brings no fonts; a real desktop always has some.
+    arch) pkgs curl xorg-server-xvfb xdotool libglvnd mesa fontconfig ttf-dejavu libx11 libxcb wayland ;;
   esac
 }
 
 aur_install() {
   local name="$1"
-  pkgs base-devel git sudo xorg-server-xvfb
+  # base-devel and git build the package. The rest is what a desktop supplies
+  # (a display, fonts, OpenGL), not something the package itself must pull in.
+  pkgs base-devel git sudo xorg-server-xvfb xdotool ttf-dejavu mesa
   id builder >/dev/null 2>&1 || useradd -m builder
   echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
   sudo -u builder git clone -q "https://aur.archlinux.org/$name.git" "/home/builder/$name"
@@ -48,7 +51,9 @@ aur_install() {
 
 rpm_install() {
   # dnf-command(copr) is dnf5-plugins on new Fedora, dnf-plugins-core on old
-  pkgs 'dnf-command(copr)' xorg-x11-server-Xvfb
+  # The display, xdotool and the OpenGL driver are what a desktop supplies; the
+  # libraries the app needs must come from the package itself.
+  pkgs 'dnf-command(copr)' xorg-x11-server-Xvfb xdotool mesa-dri-drivers
   dnf copr enable -y mujtaba1i/archtoys
   # COPR needs a little time to publish a build; wait until dnf sees it.
   for i in $(seq 1 30); do
@@ -72,7 +77,7 @@ install() {
         || fail "could not download Archtoys-$VERSION-x86_64.AppImage from the release"
       chmod +x /opt/archtoys.AppImage ;;
     deb)
-      pkgs curl ca-certificates xvfb
+      pkgs curl ca-certificates xvfb xdotool
       curl -fsSL -o /tmp/archtoys.deb "$url/archtoys_${VERSION}_amd64.deb" \
         || fail "could not download archtoys_${VERSION}_amd64.deb from the release"
       apt-get install -y -qq /tmp/archtoys.deb
@@ -90,19 +95,41 @@ start() {
     export APPIMAGE_EXTRACT_AND_RUN=1  # containers have no FUSE
     app=(/opt/archtoys.AppImage)
   fi
-  export HOME="$(mktemp -d)"
+  HOME="$(mktemp -d)"
+  export HOME DISPLAY=:99
   Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 &
   sleep 2
-  DISPLAY=:99 "${app[@]}" > /tmp/smoke.log 2>&1 &
+  "${app[@]}" > /tmp/smoke.log 2>&1 &
   local pid=$!
-  sleep 10
-  if kill -0 "$pid" 2>/dev/null; then
-    echo "The app is still running after 10 s: OK"
-    cat /tmp/smoke.log
-  else
+
+  # A window must appear: running is not enough, the app could hang before drawing.
+  local window=""
+  for _ in $(seq 1 20); do
+    window="$(xdotool search --name '^Archtoys$' 2>/dev/null | head -n 1 || true)"
+    [ -n "$window" ] && break
+    sleep 0.5
+  done
+  sleep 8   # about 10 s in total
+  if ! kill -0 "$pid" 2>/dev/null; then
     cat /tmp/smoke.log
     fail "the installed app exited within 10 seconds (its output is above)"
   fi
+  if [ -z "$window" ]; then
+    cat /tmp/smoke.log
+    fail "the app is running but no window titled Archtoys appeared (its output is above)"
+  fi
+  echo "The app is running with its window after 10 s: OK"
+
+  # One copy at a time: a second launch must end by itself and leave exactly one.
+  timeout 30 "${app[@]}" > /tmp/second.log 2>&1 || { cat /tmp/second.log; fail "a second launch did not end by itself"; }
+  cat /tmp/second.log
+  local copies=0 dir
+  for dir in /proc/[0-9]*; do
+    [ "$(cat "$dir/comm" 2>/dev/null)" = archtoys ] && copies=$((copies + 1))
+  done
+  [ "$copies" = 1 ] || fail "after a second launch $copies copies of archtoys are running; it must be exactly 1"
+  echo "A second launch left exactly one copy running: OK"
+  cat /tmp/smoke.log
 }
 
 case "$cmd" in

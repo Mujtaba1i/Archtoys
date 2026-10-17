@@ -63,8 +63,9 @@ ADVICE = {
         "Check the COPR project and any open \"COPR needs attention\" issue. A dnf dependency error means "
         "archtoys.spec needs fixing; then release the next patch version."),
     START: (
-        "The package installs but the app exits within 10 seconds. This points to the app: a crash, or a "
-        "library it loads at run time that the package does not pull in.",
+        "The package installs but the app does not start properly: it exits within 10 seconds, no window "
+        "appears, or a second launch leaves two copies running. This points to the app: a crash, a library "
+        "it loads at run time that the package does not pull in, or the one-copy lock.",
         "Read the app's output in the log. Add a missing library to that package's dependencies, or fix the "
         "crash, then release the next patch version."),
 }
