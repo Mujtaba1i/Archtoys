@@ -5,6 +5,7 @@ mod config;
 mod diagnostics;
 mod formats;
 mod hotkey;
+mod launch;
 mod names;
 mod picker;
 mod portal;
@@ -75,7 +76,25 @@ fn bring_to_front(ui: &AppWindow) {
     });
 }
 
+/// With no font installed at all, the text library panics deep inside. Say
+/// what is wrong and how to fix it instead.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info.location().is_some_and(|l| l.file().contains("fontique")) {
+            eprintln!(
+                "Archtoys can't find any fonts. Install one, for example DejaVu Sans \
+                 (ttf-dejavu on Arch, fonts-dejavu-core on Debian and Ubuntu, \
+                 dejavu-sans-fonts on Fedora), and start it again."
+            );
+            std::process::exit(1);
+        }
+        default_hook(info);
+    }));
+}
+
 fn main() -> Result<(), slint::PlatformError> {
+    install_panic_hook();
     let autostart = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
     let pick_now = std::env::args().any(|arg| arg == "--pick");
 
@@ -232,7 +251,15 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    ui.on_report_problem(diagnostics::open_issue_page);
+    let report_ui = ui_handle.clone();
+    ui.on_report_problem(move || {
+        if let Err(err) = diagnostics::open_issue_page() {
+            eprintln!("report: couldn't open the browser: {err}");
+            if let Some(ui) = report_ui.upgrade() {
+                show_message(&ui, "No browser found. Report at github.com/Mujtaba1i/Archtoys/issues");
+            }
+        }
+    });
 
     ui.on_copy_to_clipboard(move |text| {
         // near names are shown as "≈ Name"; copy just the name

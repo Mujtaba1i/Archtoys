@@ -67,11 +67,11 @@ pub fn issue_url() -> String {
         .unwrap_or_else(|_| base.to_string())
 }
 
-pub fn open_issue_page() {
-    // The app sends nothing itself; the browser opens a link.
-    if let Err(err) = std::process::Command::new("xdg-open").arg(issue_url()).spawn() {
-        eprintln!("report: couldn't open the browser: {err}");
-    }
+/// Opens the report page in the browser. The app sends nothing itself.
+pub fn open_issue_page() -> std::io::Result<()> {
+    let mut command = crate::launch::outside_command("xdg-open");
+    command.arg(issue_url());
+    crate::launch::spawn_and_reap(command)
 }
 
 #[cfg(test)]
