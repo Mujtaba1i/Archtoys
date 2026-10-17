@@ -41,7 +41,16 @@ aur_install() {
   pkgs base-devel git sudo xorg-server-xvfb xdotool ttf-dejavu mesa
   id builder >/dev/null 2>&1 || useradd -m builder
   echo "builder ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/builder
-  sudo -u builder git clone -q "https://aur.archlinux.org/$name.git" "/home/builder/$name"
+  local n
+  for n in 1 2 3 4 5; do
+    rm -rf "/home/builder/$name"
+    if sudo -u builder git clone -q "https://aur.archlinux.org/$name.git" "/home/builder/$name"; then
+      break
+    fi
+    [ "$n" = 5 ] && fail "could not clone $name from the AUR after 5 tries"
+    echo "AUR clone failed ($n/5); retrying in 15 s"
+    sleep 15
+  done
   local aur_ver
   aur_ver="$(sed -n 's/^pkgver=//p' "/home/builder/$name/PKGBUILD")"
   [ "$aur_ver" = "$VERSION" ] || fail "the AUR has $name $aur_ver, not $VERSION"
@@ -98,7 +107,13 @@ start() {
   HOME="$(mktemp -d)"
   export HOME DISPLAY=:99
   Xvfb :99 -screen 0 800x600x24 >/dev/null 2>&1 &
-  sleep 2
+  local x
+  for x in $(seq 1 30); do
+    [ -S /tmp/.X11-unix/X99 ] && break
+    sleep 0.5
+  done
+  [ -S /tmp/.X11-unix/X99 ] || { cat /tmp/xvfb.log; fail "the virtual display (Xvfb) did not start"; }
+  sleep 1
   "${app[@]}" > /tmp/smoke.log 2>&1 &
   local pid=$!
 
