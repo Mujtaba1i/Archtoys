@@ -3,7 +3,7 @@
 # app needs at run time, and the files it must install. Used by the optional
 # "Build + test the .deb" job of release.yml.
 #
-# The libraries below are the ones the app loads while it runs (keyboard,
+# The libraries below are the ones the app loads while it runs (X11, keyboard,
 # cursor, input, graphics). cargo-deb finds the ones the binary links to by
 # itself ($auto), but not these, so they are listed under depends in
 # [package.metadata.deb] in Cargo.toml. Keep both lists in step.

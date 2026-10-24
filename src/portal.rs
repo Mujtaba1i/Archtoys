@@ -6,6 +6,9 @@
 //! fast answer can arrive before we listen and we would wait forever.
 
 use std::collections::HashMap;
+use std::ffi::OsString;
+use std::os::unix::ffi::OsStringExt;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use zbus::blocking::{Connection, Proxy};
@@ -138,4 +141,50 @@ pub fn result_string(results: &Results, key: &str) -> Option<String> {
         return Some(path.as_str().to_string());
     }
     None
+}
+
+/// `%41` → `A`; None if a `%` isn't followed by two hex digits.
+pub fn percent_decode(text: &str) -> Option<Vec<u8>> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Some(out)
+}
+
+/// The path of a local `file://` URI, as the Screenshot portal returns it
+/// (`file:///home/me/Screenshot%20from%202026.png`). None for anything else.
+pub fn file_uri_to_path(uri: &str) -> Option<PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !rest.starts_with('/') {
+        return None; // another host: not a local file
+    }
+    Some(PathBuf::from(OsString::from_vec(percent_decode(rest)?)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_uris_become_paths() {
+        assert_eq!(
+            file_uri_to_path("file:///home/me/Screenshot%20from%202026-10-24%20%C3%A0.png"),
+            Some(PathBuf::from("/home/me/Screenshot from 2026-10-24 à.png"))
+        );
+        assert_eq!(file_uri_to_path("file://localhost/tmp/a.png"), Some(PathBuf::from("/tmp/a.png")));
+        assert_eq!(file_uri_to_path("file://otherhost/tmp/a.png"), None);
+        assert_eq!(file_uri_to_path("https://example.com/a.png"), None);
+        assert_eq!(file_uri_to_path("file:///tmp/bad%2"), None);
+    }
 }

@@ -3,9 +3,9 @@
 use crate::color::{calculate_shades, copy_text, format_canonical, ColorField, Rgb};
 use crate::config::{persist_config, HistoryStore};
 use crate::formats::FormatList;
-use crate::{AppWindow, FieldRow, FormatOption};
+use crate::{AppWindow, FieldRow, FormatOption, SearchCard};
 use arboard::{Clipboard, SetExtLinux};
-use slint::{Color, ComponentHandle, Model, ModelRc, VecModel};
+use slint::{Color, ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, VecModel};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::thread;
@@ -26,7 +26,16 @@ thread_local! {
     /// Bumped on every update; a row copies its value into its text field
     /// whenever this changes (see ValueRow in app.slint).
     static REVISION: Cell<i32> = const { Cell::new(0) };
+    /// Every hit of the current search; the grid gets them a page at a time.
+    static SEARCH_HITS: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
+    /// The cards in the search grid.
+    static SEARCH_CARDS: RefCell<Option<Rc<VecModel<SearchCard>>>> = const { RefCell::new(None) };
+    /// Where the main window was and how big, while it is hidden.
+    static WINDOW_PLACE: Cell<Option<(PhysicalPosition, PhysicalSize)>> = const { Cell::new(None) };
 }
+
+/// Cards added to the search grid at a time (about 10 are on screen).
+const SEARCH_PAGE: usize = 30;
 
 /// The last color that was fully applied (see `COMMITTED`).
 pub fn committed_rgb() -> Rgb {
@@ -89,6 +98,9 @@ pub fn install_models(ui: &AppWindow) {
     let options = Rc::new(VecModel::<FormatOption>::default());
     ui.set_format_options(ModelRc::from(options.clone()));
     OPTIONS.with(|o| *o.borrow_mut() = Some(options));
+    let cards = Rc::new(VecModel::<SearchCard>::default());
+    ui.set_search_results(ModelRc::from(cards.clone()));
+    SEARCH_CARDS.with(|c| *c.borrow_mut() = Some(cards));
     rebuild_rows(ui);
 }
 
@@ -198,10 +210,101 @@ pub fn update_ui_colors(ui: &AppWindow, rgb: Rgb) {
     refresh_values(ui, rgb, None);
 }
 
+/// Shows a color everywhere without making it the current one (hovering a
+/// search result). `update_ui_colors(ui, committed_rgb())` puts the old one back.
+pub fn update_ui_preview(ui: &AppWindow, rgb: Rgb) {
+    update_preview_color(ui, rgb);
+    refresh_values(ui, rgb, None);
+}
+
 /// Like `update_ui_colors`, but leaves the row the user is typing in alone.
 pub fn update_ui_preview_except_field(ui: &AppWindow, editing_field: ColorField, rgb: Rgb) {
     update_preview_color(ui, rgb);
     refresh_values(ui, rgb, Some(editing_field));
+}
+
+// ------------------------------------------------------------ the window
+
+/// Hides the main window (to the tray, or out of the way while picking) and
+/// remembers where it was and how big it was.
+pub fn hide_window(ui: &AppWindow) {
+    let window = ui.window();
+    if window.is_visible() {
+        WINDOW_PLACE.with(|p| p.set(Some((window.position(), window.size()))));
+    }
+    window.hide().ok();
+}
+
+/// Shows the main window again with the size and place it had. On Wayland a
+/// hidden window doesn't exist anymore: it comes back as a new one, which
+/// Slint gives its default size, and the desktop places it (apps can't choose
+/// where a window goes on Wayland), so at least the size is put back.
+pub fn show_window(ui: &AppWindow) {
+    let window = ui.window();
+    if window.is_visible() {
+        return;
+    }
+    window.show().ok();
+    let Some((position, size)) = WINDOW_PLACE.with(Cell::take) else { return };
+    window.set_position(position); // X11 only; Wayland ignores it
+    window.set_size(size);
+    // shortcut: Slint resets a re-created window to its default size while it
+    // creates it, so the size is set again once the window is up. Drop this when
+    // Slint keeps the size of a re-shown window on Wayland.
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(150), move || {
+        if let Some(ui) = weak.upgrade() {
+            if ui.window().size() != size {
+                ui.window().set_size(size);
+            }
+        }
+    });
+}
+
+// ------------------------------------------------------------ search
+
+fn search_card(hit: u32) -> SearchCard {
+    let (name, rgb) = crate::search::entry(hit);
+    SearchCard {
+        name: name.into(),
+        color: to_color(rgb),
+        // the first format after the name, the one Auto Copy uses
+        value: copy_text(formats().auto_copy_field(), rgb).into(),
+    }
+}
+
+/// Runs a search and shows the first page of results.
+pub fn show_search(ui: &AppWindow, query: &str) {
+    let results = crate::search::search(query);
+    ui.set_search_note(results.note.unwrap_or_default().into());
+    let first: Vec<SearchCard> = results.hits.iter().take(SEARCH_PAGE).map(|&h| search_card(h)).collect();
+    SEARCH_HITS.with(|h| *h.borrow_mut() = results.hits);
+    SEARCH_CARDS.with(|c| {
+        if let Some(model) = c.borrow().as_ref() {
+            model.set_vec(first);
+        }
+    });
+    ui.set_search_generation(ui.get_search_generation().wrapping_add(1)); // scrolls back to the top
+}
+
+/// Adds the next page of results to the grid (it scrolled near the end).
+pub fn load_more_search() {
+    SEARCH_CARDS.with(|c| {
+        let cards = c.borrow();
+        let Some(model) = cards.as_ref() else { return };
+        let shown = model.row_count();
+        SEARCH_HITS.with(|h| {
+            for &hit in h.borrow().iter().skip(shown).take(SEARCH_PAGE) {
+                model.push(search_card(hit));
+            }
+        });
+    });
+}
+
+/// The color of the search card at `index`, if there is one.
+pub fn search_hit_color(index: i32) -> Option<Rgb> {
+    let index = usize::try_from(index).ok()?;
+    SEARCH_HITS.with(|h| h.borrow().get(index).map(|&hit| crate::search::entry(hit).1))
 }
 
 // ------------------------------------------------------------ history etc.
@@ -237,7 +340,7 @@ pub fn apply_selected_color(ui: &AppWindow, history_store: &HistoryStore, rgb: R
         // the first format in the list (the name is skipped)
         copy_text_async(copy_text(formats().auto_copy_field(), rgb));
     } else {
-        ui.window().show().ok();
+        show_window(ui);
     }
 
     persist_config(ui, history_store);

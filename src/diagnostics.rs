@@ -61,10 +61,20 @@ pub fn issue_url() -> String {
         "{}\n### What is broken\n\n\n### How to reproduce it\n\n\n### What you expected\n\n",
         info()
     );
-    let base = concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new");
-    url::Url::parse_with_params(base, &[("body", body)])
-        .map(String::from)
-        .unwrap_or_else(|_| base.to_string())
+    concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new?body=").to_string() + &percent_encode(&body)
+}
+
+/// Every byte except letters, digits and `-._~` as `%XX`, for a link.
+fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 3);
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// Opens the report page in the browser. The app sends nothing itself.
@@ -89,7 +99,9 @@ mod tests {
     fn report_link_has_the_details_and_nothing_personal() {
         let url = issue_url();
         assert!(url.starts_with("https://github.com/Mujtaba1i/Archtoys/issues/new?body="));
-        let body = url::Url::parse(&url).unwrap().query_pairs().next().unwrap().1.into_owned();
+        let encoded = url.split_once("?body=").unwrap().1;
+        assert!(encoded.bytes().all(|b| b.is_ascii_alphanumeric() || b"-._~%".contains(&b)));
+        let body = String::from_utf8(crate::portal::percent_decode(encoded).unwrap()).unwrap();
         assert!(body.contains(env!("CARGO_PKG_VERSION")));
         assert!(body.contains("### How to reproduce it"));
         // No paths: the home folder would also reveal the user name.

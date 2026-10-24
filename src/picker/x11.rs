@@ -12,7 +12,6 @@ use super::{
 use crate::color::format_hex;
 use crate::config::HistoryStore;
 use crate::{AppWindow, PickerOverlay, PickerShieldWindow};
-use device_query::{DeviceQuery, DeviceState, Keycode};
 use slint::{Color, ComponentHandle, LogicalPosition};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -152,6 +151,8 @@ struct Sampler {
     width: i32,
     height: i32,
     lsb_first: bool,
+    /// The key code of Esc on this keyboard layout, if it has one.
+    escape: Option<u8>,
 }
 
 impl Sampler {
@@ -168,13 +169,21 @@ impl Sampler {
         if bpp != 32 {
             return Err(format!("unsupported screen format ({bpp} bits per pixel)"));
         }
-        Ok(Self {
-            root: screen.root,
-            width: screen.width_in_pixels as i32,
-            height: screen.height_in_pixels as i32,
-            lsb_first: setup.image_byte_order == ImageOrder::LSB_FIRST,
-            conn,
-        })
+        let (root, width, height) = (screen.root, screen.width_in_pixels as i32, screen.height_in_pixels as i32);
+        let lsb_first = setup.image_byte_order == ImageOrder::LSB_FIRST;
+        let escape = keycode_of(&conn, XK_ESCAPE);
+        Ok(Self { conn, root, width, height, lsb_first, escape })
+    }
+
+    /// Is Esc held down right now? Asked every frame instead of grabbing the
+    /// keyboard, so the rest of the desktop keeps working while picking.
+    fn escape_down(&self) -> bool {
+        let Some(code) = self.escape else { return false };
+        self.conn
+            .query_keymap()
+            .ok()
+            .and_then(|cookie| cookie.reply().ok())
+            .is_some_and(|keymap| keymap.keys[usize::from(code / 8)] & (1 << (code % 8)) != 0)
     }
 
     /// Cursor position and whether the left / right buttons are down.
@@ -232,6 +241,18 @@ impl Sampler {
         }
         Ok(out)
     }
+}
+
+const XK_ESCAPE: u32 = 0xff1b;
+
+/// The key code that types `keysym` (for example Esc) on the current layout.
+fn keycode_of(conn: &RustConnection, keysym: u32) -> Option<u8> {
+    let setup = conn.setup();
+    let (first, last) = (setup.min_keycode, setup.max_keycode);
+    let mapping = conn.get_keyboard_mapping(first, last - first + 1).ok()?.reply().ok()?;
+    let per_key = usize::from(mapping.keysyms_per_keycode.max(1));
+    let index = mapping.keysyms.chunks(per_key).position(|syms| syms.contains(&keysym))?;
+    first.checked_add(u8::try_from(index).ok()?)
 }
 
 /// X11 32-bit ZPixmap → RGBA. LSB-first servers send B,G,R,x; MSB-first x,R,G,B.
@@ -294,7 +315,6 @@ fn run_live(
         .map_err(|err| eprintln!("x11 pointer grab warning: {err}"))
         .ok();
     let sampler = Sampler::connect()?;
-    let keyboard = DeviceState::new();
 
     // Ignore a button that is still held from the click that started picking.
     let (_, _, mut prev_left, mut prev_right) = sampler.pointer()?;
@@ -311,7 +331,7 @@ fn run_live(
         if PICKER_CANCELLED.load(Ordering::SeqCst) {
             return Ok(PickOutcome::Cancelled);
         }
-        if keyboard.get_keys().contains(&Keycode::Escape) {
+        if sampler.escape_down() {
             return Ok(PickOutcome::Cancelled);
         }
 
@@ -409,7 +429,7 @@ fn capture_screen_to_png() -> Result<PathBuf, String> {
     let sampler = Sampler::connect()?;
     let rgba = sampler.rect(0, 0, sampler.width, sampler.height)?;
     let path = std::env::temp_dir().join(format!("archtoys-freeze-{}.png", std::process::id()));
-    image::save_buffer(&path, &rgba, sampler.width as u32, sampler.height as u32, image::ColorType::Rgba8)
+    image::save_buffer(&path, &rgba, sampler.width as u32, sampler.height as u32, image::ExtendedColorType::Rgba8)
         .map_err(|err| format!("saving screenshot: {err}"))?;
     Ok(path)
 }

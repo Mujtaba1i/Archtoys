@@ -1,4 +1,7 @@
-slint::include_modules!();
+// The UI is compiled by the `slint!` macro, not by a build script: the build
+// script route also compiles every image format Slint's compiler can encode (an
+// AV1 video encoder among them), about 60 crates the app never uses.
+slint::slint! { export * from "ui/app.slint"; }
 
 mod color;
 mod config;
@@ -9,6 +12,7 @@ mod launch;
 mod names;
 mod picker;
 mod portal;
+mod search;
 mod single_instance;
 mod tray;
 mod ui_state;
@@ -60,7 +64,7 @@ fn bring_to_front(ui: &AppWindow) {
     if picker::PICKER_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) {
         return; // a pick in progress wins
     }
-    ui.window().show().ok();
+    ui_state::show_window(ui);
     ui.window().with_winit_window(|window| {
         window.set_minimized(false);
         window.focus_window();
@@ -114,6 +118,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // `archtoys --pick` with no copy running starts in the tray and picks, like the hotkey.
     let start_hidden = autostart || pick_now;
 
+    search::prepare(); // builds the search index in the background
     let ui = AppWindow::new()?;
 
     // The Wayland app_id / X11 WM_CLASS. It must match archtoys.desktop, or
@@ -266,6 +271,46 @@ fn main() -> Result<(), slint::PlatformError> {
         copy_text_async(text.trim_start_matches("≈ ").to_string());
     });
 
+    // --- Color search ---
+    let search_ui = ui_handle.clone();
+    ui.on_search_changed(move |text| {
+        if let Some(ui) = search_ui.upgrade() {
+            ui_state::show_search(&ui, &text);
+        }
+    });
+    ui.on_search_load_more(ui_state::load_more_search);
+
+    // Hovering a result shows its color; leaving the results puts the old one back.
+    let hover_ui = ui_handle.clone();
+    ui.on_search_hovered(move |index| {
+        if let Some(ui) = hover_ui.upgrade() {
+            match ui_state::search_hit_color(index) {
+                Some(rgb) => ui_state::update_ui_preview(&ui, rgb),
+                None => update_ui_colors(&ui, committed_rgb()),
+            }
+        }
+    });
+
+    let applied_ui = ui_handle.clone();
+    let applied_history = history_store.clone();
+    ui.on_search_applied(move |index| {
+        let (Some(ui), Some(rgb)) = (applied_ui.upgrade(), ui_state::search_hit_color(index)) else {
+            return;
+        };
+        push_history(&applied_history, rgb);
+        sync_history_model(&ui, &applied_history);
+        update_ui_colors(&ui, rgb);
+        persist_config(&ui, &applied_history);
+    });
+
+    // Closed without choosing: the color from before the search comes back.
+    let closed_ui = ui_handle.clone();
+    ui.on_search_closed(move || {
+        if let Some(ui) = closed_ui.upgrade() {
+            update_ui_colors(&ui, committed_rgb());
+        }
+    });
+
     let toggle_ui = ui_handle.clone();
     let toggle_history = history_store.clone();
     ui.on_format_toggled(move |key, on| {
@@ -384,7 +429,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.window().on_close_requested(move || {
         if let Some(ui) = ui_close.upgrade() {
             if ui.get_setting_minimize_tray() {
-                ui.window().hide().ok();
+                ui_state::hide_window(&ui);
                 return slint::CloseRequestResponse::KeepWindowShown;
             }
             persist_config(&ui, &close_history);

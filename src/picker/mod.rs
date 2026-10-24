@@ -15,7 +15,7 @@ mod x11;
 use crate::color::Rgb;
 use crate::config::HistoryStore;
 use crate::diagnostics;
-use crate::ui_state::{apply_selected_color, current_rgb, update_ui_colors};
+use crate::ui_state::{apply_selected_color, current_rgb, hide_window, show_window, update_ui_colors};
 use crate::AppWindow;
 use slint::ComponentHandle;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,7 +77,7 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
 
     let was_visible = ui.window().is_visible();
     if ui.get_setting_minimize() {
-        ui.window().hide().ok();
+        hide_window(ui);
     }
 
     let context = PickerContext {
@@ -152,7 +152,7 @@ pub(crate) fn finish_picker(
                 && ui.get_setting_autocopy();
 
             if ui.get_setting_minimize() && !stealth {
-                ui.window().show().ok();
+                show_window(&ui);
             }
         }
 

@@ -1,8 +1,6 @@
 //! Pure color math: formatting, parsing and shades. No UI code here, so
 //! everything in this file is covered by the unit tests at the bottom.
 
-use palette::{FromColor, Hsl, Hsv, IntoColor, Oklab, Oklch, Srgb};
-
 pub type Rgb = (u8, u8, u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -85,32 +83,120 @@ pub fn format_rgb(r: u8, g: u8, b: u8) -> String {
     format!("rgb({r},{g},{b})")
 }
 
+// ------------------------------------------------- color space conversions
+
+// The arithmetic below follows the `palette` crate step by step (the app used it
+// until v0.4.0), so every value on screen stays exactly what it was: checked on
+// all 16.7 million colors.
+
+/// The hue in degrees (0 for grays), the largest and the smallest channel (0–1),
+/// shared by HSL and HSV.
+fn hue_parts(rgb: Rgb) -> (f32, f32, f32) {
+    let (r, g, b) = (rgb.0 as f32 / 255.0, rgb.1 as f32 / 255.0, rgb.2 as f32 / 255.0);
+    let (max, min, sep, coeff) = if r > g { (r, g, g - b, 0.0) } else { (g, r, b - r, 2.0) };
+    let (max, min, sep, coeff) = if b > max { (b, min, r - g, 4.0) } else { (max, min.min(b), sep, coeff) };
+    let hue = if max != min { (sep / (max - min) + coeff) * 60.0 } else { 0.0 };
+    (hue, max, min)
+}
+
+/// Whole degrees, rounded the way the app always has: halves away from 0
+/// with the hue taken between -180 and 180 (232.5 shows as 232).
+fn round_hue(hue: f32) -> f32 {
+    let signed = hue - (((hue + 180.0) / 360.0) - 1.0).ceil() * 360.0;
+    signed.round().rem_euclid(360.0)
+}
+
+/// RGB from hue (degrees), chroma (largest minus smallest channel) and the
+/// smallest channel, the three values the HSL and HSV formulas share.
+fn from_hue(h: f32, min: f32, chroma: f32) -> Rgb {
+    let h = h.rem_euclid(360.0) / 60.0;
+    let x = chroma * (1.0 - (h.rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match h as u32 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    to_rgb(r + min, g + min, b + min)
+}
+
+/// 0–1 channels to bytes.
+fn to_rgb(r: f32, g: f32, b: f32) -> Rgb {
+    let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+    (byte(r), byte(g), byte(b))
+}
+
+/// A constant written as an exact decimal, rounded to f32 the way palette does.
+const fn c(x: f64) -> f32 {
+    x as f32
+}
+
+/// The sRGB curve: a screen value (0–255) to light intensity (0–1), and back.
+fn to_linear(byte: u8) -> f32 {
+    let x = byte as f32 / 255.0;
+    if x <= c(0.04045) {
+        c(1.0 / 12.92) * x
+    } else {
+        x.mul_add(c(1.0 / 1.055), c(0.055 / 1.055)).powf(c(2.4))
+    }
+}
+
+fn from_linear(x: f32) -> f32 {
+    if x <= c(0.0031308) {
+        c(12.92) * x
+    } else {
+        x.powf(c(1.0 / 2.4)) * c(1.055) - c(0.055)
+    }
+}
+
+/// OKLab as [L, a, b] (used for formatting and for finding color names).
+/// Matrices from Björn Ottosson's definition of OKLab.
+pub fn rgb_to_oklab(rgb: Rgb) -> [f32; 3] {
+    let (r, g, b) = (to_linear(rgb.0), to_linear(rgb.1), to_linear(rgb.2));
+    let l = (c(0.4122214708) * r + c(0.5363325363) * g + c(0.0514459929) * b).cbrt();
+    let m = (c(0.2119034982) * r + c(0.6806995451) * g + c(0.1073969566) * b).cbrt();
+    let s = (c(0.0883024619) * r + c(0.2817188376) * g + c(0.6299787005) * b).cbrt();
+    [
+        c(0.2104542553) * l + c(0.7936177850) * m - c(0.0040720468) * s,
+        c(1.9779984951) * l - c(2.4285922050) * m + c(0.4505937099) * s,
+        c(0.0259040371) * l + c(0.7827717662) * m - c(0.8086757660) * s,
+    ]
+}
+
+fn oklab_to_rgb(lightness: f32, a: f32, b: f32) -> Rgb {
+    let l_ = lightness + c(0.3963377774) * a + c(0.2158037573) * b;
+    let m_ = lightness - c(0.1055613458) * a - c(0.0638541728) * b;
+    let s_ = lightness - c(0.0894841775) * a - c(1.2914855480) * b;
+    let (l, m, s) = (l_ * l_ * l_, m_ * m_ * m_, s_ * s_ * s_);
+    to_rgb(
+        from_linear(c(4.0767416621) * l - c(3.3077115913) * m + c(0.2309699292) * s),
+        from_linear(c(-1.2684380046) * l + c(2.6097574011) * m - c(0.3413193965) * s),
+        from_linear(c(-0.0041960863) * l - c(0.7034186147) * m + c(1.7076147010) * s),
+    )
+}
+
+// ------------------------------------------------------------- formatting
+
 pub fn format_hsl(r: u8, g: u8, b: u8) -> String {
-    let srgb = Srgb::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
-    let hsl: Hsl = Hsl::from_color(srgb);
-    let h = hsl.hue.into_degrees().round().rem_euclid(360.0);
-    let s = (hsl.saturation * 100.0).round().clamp(0.0, 100.0);
-    let l = (hsl.lightness * 100.0).round().clamp(0.0, 100.0);
+    let (hue, max, min) = hue_parts((r, g, b));
+    let l = (max + min) / 2.0;
+    let sum = max + min;
+    let s = if max == min { 0.0 } else if sum > 1.0 { (max - min) / (2.0 - sum) } else { (max - min) / sum };
+    let h = round_hue(hue);
+    let s = (s * 100.0).round().clamp(0.0, 100.0);
+    let l = (l * 100.0).round().clamp(0.0, 100.0);
     format!("hsl({h:.0},{s:.0}%,{l:.0}%)")
 }
 
 pub fn format_hsv(r: u8, g: u8, b: u8) -> String {
-    let srgb = Srgb::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
-    let hsv: Hsv = Hsv::from_color(srgb);
-    let h = hsv.hue.into_degrees().round().rem_euclid(360.0);
-    let s = (hsv.saturation * 100.0).round().clamp(0.0, 100.0);
-    let v = (hsv.value * 100.0).round().clamp(0.0, 100.0);
+    let (hue, max, min) = hue_parts((r, g, b));
+    let s = if max == 0.0 { 0.0 } else { (max - min) / max };
+    let h = round_hue(hue);
+    let s = (s * 100.0).round().clamp(0.0, 100.0);
+    let v = (max * 100.0).round().clamp(0.0, 100.0);
     format!("hsv({h:.0},{s:.0}%,{v:.0}%)")
-}
-
-fn to_srgb(rgb: Rgb) -> Srgb {
-    Srgb::new(rgb.0 as f32 / 255.0, rgb.1 as f32 / 255.0, rgb.2 as f32 / 255.0)
-}
-
-/// OKLab as [L, a, b] (used for formatting and for finding color names).
-pub fn rgb_to_oklab(rgb: Rgb) -> [f32; 3] {
-    let lab: Oklab = Oklab::from_color(to_srgb(rgb).into_linear());
-    [lab.l, lab.a, lab.b]
 }
 
 /// CMYK without a printer profile: a common approximation, in percent.
@@ -145,13 +231,15 @@ fn fixed(v: f32, decimals: usize) -> String {
 
 /// CSS syntax: oklch(L C H) with L 0–1.
 pub fn format_oklch(r: u8, g: u8, b: u8) -> String {
-    let lch: Oklch = Oklch::from_color(to_srgb((r, g, b)).into_linear());
-    let hue = if lch.chroma < 0.0005 {
+    let [l, a, bb] = rgb_to_oklab((r, g, b));
+    let chroma = a.hypot(bb);
+    let hue = if chroma < 0.0005 {
         0.0
     } else {
-        lch.hue.into_positive_degrees()
+        let degrees = (std::f32::consts::PI + (-bb).atan2(-a)).to_degrees();
+        degrees - (degrees / 360.0).floor() * 360.0
     };
-    format!("oklch({} {} {})", fixed(lch.l, 3), fixed(lch.chroma, 3), fixed(hue, 1))
+    format!("oklch({} {} {})", fixed(l, 3), fixed(chroma, 3), fixed(hue, 1))
 }
 
 /// CSS syntax: oklab(L a b) with L 0–1.
@@ -250,14 +338,6 @@ fn parse_percentage_0_to_1(value: &str) -> Option<f32> {
     Some((parsed / 100.0).clamp(0.0, 1.0))
 }
 
-fn srgb_to_rgb(rgb: Srgb) -> Rgb {
-    (
-        (rgb.red.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (rgb.green.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (rgb.blue.clamp(0.0, 1.0) * 255.0).round() as u8,
-    )
-}
-
 pub fn parse_hsl_permissive(value: &str) -> Option<Rgb> {
     let payload = inner_function_payload(value, "hsl");
     let parts: Vec<&str> = payload.split(',').map(str::trim).collect();
@@ -269,8 +349,8 @@ pub fn parse_hsl_permissive(value: &str) -> Option<Rgb> {
     let s = parse_percentage_0_to_1(parts[1])?;
     let l = parse_percentage_0_to_1(parts[2])?;
 
-    let rgb: Srgb = Hsl::new(h, s, l).into_color();
-    Some(srgb_to_rgb(rgb))
+    let chroma = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    Some(from_hue(h, l - chroma / 2.0, chroma))
 }
 
 pub fn parse_hsv_permissive(value: &str) -> Option<Rgb> {
@@ -284,8 +364,7 @@ pub fn parse_hsv_permissive(value: &str) -> Option<Rgb> {
     let s = parse_percentage_0_to_1(parts[1])?;
     let v = parse_percentage_0_to_1(parts[2])?;
 
-    let rgb: Srgb = Hsv::new(h, s, v).into_color();
-    Some(srgb_to_rgb(rgb))
+    Some(from_hue(h, v - v * s, v * s))
 }
 
 /// The numbers inside "func(...)", split on commas, spaces or "/".
@@ -346,8 +425,8 @@ pub fn parse_oklch_permissive(value: &str) -> Option<Rgb> {
         None => parts[1].parse::<f32>().ok()?,
     };
     let h = degrees(&parts[2])?;
-    let rgb: Srgb = Srgb::from_linear(Oklch::new(l.clamp(0.0, 1.0), c.max(0.0), h).into_color());
-    Some(srgb_to_rgb(rgb))
+    let (c, h) = (c.max(0.0), h.to_radians());
+    Some(oklab_to_rgb(l.clamp(0.0, 1.0), c * h.cos(), c * h.sin()))
 }
 
 pub fn parse_oklab_permissive(value: &str) -> Option<Rgb> {
@@ -358,8 +437,7 @@ pub fn parse_oklab_permissive(value: &str) -> Option<Rgb> {
     let l = fraction(&parts[0])?;
     let a = parts[1].parse::<f32>().ok()?;
     let b = parts[2].parse::<f32>().ok()?;
-    let rgb: Srgb = Srgb::from_linear(Oklab::new(l.clamp(0.0, 1.0), a, b).into_color());
-    Some(srgb_to_rgb(rgb))
+    Some(oklab_to_rgb(l.clamp(0.0, 1.0), a, b))
 }
 
 pub fn parse_color(field: ColorField, value: &str) -> Option<Rgb> {

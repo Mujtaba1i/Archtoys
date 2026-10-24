@@ -16,7 +16,7 @@ const NAMES_CSV: &str = include_str!("../data/colornames.csv");
 
 /// The standard CSS color names (one per color; "Gray"/"Cyan"/"Magenta"
 /// for the colors that have two spellings).
-const CSS_NAMES: &[(&str, Rgb)] = &[
+pub(crate) const CSS_NAMES: &[(&str, Rgb)] = &[
     ("Alice Blue", (240, 248, 255)),
     ("Antique White", (250, 235, 215)),
     ("Aquamarine", (127, 255, 212)),
@@ -158,14 +158,17 @@ const CSS_NAMES: &[(&str, Rgb)] = &[
     ("Yellow Green", (154, 205, 50)),
 ];
 
-struct Entry {
-    name: &'static str,
-    lab: [f32; 3],
+pub(crate) struct Entry {
+    pub name: &'static str,
+    pub rgb: Rgb,
+    pub lab: [f32; 3],
+    /// Marked "good name" in the data.
+    pub good: bool,
 }
 
 /// Sorted by lightness (OKLab L), so a lookup only has to check the names
 /// whose lightness is close enough to possibly be the nearest.
-fn entries() -> &'static [Entry] {
+pub(crate) fn entries() -> &'static [Entry] {
     static LIST: OnceLock<Vec<Entry>> = OnceLock::new();
     LIST.get_or_init(|| {
         let mut list = Vec::with_capacity(32_000);
@@ -173,8 +176,9 @@ fn entries() -> &'static [Entry] {
             // name,#rrggbb,good-name-flag   (names contain no commas)
             let mut parts = line.split(',');
             let (Some(name), Some(hex)) = (parts.next(), parts.next()) else { continue };
+            let good = parts.next().is_some_and(|flag| flag.trim() == "x");
             if let Some(rgb) = crate::color::parse_hex_flexible(hex) {
-                list.push(Entry { name, lab: rgb_to_oklab(rgb) });
+                list.push(Entry { name, rgb, lab: rgb_to_oklab(rgb), good });
             }
         }
         list.sort_by(|a, b| a.lab[0].total_cmp(&b.lab[0]));

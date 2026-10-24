@@ -4,7 +4,6 @@ use crate::AppWindow;
 use image::{GenericImageView, ImageFormat};
 use ksni::menu::StandardItem;
 use ksni::{Icon, MenuItem, Tray};
-use slint::ComponentHandle;
 use std::sync::OnceLock;
 
 fn tray_icon_pixmap() -> Vec<Icon> {
@@ -55,7 +54,7 @@ impl Tray for AppTray {
 
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.ui.upgrade_in_event_loop(|ui| {
-            ui.window().show().ok();
+            crate::ui_state::show_window(&ui);
         });
     }
 
@@ -65,7 +64,7 @@ impl Tray for AppTray {
                 label: "Open".into(),
                 activate: Box::new(|this: &mut AppTray| {
                     let _ = this.ui.upgrade_in_event_loop(|ui: AppWindow| {
-                        ui.window().show().ok();
+                        crate::ui_state::show_window(&ui);
                     });
                 }),
                 ..Default::default()
