@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.3.3
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -142,6 +142,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Sat Oct 24 2026 Mujtaba1i <mujtaba1i@github> - 0.4.0-1
+- fixing package-test script to include archtoys-bin
+- Added a search bar for name hex rgb and so, fixed a wayland pick bug, removed unused compiled crates
+
 * Sat Oct 17 2026 Mujtaba1i <mujtaba1i@github> - 0.3.3-1
 - The Fedora package now requires the libraries Archtoys loads while it runs
 - Say so when no fonts or no browser are available, and keep the AppImage's libraries away from the browser
