@@ -46,6 +46,7 @@ Requires:       hicolor-icon-theme
 # Libraries the app opens by name while it runs (winit and the renderer load
 # them), so rpmbuild cannot see them in the binary. Written as sonames, so the
 # package names do not matter. Without them a minimal install fails to start.
+Requires:       libX11.so.6()(64bit)
 Requires:       libxkbcommon.so.0()(64bit)
 Requires:       libxkbcommon-x11.so.0()(64bit)
 Requires:       libXcursor.so.1()(64bit)
@@ -80,7 +81,9 @@ directory = "vendor"
 EOF
 
 %build
-cargo build --release --frozen --offline
+# Cargo.toml strips the binary; rpmbuild strips it itself and needs the symbols
+# to make the debuginfo package, so keep them here.
+cargo build --release --frozen --offline --config profile.release.strip=false
 
 %install
 rm -rf %{buildroot}

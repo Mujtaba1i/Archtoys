@@ -10,20 +10,22 @@ readme = "README.md"
 
 [dependencies]
 slint = { version = "1.15.0", default-features = false, features = ["backend-winit", "renderer-femtovg", "compat-1-2", "unstable-winit-030"] }
-arboard = "3.2"
-palette = "0.7"
-device_query = "1.1"
+# text only: copying images needs extra crates the app never uses
+arboard = { version = "3.2", default-features = false }
 global-hotkey = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ksni = { version = "0.3.3", default-features = false, features = ["blocking", "async-io"] }
-image = { version = "0.24.7", default-features = false, features = ["png"] }
+# the same version Slint uses, so it is compiled once
+image = { version = "0.25", default-features = false, features = ["png"] }
 x11rb = "0.13.2"
 zbus = "5.13.2"
-url = "2.5.4"
 
-[build-dependencies]
-slint-build = "1.15.0"
+[profile.release]
+# No symbol tables in the binary: 28% smaller (27.6 MB -> 19.8 MB) at no build
+# cost. Full LTO would save 3 MB more but doubles the build time.
+strip = true
+
 
 # How the .deb is built (cargo-deb). Used by the optional "Build + test the .deb"
 # job of .github/workflows/release.yml. Keep "depends" in step with
@@ -39,7 +41,7 @@ inspired by the Color Picker in Microsoft PowerToys."""
 section = "graphics"
 priority = "optional"
 # $auto = the libraries the program links to; the rest are loaded while it runs.
-depends = "$auto, libxkbcommon0, libxkbcommon-x11-0, libxcursor1, libxi6, libxrender1, libgl1, libegl1, libwayland-client0, libwayland-egl1"
+depends = "$auto, libx11-6, libxkbcommon0, libxkbcommon-x11-0, libxcursor1, libxi6, libxrender1, libgl1, libegl1, libwayland-client0, libwayland-egl1"
 recommends = "xdg-desktop-portal, hicolor-icon-theme"
 assets = [
     ["target/release/archtoys", "usr/bin/archtoys", "755"],

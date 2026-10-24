@@ -68,10 +68,7 @@ fn take_screenshot() -> Result<Option<PathBuf>, String> {
         Outcome::Cancelled => Ok(None),
         Outcome::Success(results) => {
             let uri = portal::result_string(&results, "uri").ok_or("screenshot: no uri in reply")?;
-            let path = url::Url::parse(&uri)
-                .map_err(|err| format!("screenshot: bad uri {uri}: {err}"))?
-                .to_file_path()
-                .map_err(|_| format!("screenshot: not a local file: {uri}"))?;
+            let path = portal::file_uri_to_path(&uri).ok_or_else(|| format!("screenshot: not a local file: {uri}"))?;
             Ok(Some(path))
         }
     }

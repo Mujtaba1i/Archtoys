@@ -20,6 +20,14 @@ export struct FormatOption {
     enabled: bool,
 }
 
+// One color in the search results.
+export struct SearchCard {
+    name: string,
+    color: color,
+    // the color in the first format after the name (shown on hover)
+    value: string,
+}
+
 export global Skin {
     in-out property <bool> dark-mode: false;
     
@@ -109,6 +117,79 @@ component SkinButton inherits Rectangle {
         vertical-alignment: center;
     }
     touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// --- A search result: a block of color with its name in a dark oval. A dark
+// oval with light text reads on any color, in both themes. ---
+component SearchCardView inherits Rectangle {
+    in property <SearchCard> card;
+    in property <bool> highlighted;
+    callback hover-changed(bool);
+    callback clicked;
+
+    border-radius: 8px;
+    background: root.card.color;
+    accessible-role: button;
+    accessible-label: root.card.name;
+    accessible-action-default => { root.clicked(); }
+
+    if root.highlighted : Rectangle {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: 10px;
+        border-width: 2px;
+        border-color: #3b82f6;
+    }
+
+    // The value shows only on the highlighted card, so the grid stays calm.
+    if root.highlighted : Rectangle {
+        y: 6px;
+        height: 20px;
+        width: min(parent.width - 8px, value-measure.preferred-width + 14px);
+        x: (parent.width - self.width) / 2;
+        border-radius: 10px;
+        background: #000000b0;
+        Text {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.card.value;
+            color: #ffffff;
+            font-size: 11px;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    value-measure := Text { text: root.card.value; font-size: 11px; visible: false; }
+
+    // Long names are cut with "…" (the grid shows the highlighted one in full).
+    Rectangle {
+        x: 4px;
+        width: parent.width - 8px;
+        height: 22px;
+        y: parent.height - self.height - 5px;
+        border-radius: 11px;
+        background: #1e1e1ee8;
+        Text {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.card.name;
+            color: #ffffff;
+            font-size: 11px;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+        changed has-hover => { root.hover-changed(self.has-hover); }
+    }
 }
 
 // --- The "Pick" Button ---
@@ -218,12 +299,16 @@ component ValueRow inherits Rectangle {
             single-line: true;
 
             edited => { root.edited(self.text); }
+            // A read-only row (NAME) can be focused to select its text; only
+            // rows you can type in are checked as a color.
             accepted => {
-                root.accepted(self.text);
+                if root.editable {
+                    root.accepted(self.text);
+                }
                 focus-release.focus();
             }
             changed has-focus => {
-                if !self.has-focus {
+                if !self.has-focus && root.editable {
                     root.blurred(self.text);
                 }
             }
@@ -451,6 +536,8 @@ export component AppWindow inherits Window {
     max-width: 900px;
     max-height: 620px;
     background: Skin.bg-color;
+    // Start with the keyboard on the window itself, so Ctrl+F works at once.
+    forward-focus: defocus-scope;
 
     in property <color> current-color: #cbb6ac;
     in property <[color]> history-model: [#e0e0e0, #4a5a6a, #cbb6ac, #8c8b5c];
@@ -496,6 +583,77 @@ export component AppWindow inherits Window {
     callback clear-history();
     callback report-problem();
 
+    // --- Color search ---
+    in-out property <bool> search-open: false;
+    in property <[SearchCard]> search-results;
+    // "Showing results for pink", or a hint when nothing matches
+    in property <string> search-note;
+    // bumped by the app for every new search (the grid scrolls back to the top)
+    in property <int> search-generation;
+    // the card under the mouse or chosen with the arrow keys (-1: none)
+    in-out property <int> search-highlight: -1;
+    // true while the arrow keys move the highlight (then the grid follows it)
+    property <bool> search-keyboard: false;
+    // 0 = closed, 1 = open; animated, so the bar grows and shrinks smoothly
+    property <float> search-t: root.search-open ? 1 : 0;
+    animate search-t { duration: 180ms; easing: ease-out; }
+    callback search-changed(string);
+    callback search-hovered(int);
+    callback search-applied(int);
+    callback search-closed();
+    callback search-load-more();
+
+    function open-search() {
+        root.formats-open = false;
+        root.settings-open = false;
+        root.search-open = true;
+        root.search-highlight = -1;
+        search-input.text = "";
+        root.search-changed("");
+        search-input.focus();
+    }
+
+    // Ctrl+F opens the search, and closes it when it is open.
+    function toggle-search() {
+        if root.search-open {
+            root.close-search();
+        } else {
+            root.open-search();
+        }
+    }
+
+    // Esc, Ctrl+F, a click elsewhere, or another panel: the previous color comes back.
+    function close-search() {
+        if root.search-open {
+            root.search-open = false;
+            root.search-highlight = -1;
+            root.search-closed();
+            defocus-scope.focus();
+        }
+    }
+
+    function apply-search(index: int) {
+        if index >= 0 && index < root.search-results.length {
+            root.search-applied(index);
+            root.close-search();
+        }
+    }
+
+    // Arrow keys: +-1 moves along a row, +-5 moves a row. Up from the first
+    // row goes back to the text.
+    function move-highlight(delta: int) {
+        if root.search-results.length > 0 {
+            root.search-keyboard = true;
+            root.search-highlight = root.search-highlight < 0 ? (delta > 0 ? 0 : -1)
+                : root.search-highlight + delta < 0 ? (delta == -5 ? -1 : root.search-highlight)
+                : Math.min(root.search-highlight + delta, root.search-results.length - 1);
+            if root.search-highlight > root.search-results.length - 11 {
+                root.search-load-more();
+            }
+            root.search-hovered(root.search-highlight);
+        }
+    }
+
     // Esc cancels a pick while this window has the keyboard.
     pick-scope := FocusScope {
         enabled: root.picking;
@@ -513,11 +671,6 @@ export component AppWindow inherits Window {
         pick-scope.focus();
     }
 
-    defocus-scope := FocusScope {
-        enabled: true;
-        width: 1px;
-        height: 1px;
-    }
 
     hotkey-record-scope := FocusScope {
         enabled: root.setting-hotkey-recording;
@@ -561,6 +714,17 @@ export component AppWindow inherits Window {
         }
     }
 
+    // Holds the focus when nothing else should. It wraps the window's content,
+    // so Ctrl+F works from anywhere, including while typing in a row.
+    defocus-scope := FocusScope {
+    key-pressed(event) => {
+        if event.modifiers.control && (event.text == "f" || event.text == "F") {
+            root.toggle-search();
+            return accept;
+        }
+        reject
+    }
+
     VerticalBox {
         padding: 14px; 
         spacing: 0px;
@@ -574,7 +738,7 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 spacing: 15px;
 
-                PickButton { clicked => { root.pick-color(); } }
+                pick-button := PickButton { clicked => { root.pick-color(); } }
 
                 Rectangle {
                     horizontal-stretch: 1;
@@ -598,9 +762,17 @@ export component AppWindow inherits Window {
 
             // --- spacer that pushes settings button to far right ---
 
+            search-button := SettingsButton {
+                icon-source: @image-url("search.svg");
+                accessible-role: button;
+                accessible-label: "Search colors (Ctrl+F)";
+                clicked => { root.open-search(); }
+            }
+
             SettingsButton {
                 icon-source: @image-url("sliders.svg");
                 clicked => {
+                    root.close-search();
                     root.settings-open = false;
                     root.formats-open = !root.formats-open;
                 }
@@ -609,6 +781,7 @@ export component AppWindow inherits Window {
             SettingsButton {
                 icon-source: @image-url("settings.svg");
                 clicked => {
+                    root.close-search();
                     root.formats-open = false;
                     root.settings-open = !root.settings-open;
                     if root.settings-open { root.settings-opened(); }
@@ -629,7 +802,7 @@ export component AppWindow inherits Window {
             spacing: 16px;
 
             // Shade Bar
-            Rectangle {
+            shade-bar := Rectangle {
                 width: 36px; 
                 vertical-stretch: 1;
                 border-radius: 6px; 
@@ -662,6 +835,202 @@ export component AppWindow inherits Window {
                         accepted(txt) => { root.value-accepted(row.key, txt) }
                         blurred(txt) => { root.value-blurred(row.key, txt) }
                     }
+                }
+            }
+        }
+    }
+    } // defocus-scope
+
+    // --- Color search ---
+    // While searching, a click anywhere else closes it.
+    if root.search-open : TouchArea {
+        clicked => { root.close-search(); }
+    }
+
+    // The results open under the header, right of the shade bar, so the shade
+    // bar keeps showing the color under the mouse.
+    if root.search-open : Rectangle {
+        x: shade-bar.absolute-position.x + shade-bar.width + 16px;
+        y: search-button.absolute-position.y + search-button.height + 14px;
+        width: root.width - self.x - 14px;
+        height: root.height - self.y - 14px;
+        background: Skin.content-bg;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: Skin.border;
+        drop-shadow-blur: 12px;
+        drop-shadow-color: #00000040;
+
+        TouchArea { } // clicks inside don't close it
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+
+            Text {
+                text: root.search-note != "" ? root.search-note
+                    : root.search-results.length > 0 ? "Results"
+                    : "Type a color name, a word like sky, or a code like #FF46A2";
+                color: Skin.text-muted;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+
+            grid := Flickable {
+                vertical-stretch: 1;
+                property <length> gap: 6px;
+                property <length> edge: 4px; // room for the highlight outline
+                property <length> card-w: (self.width - 2 * self.edge - 4 * self.gap) / 5;
+                property <length> card-h: self.card-w * 0.9;
+                property <int> generation: root.search-generation;
+                property <int> highlight: root.search-highlight;
+                viewport-height: Math.ceil(root.search-results.length / 5) * (self.card-h + self.gap) + 2 * self.edge;
+
+                changed generation => { self.viewport-y = 0; }
+                changed viewport-y => {
+                    if -self.viewport-y + self.height > self.viewport-height - 2 * (self.card-h + self.gap) {
+                        root.search-load-more();
+                    }
+                }
+                // The arrow keys move the highlight: keep it in view.
+                changed highlight => {
+                    if root.search-keyboard && self.highlight >= 0 {
+                        if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) < -self.viewport-y {
+                            self.viewport-y = -Math.floor(self.highlight / 5) * (self.card-h + self.gap);
+                        } else if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h + self.edge > -self.viewport-y + self.height {
+                            self.viewport-y = -(2 * self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h - self.height);
+                        }
+                    }
+                }
+
+                for card[i] in root.search-results : SearchCardView {
+                    x: grid.edge + Math.mod(i, 5) * (grid.card-w + grid.gap);
+                    y: grid.edge + Math.floor(i / 5) * (grid.card-h + grid.gap);
+                    width: grid.card-w;
+                    height: grid.card-h;
+                    card: card;
+                    highlighted: root.search-highlight == i;
+                    hover-changed(on) => {
+                        root.search-keyboard = false;
+                        if on {
+                            root.search-highlight = i;
+                            root.search-hovered(i);
+                        } else if root.search-highlight == i {
+                            root.search-highlight = -1;
+                            root.search-hovered(-1);
+                        }
+                    }
+                    clicked => { root.apply-search(i); }
+                }
+
+                // The highlighted card's full name, drawn over its neighbours.
+                if root.search-highlight >= 0 && root.search-highlight < root.search-results.length : Rectangle {
+                    property <length> card-x: grid.edge + Math.mod(root.search-highlight, 5) * (grid.card-w + grid.gap);
+                    width: Math.min(grid.width - 2 * grid.edge, Math.max(grid.card-w - 8px, full-name.preferred-width + 16px));
+                    height: 22px;
+                    x: Math.max(grid.edge, Math.min(self.card-x + (grid.card-w - self.width) / 2, grid.width - grid.edge - self.width));
+                    y: grid.edge + Math.floor(root.search-highlight / 5) * (grid.card-h + grid.gap) + grid.card-h - self.height - 5px;
+                    border-radius: 11px;
+                    background: #1e1e1e;
+                    full-name := Text {
+                        x: 8px;
+                        width: parent.width - 16px;
+                        height: parent.height;
+                        text: root.search-results[root.search-highlight].name;
+                        color: #ffffff;
+                        font-size: 11px;
+                        overflow: elide;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // The search bar grows out of the search button, over the history row.
+    Rectangle {
+        property <length> right: search-button.absolute-position.x + search-button.width;
+        property <length> full: self.right - (pick-button.absolute-position.x + pick-button.width + 15px);
+        visible: root.search-open || root.search-t > 0.01;
+        y: search-button.absolute-position.y;
+        height: search-button.height;
+        width: search-button.width + (self.full - search-button.width) * root.search-t;
+        x: self.right - self.width;
+        border-radius: self.height / 2;
+        background: Skin.content-bg;
+        border-width: 1px;
+        border-color: Skin.border;
+
+        TouchArea { } // clicks on the bar don't close it
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 12px;
+            spacing: 8px;
+
+            VerticalLayout {
+                alignment: center;
+                Image {
+                    source: @image-url("search.svg");
+                    width: 16px;
+                    height: 16px;
+                    colorize: Skin.icon-tint;
+                }
+            }
+
+            FocusScope {
+                horizontal-stretch: 1;
+                // Before the text field sees them: arrows move through the
+                // grid, Esc closes. Left/Right only once a card is chosen.
+                capture-key-pressed(event) => {
+                    if event.text == Key.Escape
+                        || (event.modifiers.control && (event.text == "f" || event.text == "F")) {
+                        root.close-search();
+                        return accept;
+                    }
+                    if event.text == Key.DownArrow {
+                        root.move-highlight(5);
+                        return accept;
+                    }
+                    if event.text == Key.UpArrow {
+                        root.move-highlight(-5);
+                        return accept;
+                    }
+                    if root.search-highlight >= 0 && event.text == Key.RightArrow {
+                        root.move-highlight(1);
+                        return accept;
+                    }
+                    if root.search-highlight >= 0 && event.text == Key.LeftArrow {
+                        root.move-highlight(-1);
+                        return accept;
+                    }
+                    reject
+                }
+
+                search-input := TextInput {
+                    width: 100%;
+                    height: 100%;
+                    color: Skin.text-main;
+                    font-size: 14px;
+                    single-line: true;
+                    vertical-alignment: center;
+                    accessible-label: "Search colors";
+                    edited => {
+                        root.search-highlight = -1;
+                        root.search-changed(self.text);
+                    }
+                    accepted => {
+                        root.apply-search(root.search-highlight >= 0 ? root.search-highlight : 0);
+                    }
+                }
+                if search-input.text == "" : Text {
+                    width: 100%;
+                    height: 100%;
+                    text: "Search colors";
+                    color: Skin.text-muted;
+                    font-size: 14px;
+                    vertical-alignment: center;
                 }
             }
         }
