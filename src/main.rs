@@ -8,6 +8,7 @@ mod config;
 mod diagnostics;
 mod formats;
 mod hotkey;
+mod kwin;
 mod launch;
 mod names;
 mod picker;
@@ -47,6 +48,7 @@ fn apply_native_window_constraints(ui: &AppWindow) {
 }
 
 fn apply_hidden_startup_state(ui: &AppWindow) {
+    use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use slint::winit_030::WinitWindowAccessor;
 
     // Keep startup fully tray-only: no visible top-level window/task entry.
@@ -54,6 +56,28 @@ fn apply_hidden_startup_state(ui: &AppWindow) {
     ui.window().with_winit_window(|window| {
         window.set_visible(false);
     });
+
+    // Slint still creates the window when the event loop starts, and on Wayland
+    // a window can't exist hidden: it sat in the taskbar, never drawn, and
+    // showing it later didn't draw it either (issue #7). Once it exists, show
+    // and hide it in the same turn: on Wayland that makes Slint destroy it, and
+    // the next show creates a fresh window. (On X11 it is created invisible.)
+    let weak = ui.as_weak();
+    let started = slint::spawn_local(async move {
+        let Some(ui) = weak.upgrade() else { return };
+        let Ok(window) = ui.window().winit_window().await else { return };
+        let wayland = window
+            .window_handle()
+            .is_ok_and(|handle| matches!(handle.as_raw(), RawWindowHandle::Wayland(..)));
+        drop(window); // Slint only destroys a window nothing else holds
+        if wayland {
+            ui.window().show().ok();
+            ui.window().hide().ok();
+        }
+    });
+    if let Err(err) = started {
+        eprintln!("startup: couldn't keep the window hidden: {err:?}");
+    }
 }
 
 /// Shows the window in any state (tray, minimized, behind others, another
@@ -134,7 +158,9 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     let ui_handle = ui.as_weak();
 
-    let tray = tray::AppTray { ui: ui_handle.clone() };
+    // The desktop's tray host may start after us (autostart at login): wait for
+    // it instead of giving up, or a hidden start has no way back (issue #7).
+    let tray = tray::AppTray { ui: ui_handle.clone() }.assume_sni_available(true);
     let _tray_handle = match tray.spawn() {
         Ok(handle) => Some(handle),
         Err(err) => {

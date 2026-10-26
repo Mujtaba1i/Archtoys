@@ -256,6 +256,11 @@ impl HotkeyService {
     }
 
     pub(crate) fn start_x11(text: &str, trigger: Trigger) -> (Self, String) {
+        // Without an X server (Wayland with no XWayland) the X11 library crashes.
+        if std::env::var_os("DISPLAY").is_none() {
+            eprintln!("hotkey: no X11 display, so no hotkey (use archtoys --pick from a desktop shortcut)");
+            return (Self { backend: None }, text.to_string());
+        }
         let manager = match GlobalHotKeyManager::new() {
             Ok(manager) => manager,
             Err(err) => {
