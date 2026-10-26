@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.4.0
+Version:        0.4.1
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -142,6 +142,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Mon Oct 26 2026 Mujtaba1i <mujtaba1i@github> - 0.4.1-1
+- Starting hidden at login no longer leaves a stuck window in the taskbar, and the tray icon appears even when the panel starts after Archtoys (#7)
+- Minimize on Pick now keeps the window where you put it on KDE Plasma (Wayland)
+
 * Sat Oct 24 2026 Mujtaba1i <mujtaba1i@github> - 0.4.0-1
 - fixing package-test script to include archtoys-bin
 - Added a search bar for name hex rgb and so, fixed a wayland pick bug, removed unused compiled crates
