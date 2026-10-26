@@ -38,6 +38,9 @@ pub(crate) struct PickerContext {
     was_visible_before_trigger: bool,
     /// Shown again if the user cancels.
     previous: Rgb,
+    /// "Minimize on Pick" made the window transparent through KWin instead of
+    /// hiding it (KDE Wayland), so it keeps its place.
+    faded: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -76,7 +79,15 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
     PICKER_CANCELLED.store(false, Ordering::SeqCst);
 
     let was_visible = ui.window().is_visible();
-    if ui.get_setting_minimize() {
+    // On KDE Wayland, fade the window out instead of hiding it: a hidden window
+    // is destroyed there and comes back wherever the desktop puts it.
+    let faded = ui.get_setting_minimize()
+        && was_visible
+        && crate::kwin::available()
+        && crate::kwin::set_main_window_opacity(0.0)
+            .map_err(|err| eprintln!("picker: couldn't fade the window ({err}); hiding it"))
+            .is_ok();
+    if ui.get_setting_minimize() && !faded {
         hide_window(ui);
     }
 
@@ -84,6 +95,7 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
         source,
         was_visible_before_trigger: was_visible,
         previous: current_rgb(ui),
+        faded,
     };
     let ui_weak = ui.as_weak();
     // Give the compositor a moment to remove our window before a screenshot.
@@ -151,7 +163,11 @@ pub(crate) fn finish_picker(
                 && !context.was_visible_before_trigger
                 && ui.get_setting_autocopy();
 
-            if ui.get_setting_minimize() && !stealth {
+            if context.faded {
+                if let Err(err) = crate::kwin::set_main_window_opacity(1.0) {
+                    eprintln!("picker: couldn't fade the window back in ({err})");
+                }
+            } else if ui.get_setting_minimize() && !stealth {
                 show_window(&ui);
             }
         }
