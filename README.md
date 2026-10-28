@@ -25,12 +25,13 @@ Wayland and X11 · at home on KDE Plasma · works offline
 
 |                                                                                                              |                                                                                                                          |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| **Pixel magnifier**<br>The pixels around your cursor, 10× larger, with the one you'll get outlined.          | **Live preview, on Wayland too**<br>The color follows your mouse. On Wayland, Archtoys picks from one frozen screenshot. |
-| **Color search** · new<br>Press `Ctrl+F` and type a name, a word like _sky_, or a code like `#FF46A2`.       | **Color names**<br>The CSS name when there is one ("Hot Pink"), otherwise the closest of ~32,000 ("≈ Barbie Pink").      |
-| **Your formats, your order**<br>HEX, RGB, HSL, HSV, plus CMYK, HSLA, OKLCH and OKLab. Type into any of them. | **Shades and history**<br>Lighter and darker shades one click away, and every color you pick is kept.                    |
-| **Global hotkey**<br>`Ctrl+Super+C` from anywhere. On Wayland it uses your desktop's own shortcuts.          | **Auto copy**<br>Copies your first format the moment you click, without opening the window.                              |
+| **Pixel magnifier**<br>The pixels around your cursor, 10× larger, with the one you'll get outlined. | **Live preview, on Wayland too**<br>The color follows your mouse. On Wayland, Archtoys picks from one frozen screenshot. |
+| **The color card** · new<br>Your first format, big, on the color itself. Click the value to type a new one. | **Color search**<br>Press `Ctrl+F` and type a name, a word like _sky_, or a code like `#FF46A2`. |
+| **Your formats, your order**<br>HEX, RGB, HSL, HSV, CMYK, HSLA, OKLCH and OKLab. Type plain numbers like `255, 70, 162`; copying gives `rgb(255,70,162)`. | **Color names**<br>The CSS name when there is one ("Hot Pink"), otherwise the closest of ~32,000 ("≈ Barbie Pink"). |
+| **Shades and history**<br>Five shades under the card, each with its value and name, and every color you pick is kept. | **Auto copy**<br>Copies the value on the card the moment you click, without opening the window. |
+| **Global hotkey**<br>`Ctrl+Super+C` from anywhere. On Wayland it uses your desktop's own shortcuts. | **Light, dark or your desktop's theme** · new<br>A faint glow in the corner follows your color, and so does the dot on the tray icon. |
 
-`Esc` or right-click cancels a pick and brings the previous color back. Archtoys lives in the tray, can start on login, and has light and dark themes.
+`Esc` or right-click cancels a pick and brings the previous color back. Archtoys lives in the tray and can start on login.
 
 <div align="center">
 
@@ -39,7 +40,9 @@ Wayland and X11 · at home on KDE Plasma · works offline
 | ![Archtoys main window, light theme](docs/screenshots/main-light.png) | ![Archtoys main window, dark theme](docs/screenshots/main-dark.png) |
 
 <details>
-<summary>The Customize formats panel</summary>
+<summary>Settings, and the Customize formats panel</summary>
+
+![The settings page: cards with switches for the Color Picker and the app](docs/screenshots/settings.png)
 
 ![The Customize formats panel: turn formats on or off and change their order](docs/screenshots/formats.png)
 
@@ -70,17 +73,17 @@ Wayland and X11 · at home on KDE Plasma · works offline
 | ----------------------------------------- | -------------------------------------------------------------------------------------- |
 | Pick a color                              | Click **Pick** or press `Ctrl+Super+C`, then left-click. `Esc` or right-click cancels. |
 | Find a color by name                      | Press `Ctrl+F` or click 🔍 (see [Color search](#color-search))                         |
-| Copy a value                              | Click the copy icon next to it                                                         |
-| Enter a color by hand                     | Type into any field and press `Enter`                                                  |
-| Choose and reorder formats                | The sliders button, next to ⚙                                                          |
-| Use a shade or an old color               | Click it in the shade bar or the history row                                           |
+| Copy a value                              | Click the copy icon next to it. You get the full form, like `rgb(255,70,162)`.         |
+| Enter a color by hand                     | Click the big value on the card, or a box, type, and press `Enter`. Plain numbers work. |
+| Choose and reorder formats                | The sliders button, next to ⚙ (you can hide it; then it's in the ⚙ settings)           |
+| Use a shade or an old color               | Click it in the shades or the history row                                              |
 | Change the hotkey, theme, startup…        | The ⚙ settings                                                                         |
 | Pick from a terminal or your own shortcut | `archtoys --pick` (starts Archtoys if it isn't running)                                |
 | Report a problem                          | **Report a problem** in the ⚙ settings                                                 |
 
 ### Color search
 
-Press `Ctrl+F` and type. Results appear as you type, as a grid of color cards.
+Press `Ctrl+F` and type. Results appear as you type, as a grid of color cards, with how many colors matched and how long it took. The color card moves down under the results.
 
 <div align="center">
 
@@ -96,7 +99,7 @@ Press `Ctrl+F` and type. Results appear as you type, as a grid of color cards.
 | `#FF46A2`, `rgb(255,70,162)`, `oklch(…)` | The nearest named colors                                                                                               |
 | `pnik`                                   | A typo is fixed only when nothing matches, and the search says so: _Showing results for pink_                          |
 
-Hovering a card previews it in the window and shows its value in your first format. Click it (or use the arrow keys and `Enter`) to use it, or press `Esc` to go back to your previous color.
+Hovering a result shows it on the color card and shows its value in your first format. Click it (or use the arrow keys and `Enter`) to use it. `Esc`, `Ctrl+F` or a click on the color card goes back to your previous color.
 
 ## Desktop support
 
@@ -211,6 +214,7 @@ ui/app.slint            the whole user interface
 Archtoys is growing into a **PowerToys-style toolkit for Linux**, with the color picker as its first tool.
 
 - [x] Color search
+- [x] A new look: the color card, shades with names, themes, and a new logo
 - [ ] A color editor, and comparing two colors (contrast and how alike they look)
 - [ ] **Text Extractor**: select any area of the screen and copy the text in it (OCR)
 - [ ] A sidebar with multiple tools, in the style of PowerToys
