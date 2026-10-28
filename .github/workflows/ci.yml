@@ -42,6 +42,38 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+      # Color search must answer each keystroke in under 2 ms. This is a
+      # report, not a gate: shared runners vary in speed, so a slow run shows a
+      # warning and the timings in the run's summary instead of failing CI
+      # (which would also hold back a release).
+      - name: Search speed (under 2 ms per keystroke)
+        run: |
+          set +e
+          out=$(cargo test --locked --release search::tests::speed -- --ignored --nocapture 2>&1)
+          status=$?
+          set -e
+          worst=$(grep -oP '^worst: \K[0-9.]+' <<<"$out" || true)
+          slowest=$(grep -P '^\s*[0-9.]+ ms ' <<<"$out" | sort -rn | head -5 || true)
+          {
+            if [ -z "$worst" ]; then
+              echo "### ⚠️ Search speed: the test didn't run"
+              echo '```'; tail -n 30 <<<"$out"; echo '```'
+            elif [ "$status" -eq 0 ]; then
+              echo "### ✅ Search speed: slowest keystroke ${worst} ms (budget 2 ms)"
+            else
+              echo "### ⚠️ Search speed: slowest keystroke ${worst} ms, over the 2 ms budget"
+            fi
+            if [ -n "$slowest" ]; then
+              echo; echo "Slowest keystrokes (time, results, text typed so far):"
+              echo '```'; echo "$slowest"; echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$worst" ]; then
+            echo "::warning title=Search speed::The speed test didn't run; see the run summary"
+          elif [ "$status" -ne 0 ]; then
+            echo "::warning title=Search speed::Slowest keystroke took ${worst} ms (budget 2 ms); see the run summary"
+          fi
+
       - name: Check PKGBUILDs parse
         run: |
           bash -n packaging/aur-archtoys/PKGBUILD
