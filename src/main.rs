@@ -18,7 +18,7 @@ mod single_instance;
 mod tray;
 mod ui_state;
 
-use color::{parse_color, scale_rgb, ColorField};
+use color::{copy_text, parse_color, scale_rgb, ColorField};
 use config::{apply_config, load_config, persist_config, sync_autostart_entry, HistoryStore};
 use hotkey::{build_hotkey_from_capture, HotkeyService, HotkeyStatus, DEFAULT_HOTKEY_TEXT};
 use ksni::blocking::TrayMethods;
@@ -33,9 +33,9 @@ use ui_state::{
 };
 
 const WINDOW_MIN_WIDTH: f64 = 480.0;
-const WINDOW_MIN_HEIGHT: f64 = 320.0;
+const WINDOW_MIN_HEIGHT: f64 = 420.0;
 const WINDOW_MAX_WIDTH: f64 = 900.0;
-const WINDOW_MAX_HEIGHT: f64 = 620.0;
+const WINDOW_MAX_HEIGHT: f64 = 1000.0;
 
 fn apply_native_window_constraints(ui: &AppWindow) {
     use slint::winit_030::{winit, WinitWindowAccessor};
@@ -160,14 +160,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // The desktop's tray host may start after us (autostart at login): wait for
     // it instead of giving up, or a hidden start has no way back (issue #7).
-    let tray = tray::AppTray { ui: ui_handle.clone() }.assume_sni_available(true);
-    let _tray_handle = match tray.spawn() {
-        Ok(handle) => Some(handle),
-        Err(err) => {
-            eprintln!("tray: failed to spawn: {err:?}");
-            None
-        }
-    };
+    // The dot starts pink, like the logo, and takes the color once it is shown.
+    let tray = tray::AppTray { ui: ui_handle.clone(), dot: (0xff, 0x2e, 0x93) }.assume_sni_available(true);
+    match tray.spawn() {
+        Ok(handle) => tray::install(handle),
+        Err(err) => eprintln!("tray: failed to spawn: {err:?}"),
+    }
 
     let history_store: HistoryStore = Arc::new(Mutex::new(vec![(203, 182, 172), (85, 85, 85)]));
     ui_state::install_models(&ui);
@@ -238,7 +236,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let settings_history = history_store.clone();
     ui.on_settings_changed(move || {
         if let Some(ui) = settings_ui.upgrade() {
-            ui_state::refresh_rows(&ui); // Auto Copy moves the highlight
+            ui_state::refresh_rows(&ui); // names on or off
             persist_config(&ui, &settings_history);
             sync_autostart_entry(ui.get_setting_autostart());
         }
@@ -292,9 +290,12 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    ui.on_copy_to_clipboard(move |text| {
-        // near names are shown as "≈ Name"; copy just the name
-        copy_text_async(text.trim_start_matches("≈ ").to_string());
+    // The boxes show values without the wrapper; copying gives the full form.
+    let copy_ui = ui_handle.clone();
+    ui.on_copy_value(move |key| {
+        if let (Some(ui), Some(field)) = (copy_ui.upgrade(), ColorField::from_ui_label(&key)) {
+            copy_text_async(copy_text(field, current_rgb(&ui)));
+        }
     });
 
     // --- Color search ---

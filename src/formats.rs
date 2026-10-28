@@ -1,5 +1,5 @@
-//! Which color formats are shown, in which order, and which one Auto Copy
-//! copies (the first enabled one, skipping the name).
+//! Which color formats are shown and in which order. The first enabled one is
+//! the big value on the color card and what Auto Copy copies.
 
 use crate::color::ColorField;
 use serde::{Deserialize, Serialize};
@@ -45,7 +45,7 @@ impl FormatList {
             }
         }
         let mut list = Self { items };
-        if list.copyable_enabled_count() == 0 {
+        if list.enabled().is_empty() {
             list.set_state(ColorField::Hex, true);
         }
         list
@@ -71,16 +71,10 @@ impl FormatList {
         self.items.iter().filter(|(_, on)| *on).map(|(f, _)| *f).collect()
     }
 
-    /// What Auto Copy copies: the first enabled format that isn't the name.
+    /// The first enabled format: shown big on the color card, and what Auto
+    /// Copy copies.
     pub fn auto_copy_field(&self) -> ColorField {
-        self.enabled()
-            .into_iter()
-            .find(|f| *f != ColorField::Name)
-            .unwrap_or(ColorField::Hex)
-    }
-
-    fn copyable_enabled_count(&self) -> usize {
-        self.items.iter().filter(|(f, on)| *on && *f != ColorField::Name).count()
+        self.enabled().first().copied().unwrap_or(ColorField::Hex)
     }
 
     fn set_state(&mut self, field: ColorField, on: bool) {
@@ -89,11 +83,11 @@ impl FormatList {
         }
     }
 
-    /// Turns a format on or off. At least one format besides the name must
-    /// stay on, so there is always something to copy.
+    /// Turns a format on or off. At least one format must stay on, so there is
+    /// always something on the color card to copy.
     pub fn set_enabled(&mut self, field: ColorField, on: bool) -> Result<(), &'static str> {
         let currently_on = self.items.iter().any(|(f, s)| *f == field && *s);
-        if !on && currently_on && field != ColorField::Name && self.copyable_enabled_count() <= 1 {
+        if !on && currently_on && self.enabled().len() <= 1 {
             return Err("Keep at least one color format turned on");
         }
         self.set_state(field, on);
@@ -123,9 +117,9 @@ mod tests {
         let list = FormatList::default();
         assert_eq!(
             list.enabled(),
-            vec![ColorField::Name, ColorField::Hex, ColorField::Rgb, ColorField::Hsl, ColorField::Hsv]
+            vec![ColorField::Hex, ColorField::Rgb, ColorField::Hsl, ColorField::Hsv]
         );
-        assert_eq!(list.auto_copy_field(), ColorField::Hex); // the name is skipped
+        assert_eq!(list.auto_copy_field(), ColorField::Hex);
     }
 
     #[test]
@@ -146,7 +140,6 @@ mod tests {
             list.set_enabled(f, false).unwrap();
         }
         assert!(list.set_enabled(ColorField::Hsv, false).is_err());
-        assert!(list.set_enabled(ColorField::Name, false).is_ok()); // the name doesn't count
         assert_eq!(list.enabled(), vec![ColorField::Hsv]);
     }
 
@@ -155,6 +148,7 @@ mod tests {
         let saved = vec![
             FormatEntry { key: "RGB".into(), enabled: true },
             FormatEntry { key: "HEX".into(), enabled: false },
+            FormatEntry { key: "NAME".into(), enabled: true }, // no longer a format: ignored
             FormatEntry { key: "FUTURE".into(), enabled: true }, // unknown: ignored
         ];
         let list = FormatList::from_saved(&saved);

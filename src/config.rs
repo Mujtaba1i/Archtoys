@@ -17,7 +17,17 @@ pub type HistoryStore = Arc<Mutex<Vec<Rgb>>>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
-    pub dark_mode: bool,
+    /// "light", "dark" or "system". The old `dark_mode` switch is not carried
+    /// over: everyone starts on the desktop's own setting.
+    pub theme: String,
+    /// The color card as a gradient instead of the solid color.
+    pub card_gradient: bool,
+    /// Show color names (card and shades). None in configs from before v0.5.0,
+    /// which had NAME as a format instead: then that format decides.
+    pub show_name: Option<bool>,
+    /// The sliders button (Customize formats) in the header.
+    #[serde(default = "default_true")]
+    pub show_formats_button: bool,
     pub setting_minimize: bool,
     /// Minimize to system tray when the window's [X] close button is clicked.
     /// Defaults to `true` so the app lives in the tray by default.
@@ -40,7 +50,10 @@ fn default_true() -> bool {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            dark_mode: false,
+            theme: "system".to_string(),
+            card_gradient: false,
+            show_name: None,
+            show_formats_button: true,
             setting_minimize: false,
             setting_minimize_tray: true,
             setting_autocopy: false,
@@ -136,7 +149,10 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         guard.iter().map(|(r, g, b)| [*r, *g, *b]).collect()
     };
     AppConfig {
-        dark_mode: skin.get_dark_mode(),
+        theme: ["light", "dark", "system"][skin.get_theme().clamp(0, 2) as usize].to_string(),
+        card_gradient: ui.get_setting_card_gradient(),
+        show_name: Some(ui.get_setting_show_name()),
+        show_formats_button: ui.get_setting_formats_button(),
         setting_minimize: ui.get_setting_minimize(),
         setting_minimize_tray: ui.get_setting_minimize_tray(),
         setting_autocopy: ui.get_setting_autocopy(),
@@ -153,7 +169,14 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
 
 pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfig) {
     let skin = ui.global::<Skin>();
-    skin.set_dark_mode(cfg.dark_mode);
+    skin.set_theme(match cfg.theme.as_str() {
+        "light" => 0,
+        "dark" => 1,
+        _ => 2,
+    });
+    ui.set_setting_card_gradient(cfg.card_gradient);
+    ui.set_setting_show_name(show_name(cfg));
+    ui.set_setting_formats_button(cfg.show_formats_button);
     ui.set_setting_minimize(cfg.setting_minimize);
     ui.set_setting_minimize_tray(cfg.setting_minimize_tray);
     ui.set_setting_autocopy(cfg.setting_autocopy);
@@ -168,6 +191,13 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
             guard.push((rgb[0], rgb[1], rgb[2]));
         }
     }
+}
+
+/// Before v0.5.0 the name was a format ("NAME" in the format list); turning
+/// it off there means the name stays off.
+fn show_name(cfg: &AppConfig) -> bool {
+    cfg.show_name
+        .unwrap_or_else(|| cfg.formats.iter().find(|f| f.key == "NAME").is_none_or(|f| f.enabled))
 }
 
 pub fn persist_config(ui: &AppWindow, history_store: &HistoryStore) {
@@ -188,9 +218,20 @@ mod tests {
         fs::write(path.with_extension("json.tmp"), "half-writ").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "old");
 
-        write_atomic(&path, b"{\"dark_mode\":true}").unwrap();
-        assert!(serde_json::from_str::<AppConfig>(&fs::read_to_string(&path).unwrap()).unwrap().dark_mode);
+        write_atomic(&path, b"{\"setting_autocopy\":true}").unwrap();
+        assert!(serde_json::from_str::<AppConfig>(&fs::read_to_string(&path).unwrap()).unwrap().setting_autocopy);
         assert!(!path.with_extension("json.tmp").exists());
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn configs_from_before_v0_5_0_keep_their_choices() {
+        let old: AppConfig = serde_json::from_str(r#"{"dark_mode":true,"formats":[{"key":"NAME","enabled":false},{"key":"HEX","enabled":true}]}"#).unwrap();
+        assert_eq!(old.theme, "system"); // everyone starts on the desktop's setting
+        assert!(!show_name(&old)); // NAME was turned off as a format
+        let named: AppConfig = serde_json::from_str(r#"{"formats":[{"key":"NAME","enabled":true}]}"#).unwrap();
+        assert!(show_name(&named));
+        assert!(show_name(&serde_json::from_str::<AppConfig>("{}").unwrap()));
+        assert!(serde_json::from_str::<AppConfig>("{}").unwrap().show_formats_button);
     }
 }

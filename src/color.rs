@@ -5,7 +5,6 @@ pub type Rgb = (u8, u8, u8);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorField {
-    Name,
     Hex,
     Rgb,
     Hsl,
@@ -18,8 +17,7 @@ pub enum ColorField {
 
 impl ColorField {
     /// Every field, in the default order.
-    pub const ALL: [ColorField; 9] = [
-        Self::Name,
+    pub const ALL: [ColorField; 8] = [
         Self::Hex,
         Self::Rgb,
         Self::Hsl,
@@ -33,7 +31,6 @@ impl ColorField {
     /// The short label shown in the row, also used as its key.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Name => "NAME",
             Self::Hex => "HEX",
             Self::Rgb => "RGB",
             Self::Hsl => "HSL",
@@ -51,18 +48,12 @@ impl ColorField {
 
     /// Enabled until the user changes it.
     pub fn on_by_default(self) -> bool {
-        matches!(self, Self::Name | Self::Hex | Self::Rgb | Self::Hsl | Self::Hsv)
-    }
-
-    /// The name can't be typed in (yet).
-    pub fn editable(self) -> bool {
-        self != Self::Name
+        matches!(self, Self::Hex | Self::Rgb | Self::Hsl | Self::Hsv)
     }
 
     /// An example of the format, for error messages.
     pub fn example(self) -> &'static str {
         match self {
-            Self::Name => "a color name",
             Self::Hex => "#FF46A2",
             Self::Rgb => "rgb(255, 70, 162)",
             Self::Hsl => "hsl(330, 100%, 64%)",
@@ -251,7 +242,6 @@ pub fn format_oklab(r: u8, g: u8, b: u8) -> String {
 pub fn format_canonical(field: ColorField, rgb: Rgb) -> String {
     let (r, g, b) = rgb;
     match field {
-        ColorField::Name => crate::names::display_name(rgb),
         ColorField::Hex => format_hex(r, g, b),
         ColorField::Rgb => format_rgb(r, g, b),
         ColorField::Hsl => format_hsl(r, g, b),
@@ -265,8 +255,33 @@ pub fn format_canonical(field: ColorField, rgb: Rgb) -> String {
 
 /// What gets copied: like the display, but without the "≈ " of near names.
 pub fn copy_text(field: ColorField, rgb: Rgb) -> String {
-    let text = format_canonical(field, rgb);
-    text.trim_start_matches("≈ ").to_string()
+    format_canonical(field, rgb)
+}
+
+/// What the card, the boxes and the shades show: the value without its
+/// wrapper, e.g. "255, 70, 162" for rgb(255,70,162) and "330°, 100%, 64%" for
+/// hsl(330,100%,64%). Copying still gives the full form (`copy_text`), and
+/// every bare form can be typed back in.
+pub fn format_bare(field: ColorField, rgb: Rgb) -> String {
+    let full = format_canonical(field, rgb);
+    let inner = full.find('(').map_or(full.as_str(), |open| &full[open + 1..full.len() - 1]);
+    match field {
+        ColorField::Hex => full.clone(),
+        ColorField::Oklch | ColorField::Oklab => inner.to_string(),
+        ColorField::Cmyk => inner.replace('%', "").replace(',', ", "),
+        ColorField::Hsl | ColorField::Hsv | ColorField::Hsla => {
+            let (hue, rest) = inner.split_once(',').unwrap_or((inner, ""));
+            format!("{hue}°, {}", rest.replace(',', ", "))
+        }
+        ColorField::Rgb => inner.replace(',', ", "),
+    }
+}
+
+/// Whether text on this color reads better dark than white (WCAG contrast:
+/// dark text when the color's relative luminance is above about 0.18).
+pub fn wants_dark_text(rgb: Rgb) -> bool {
+    let lum = 0.2126 * to_linear(rgb.0) + 0.7152 * to_linear(rgb.1) + 0.0722 * to_linear(rgb.2);
+    lum > 0.179
 }
 
 /// Multiplies each channel by `factor`, clamped to 0..=255.
@@ -345,7 +360,7 @@ pub fn parse_hsl_permissive(value: &str) -> Option<Rgb> {
         return None;
     }
 
-    let h = parts[0].parse::<f32>().ok()?.rem_euclid(360.0);
+    let h = degrees(parts[0])?.rem_euclid(360.0);
     let s = parse_percentage_0_to_1(parts[1])?;
     let l = parse_percentage_0_to_1(parts[2])?;
 
@@ -360,7 +375,7 @@ pub fn parse_hsv_permissive(value: &str) -> Option<Rgb> {
         return None;
     }
 
-    let h = parts[0].parse::<f32>().ok()?.rem_euclid(360.0);
+    let h = degrees(parts[0])?.rem_euclid(360.0);
     let s = parse_percentage_0_to_1(parts[1])?;
     let v = parse_percentage_0_to_1(parts[2])?;
 
@@ -385,8 +400,16 @@ fn fraction(value: &str) -> Option<f32> {
     value.parse::<f32>().ok()
 }
 
+/// "330", "330°" or "330deg" -> 330.
 fn degrees(value: &str) -> Option<f32> {
-    value.trim_end_matches("deg").parse::<f32>().ok()
+    value.trim().trim_end_matches('°').trim_end_matches("deg").trim().parse::<f32>().ok()
+}
+
+/// OKLCH / OKLab lightness: "0.62", "62%", or a bare number above 1 read as
+/// percent ("62" -> 0.62).
+fn lightness(value: &str) -> Option<f32> {
+    let l = fraction(value)?;
+    Some(if l > 1.0 && !value.ends_with('%') { l / 100.0 } else { l })
 }
 
 pub fn parse_cmyk_permissive(value: &str) -> Option<Rgb> {
@@ -418,7 +441,7 @@ pub fn parse_oklch_permissive(value: &str) -> Option<Rgb> {
     if parts.len() != 3 && parts.len() != 4 {
         return None;
     }
-    let l = fraction(&parts[0])?;
+    let l = lightness(&parts[0])?;
     // chroma as "%" means % of 0.4 (CSS)
     let c = match parts[1].strip_suffix('%') {
         Some(p) => p.trim().parse::<f32>().ok()? / 100.0 * 0.4,
@@ -434,7 +457,7 @@ pub fn parse_oklab_permissive(value: &str) -> Option<Rgb> {
     if parts.len() != 3 && parts.len() != 4 {
         return None;
     }
-    let l = fraction(&parts[0])?;
+    let l = lightness(&parts[0])?;
     let a = parts[1].parse::<f32>().ok()?;
     let b = parts[2].parse::<f32>().ok()?;
     Some(oklab_to_rgb(l.clamp(0.0, 1.0), a, b))
@@ -442,7 +465,6 @@ pub fn parse_oklab_permissive(value: &str) -> Option<Rgb> {
 
 pub fn parse_color(field: ColorField, value: &str) -> Option<Rgb> {
     match field {
-        ColorField::Name => None,
         ColorField::Hex => parse_hex_flexible(value),
         ColorField::Rgb => parse_rgb_permissive(value),
         ColorField::Hsl => parse_hsl_permissive(value),
@@ -533,7 +555,6 @@ mod tests {
         assert_eq!(parse_color(ColorField::Oklch, "oklch(62.8% 0.2577 29.23deg)"), Some((255, 0, 0)));
         assert_eq!(parse_color(ColorField::Oklab, "oklab(0.628 0.2249 0.1258)"), Some((255, 0, 0)));
         assert_eq!(parse_color(ColorField::Oklch, "oklch(nope)"), None);
-        assert_eq!(parse_color(ColorField::Name, "Red"), None);
     }
 
     #[test]
@@ -550,5 +571,39 @@ mod tests {
         assert_eq!(l1, (240, 120, 0));
         assert_eq!(d1, (140, 70, 0));
         assert_eq!(d2, (100, 50, 0));
+    }
+
+    #[test]
+    fn bare_values_read_back_as_the_same_color() {
+        let c = (255, 70, 162);
+        assert_eq!(format_bare(ColorField::Hex, c), "#FF46A2");
+        assert_eq!(format_bare(ColorField::Rgb, c), "255, 70, 162");
+        assert_eq!(format_bare(ColorField::Hsl, c), "330°, 100%, 64%");
+        assert_eq!(format_bare(ColorField::Cmyk, c), "0, 73, 36, 0");
+        assert!(format_bare(ColorField::Oklch, c).starts_with("0.6"));
+        for c in [(0, 0, 0), (255, 255, 255), (25, 129, 206), (239, 168, 62), (255, 70, 162)] {
+            for field in ColorField::ALL {
+                let back = parse_color(field, &format_bare(field, c)).unwrap_or_else(|| panic!("{field:?} {c:?}"));
+                let close = |a: u8, b: u8| a.abs_diff(b) <= 2;
+                assert!(close(back.0, c.0) && close(back.1, c.1) && close(back.2, c.2), "{field:?}: {c:?} -> {back:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn bare_numbers_are_understood() {
+        assert_eq!(parse_color(ColorField::Rgb, "10,20,30"), Some((10, 20, 30)));
+        assert_eq!(parse_color(ColorField::Hsl, "0,100,50"), Some((255, 0, 0)));
+        assert_eq!(parse_color(ColorField::Hsl, "120°, 100%, 50%"), Some((0, 255, 0)));
+        assert_eq!(parse_color(ColorField::Oklch, "62.8 0.2577 29.23"), Some((255, 0, 0)));
+        assert_eq!(parse_color(ColorField::Oklch, "0.628 0.2577 29.23"), Some((255, 0, 0)));
+    }
+
+    #[test]
+    fn text_color_follows_brightness() {
+        assert!(wants_dark_text((255, 196, 0))); // yellow: dark text
+        assert!(wants_dark_text((57, 255, 20))); // neon green
+        assert!(!wants_dark_text((201, 43, 30))); // red: white text
+        assert!(!wants_dark_text((5, 24, 62))); // navy
     }
 }

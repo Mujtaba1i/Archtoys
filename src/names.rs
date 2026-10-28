@@ -241,7 +241,7 @@ pub fn name_of(rgb: Rgb) -> (&'static str, bool) {
     answer
 }
 
-/// What the NAME row shows: "Hot Pink", or "≈ Hot Pink" if only close.
+/// The name on the color card and the shades: "Hot Pink", or "≈ Hot Pink" if only close.
 pub fn display_name(rgb: Rgb) -> String {
     match name_of(rgb) {
         ("", _) => String::new(),

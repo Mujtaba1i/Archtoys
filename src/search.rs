@@ -117,7 +117,7 @@ fn lch(lab: [f32; 3]) -> [f32; 3] {
 }
 
 /// The names list plus the CSS names. A CSS name keeps its CSS color (Crimson is
-/// #DC143C, as the NAME row says), the same name with the same color is kept
+/// #DC143C, as the color card says), the same name with the same color is kept
 /// once, and the same name with different colors keeps every color.
 fn build_pool() -> Pool {
     let csv = names::entries();
@@ -237,7 +237,7 @@ fn color_code(query: &str) -> Option<Result<Rgb, &'static str>> {
     let prefix = lower[..open].trim();
     let field = ColorField::ALL
         .into_iter()
-        .find(|f| *f != ColorField::Name && f.label().eq_ignore_ascii_case(prefix))?;
+        .find(|f| f.label().eq_ignore_ascii_case(prefix))?;
     Some(parse_color(field, query).ok_or(field.example()))
 }
 

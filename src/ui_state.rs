@@ -1,9 +1,10 @@
-//! Pushes colors, the format rows and history into the main window.
+//! Pushes the color into the main window: the color card (first format), the
+//! format boxes (the others), the shades, the search results and history.
 
-use crate::color::{calculate_shades, copy_text, format_canonical, ColorField, Rgb};
+use crate::color::{calculate_shades, copy_text, format_bare, wants_dark_text, ColorField, Rgb};
 use crate::config::{persist_config, HistoryStore};
 use crate::formats::FormatList;
-use crate::{AppWindow, FieldRow, FormatOption, SearchCard};
+use crate::{AppWindow, FieldRow, FormatOption, SearchCard, ShadeCell};
 use arboard::{Clipboard, SetExtLinux};
 use slint::{Color, ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, VecModel};
 use std::cell::{Cell, RefCell};
@@ -19,12 +20,14 @@ thread_local! {
     static ERROR_GENERATION: Cell<u64> = const { Cell::new(0) };
     /// Which formats are shown, and in which order.
     static FORMATS: RefCell<FormatList> = RefCell::new(FormatList::default());
-    /// The rows on screen. Kept (not recreated) so typing isn't interrupted.
+    /// The format boxes (formats 2..n). Kept (not recreated) so typing isn't interrupted.
     static ROWS: RefCell<Option<Rc<VecModel<FieldRow>>>> = const { RefCell::new(None) };
+    /// The shades strip. Kept, so the tiles fade to a new color.
+    static SHADES: RefCell<Option<Rc<VecModel<ShadeCell>>>> = const { RefCell::new(None) };
     /// The list in the "Customize formats" panel.
     static OPTIONS: RefCell<Option<Rc<VecModel<FormatOption>>>> = const { RefCell::new(None) };
-    /// Bumped on every update; a row copies its value into its text field
-    /// whenever this changes (see ValueRow in app.slint).
+    /// Bumped on every update; a box copies its value into its text field
+    /// whenever this changes (see FormatBox in app.slint).
     static REVISION: Cell<i32> = const { Cell::new(0) };
     /// Every hit of the current search; the grid gets them a page at a time.
     static SEARCH_HITS: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
@@ -36,6 +39,9 @@ thread_local! {
 
 /// Cards added to the search grid at a time (about 10 are on screen).
 const SEARCH_PAGE: usize = 30;
+
+/// The shades, lightest to darkest; the middle one is the color itself.
+const SHADE_FACTORS: [f32; 5] = [1.5, 1.2, 1.0, 0.7, 0.5];
 
 /// The last color that was fully applied (see `COMMITTED`).
 pub fn committed_rgb() -> Rgb {
@@ -84,7 +90,7 @@ pub fn formats() -> FormatList {
     FORMATS.with(|f| f.borrow().clone())
 }
 
-/// Sets the format list (e.g. from config.json) and rebuilds the rows.
+/// Sets the format list (e.g. from config.json) and rebuilds the card and boxes.
 pub fn set_formats(ui: &AppWindow, list: FormatList) {
     FORMATS.with(|f| *f.borrow_mut() = list);
     rebuild_rows(ui);
@@ -98,6 +104,9 @@ pub fn install_models(ui: &AppWindow) {
     let options = Rc::new(VecModel::<FormatOption>::default());
     ui.set_format_options(ModelRc::from(options.clone()));
     OPTIONS.with(|o| *o.borrow_mut() = Some(options));
+    let shades = Rc::new(VecModel::<ShadeCell>::default());
+    ui.set_shades(ModelRc::from(shades.clone()));
+    SHADES.with(|s| *s.borrow_mut() = Some(shades));
     let cards = Rc::new(VecModel::<SearchCard>::default());
     ui.set_search_results(ModelRc::from(cards.clone()));
     SEARCH_CARDS.with(|c| *c.borrow_mut() = Some(cards));
@@ -111,33 +120,28 @@ fn next_revision() -> i32 {
     })
 }
 
-fn make_row(ui: &AppWindow, field: ColorField, rgb: Rgb, auto_field: ColorField, revision: i32) -> FieldRow {
+fn make_row(field: ColorField, rgb: Rgb, revision: i32) -> FieldRow {
     FieldRow {
         key: field.label().into(),
         label: field.label().into(),
-        value: format_canonical(field, rgb).into(),
+        value: format_bare(field, rgb).into(),
         rev: revision,
-        auto_copy: ui.get_setting_autocopy() && field == auto_field,
-        editable: field.editable(),
     }
 }
 
-/// Rebuilds the rows and the options list after the format list changed.
+/// Rebuilds the card, the boxes and the options list after the format list changed.
 fn rebuild_rows(ui: &AppWindow) {
     let list = formats();
     let rgb = committed_rgb();
-    let auto_field = list.auto_copy_field();
     let revision = next_revision();
-    let rows: Vec<FieldRow> = list
-        .enabled()
-        .into_iter()
-        .map(|f| make_row(ui, f, rgb, auto_field, revision))
-        .collect();
+    ui.set_card(make_row(list.auto_copy_field(), rgb, revision));
+    let rows: Vec<FieldRow> = list.enabled().into_iter().skip(1).map(|f| make_row(f, rgb, revision)).collect();
     ROWS.with(|r| {
         if let Some(model) = r.borrow().as_ref() {
             model.set_vec(rows);
         }
     });
+    update_shades(ui, rgb);
     let options: Vec<FormatOption> = list
         .items()
         .iter()
@@ -154,10 +158,14 @@ fn rebuild_rows(ui: &AppWindow) {
     });
 }
 
-/// Updates every row's value, except the one the user is typing in.
+/// Updates the card, every box and the shades, except the value the user is typing in.
 fn refresh_values(ui: &AppWindow, rgb: Rgb, skip: Option<ColorField>) {
-    let auto_field = formats().auto_copy_field();
+    let first = formats().auto_copy_field();
     let revision = next_revision();
+    if skip != Some(first) {
+        ui.set_card(make_row(first, rgb, revision));
+    }
+    update_shades(ui, rgb);
     ROWS.with(|r| {
         let rows = r.borrow();
         let Some(model) = rows.as_ref() else { return };
@@ -167,9 +175,49 @@ fn refresh_values(ui: &AppWindow, rgb: Rgb, skip: Option<ColorField>) {
             if Some(field) == skip {
                 continue;
             }
-            model.set_row_data(i, make_row(ui, field, rgb, auto_field, revision));
+            model.set_row_data(i, make_row(field, rgb, revision));
         }
     });
+}
+
+/// The shades strip: each shade with its own name (when names are on), and its
+/// value in the first format, in text that reads on it.
+fn update_shades(ui: &AppWindow, rgb: Rgb) {
+    let first = formats().auto_copy_field();
+    let names = ui.get_setting_show_name();
+    let (l2, l1, d1, d2) = calculate_shades(rgb);
+    let cells: Vec<ShadeCell> = [l2, l1, rgb, d1, d2]
+        .into_iter()
+        .zip(SHADE_FACTORS)
+        .map(|(shade, factor)| ShadeCell {
+            color: to_color(shade),
+            ink: ink(shade),
+            name: if names { crate::names::display_name(shade).into() } else { "".into() },
+            value: format_bare(first, shade).into(),
+            factor,
+        })
+        .collect();
+    SHADES.with(|s| {
+        let Some(model) = s.borrow().as_ref().cloned() else { return };
+        if model.row_count() != cells.len() {
+            model.set_vec(cells);
+            return;
+        }
+        for (i, cell) in cells.into_iter().enumerate() {
+            model.set_row_data(i, cell);
+        }
+    });
+    ui.set_card_name(if names { crate::names::display_name(rgb).into() } else { "".into() });
+    ui.set_card_ink(ink(rgb));
+}
+
+/// Dark or white text, whichever reads better on `rgb`.
+fn ink(rgb: Rgb) -> Color {
+    if wants_dark_text(rgb) {
+        Color::from_rgb_u8(0x14, 0x14, 0x18)
+    } else {
+        Color::from_rgb_u8(0xff, 0xff, 0xff)
+    }
 }
 
 /// Turns a format on or off; refuses to turn off the last one.
@@ -186,28 +234,24 @@ pub fn move_format(ui: &AppWindow, field: ColorField, delta: i32) {
     }
 }
 
-/// Re-draws the rows (e.g. after Auto Copy was switched, which moves the highlight).
+/// Re-draws the card, boxes and shades (e.g. after names were switched on or off).
 pub fn refresh_rows(ui: &AppWindow) {
     refresh_values(ui, committed_rgb(), None);
 }
 
 // ------------------------------------------------------------ the color
 
-/// Main swatch + the light/dark shades bar.
+/// The color the card, the aurora and the search preview show.
 fn update_preview_color(ui: &AppWindow, rgb: Rgb) {
     ui.set_current_color(to_color(rgb));
-    let (lighter_2, lighter_1, darker_1, darker_2) = calculate_shades(rgb);
-    ui.set_shade_lighter_2(to_color(lighter_2));
-    ui.set_shade_lighter_1(to_color(lighter_1));
-    ui.set_shade_darker_1(to_color(darker_1));
-    ui.set_shade_darker_2(to_color(darker_2));
 }
 
-/// Swatch, shades and every row.
+/// Makes `rgb` the selected color: card, boxes, shades and the tray dot.
 pub fn update_ui_colors(ui: &AppWindow, rgb: Rgb) {
     COMMITTED.with(|c| c.set(rgb));
     update_preview_color(ui, rgb);
     refresh_values(ui, rgb, None);
+    crate::tray::set_dot(rgb);
 }
 
 /// Shows a color everywhere without making it the current one (hovering a
@@ -268,15 +312,19 @@ fn search_card(hit: u32) -> SearchCard {
     SearchCard {
         name: name.into(),
         color: to_color(rgb),
-        // the first format after the name, the one Auto Copy uses
-        value: copy_text(formats().auto_copy_field(), rgb).into(),
+        // the first format, as on the color card
+        value: format_bare(formats().auto_copy_field(), rgb).into(),
     }
 }
 
-/// Runs a search and shows the first page of results.
+/// Runs a search and shows the first page of results, with how many colors
+/// matched and how long the search took.
 pub fn show_search(ui: &AppWindow, query: &str) {
+    let started = std::time::Instant::now();
     let results = crate::search::search(query);
-    ui.set_search_note(results.note.unwrap_or_default().into());
+    let took = started.elapsed();
+    ui.set_search_note(results.note.clone().unwrap_or_default().into());
+    ui.set_search_summary(if results.hits.is_empty() { "".into() } else { search_summary(results.hits.len(), took).into() });
     let first: Vec<SearchCard> = results.hits.iter().take(SEARCH_PAGE).map(|&h| search_card(h)).collect();
     SEARCH_HITS.with(|h| *h.borrow_mut() = results.hits);
     SEARCH_CARDS.with(|c| {
@@ -285,6 +333,22 @@ pub fn show_search(ui: &AppWindow, query: &str) {
         }
     });
     ui.set_search_generation(ui.get_search_generation().wrapping_add(1)); // scrolls back to the top
+}
+
+/// "5,351 colors · 0.84 ms" (µs below a tenth of a millisecond).
+fn search_summary(count: usize, took: Duration) -> String {
+    let digits = count.to_string();
+    let mut grouped = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(ch);
+    }
+    let noun = if count == 1 { "color" } else { "colors" };
+    let micros = took.as_micros();
+    let time = if micros < 100 { format!("{micros} µs") } else { format!("{:.2} ms", took.as_secs_f64() * 1000.0) };
+    format!("{grouped} {noun} · {time}")
 }
 
 /// Adds the next page of results to the grid (it scrolled near the end).
@@ -337,11 +401,23 @@ pub fn apply_selected_color(ui: &AppWindow, history_store: &HistoryStore, rgb: R
     update_ui_colors(ui, rgb);
 
     if ui.get_setting_autocopy() {
-        // the first format in the list (the name is skipped)
+        // the first format: the big value on the color card
         copy_text_async(copy_text(formats().auto_copy_field(), rgb));
     } else {
         show_window(ui);
     }
 
     persist_config(ui, history_store);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_summary_reads_well() {
+        assert_eq!(search_summary(5351, Duration::from_micros(840)), "5,351 colors · 0.84 ms");
+        assert_eq!(search_summary(1, Duration::from_micros(42)), "1 color · 42 µs");
+        assert_eq!(search_summary(1_234_567, Duration::from_millis(2)), "1,234,567 colors · 2.00 ms");
+    }
 }
