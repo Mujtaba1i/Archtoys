@@ -1,6 +1,6 @@
 [package]
 name = "archtoys"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 description = "System-wide color picker for Linux, inspired by Microsoft PowerToys"
 license = "MIT"

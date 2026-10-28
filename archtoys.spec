@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.4.1
+Version:        0.5.0
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -142,6 +142,71 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Wed Oct 28 2026 Mujtaba1i <mujtaba1i@github> - 0.5.0-1
+- UI finished
+- README
+- functionality DONE!
+- ready to publish
+- changed dependencies
+- test
+- v0.1.1 and fix AUR build
+- v0.1.2
+- fixed
+- Fix light-mode text and icon install
+- fixed a bug v0.1.5
+- Release 0.1.6 with updated lockfile
+- fix
+- Fix tray icon + install proper icon sizes
+- Add GitHub Actions release workflow
+- Install fontconfig deps in CI
+- Install X11 deps in CI
+- Install xcb-shm deps in CI
+- Fix release artifact name
+- Grant release write permissions to workflow
+- Fix picker overlay window lifecycle and release v0.1.8
+- Fix settings panel overflow and release v0.1.9
+- Prepare v0.2.1: tray-start fix, AppImage pipeline, repo cleanup
+- Added Fedora Copr .spec file
+- Copr build bug fix
+- bug fix copr and rpm file workflow added
+- bug fix copr
+- bug fixes & copr release
+- fix: vendor crates and fix spec for offline Copr buildroot
+- ci: add manual trigger option for release-rpm workflow
+- release-rpm fix
+- modifified README.md
+- Configure separate automated AUR deployment workflows
+- Consolidate release workflows, fix AUR packaging, add one-time AUR hotfix
+- Remove one-time AUR hotfix
+- Build release binaries on ubuntu 22.04
+- Bundle runtime and add smoke test
+- Automate version bump, changelog and failure reports on release
+- Add pixel magnifier and live preview on Wayland, desktop-managed hotkey, input validation, and fix color accuracy and crash bugs
+- New README with screenshots
+- Fixing README image missing
+- README added aur link
+- fix app icon wayland
+- making releases wait for CI
+- add color names, CMYK, HSLA, OKLCH and OKLab
+- Color name license and readme update
+- Follow COPR builds until the RPMs are attached
+- New workflow to create .deb file
+- fixed a bug with copr watcher in the CI
+- new testing and releasing methods
+- adding a report button and fixing a text color big
+- The Fedora package now requires the libraries Archtoys loads while it runs
+- Say so when no fonts or no browser are available, and keep the AppImage's libraries away from the browser
+- Package checks now confirm a window appears and a second launch leaves one copy
+- fixing package-test script to include archtoys-bin
+- Added a search bar for name hex rgb and so, fixed a wayland pick bug, removed unused compiled crates
+- Starting hidden at login no longer leaves a stuck window in the taskbar, and the tray icon appears even when the panel starts after Archtoys (#7)
+- Minimize on Pick now keeps the window where you put it on KDE Plasma (Wayland)
+- Fixed a bug in package-test for .deb:ubuntu24.04 and a bug for the last log lines not appearing in opened issue by the script
+- New logo and app icon
+- New look:first format in big on a color card, typing numbers like 255, 70, 162 in rgb is fine, named shades, a settings page, Light/Dark/System theme, and a tray dot with picked color
+- CI reports how fast color search answers each keystroke
+- README: new screenshots and the new look
+
 * Mon Oct 26 2026 Mujtaba1i <mujtaba1i@github> - 0.4.1-1
 - Starting hidden at login no longer leaves a stuck window in the taskbar, and the tray icon appears even when the panel starts after Archtoys (#7)
 - Minimize on Pick now keeps the window where you put it on KDE Plasma (Wayland)
