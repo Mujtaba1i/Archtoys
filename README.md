@@ -27,7 +27,7 @@ Wayland and X11 · at home on KDE Plasma · works offline
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | **Pixel magnifier**<br>The pixels around your cursor, 10× larger, with the one you'll get outlined. | **Live preview, on Wayland too**<br>The color follows your mouse. On Wayland, Archtoys picks from one frozen screenshot. |
 | **The color card** · new<br>Your first format, big, on the color itself. Click the value to type a new one. | **Color search**<br>Press `Ctrl+F` and type a name, a word like _sky_, or a code like `#FF46A2`. |
-| **Your formats, your order**<br>HEX, RGB, HSL, HSV, CMYK, HSLA, OKLCH and OKLab. Type plain numbers like `255, 70, 162`; copying gives `rgb(255,70,162)`. | **Color names**<br>The CSS name when there is one ("Hot Pink"), otherwise the closest of ~32,000 ("≈ Barbie Pink"). |
+| **Your formats, your order**<br>HEX, RGB, HSL, HSV, CMYK, HSLA, OKLCH, OKLab and HWB. Type plain numbers like `255, 70, 162`; copying gives `rgb(255,70,162)`. | **Color names**<br>The CSS name when there is one ("Hot Pink"), otherwise the closest of ~32,000 ("≈ Barbie Pink"). |
 | **Shades and history**<br>Five shades under the card, each with its value and name, and every color you pick is kept. | **Auto copy**<br>Copies the value on the card the moment you click, without opening the window. |
 | **Global hotkey**<br>`Ctrl+Super+C` from anywhere. On Wayland it uses your desktop's own shortcuts. | **Light, dark or your desktop's theme** · new<br>A faint glow in the corner follows your color, and so does the dot on the tray icon. |
 
@@ -185,6 +185,16 @@ cd Archtoys
 cargo test --locked
 cargo run --release --locked
 ```
+
+On Wayland, the desktop knows an app by its `.desktop` file: without it there is no app icon (a generic "W" instead) and no global shortcut through the desktop. A package installs it; when you run from source with no package installed, add it for your user, pointing at your build:
+
+```bash
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/256x256/apps
+sed "s|^Exec=.*|Exec=$PWD/target/release/archtoys %u|" packaging/archtoys.desktop > ~/.local/share/applications/archtoys.desktop
+cp packaging/archtoys-256.png ~/.local/share/icons/hicolor/256x256/apps/archtoys.png
+```
+
+Remove both files again before installing a package, or they take its place.
 
 **Project layout**
 
