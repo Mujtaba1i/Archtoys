@@ -36,6 +36,9 @@ NEWEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n 1)"
 
 BASE="$(bash "$(dirname "$0")/changes-base.sh" "$TAG" "$TAG_SHA")"
 RANGE="${BASE:+$BASE..}$TAG_SHA"
+# The previous release's tag, for the notes' heading and compare link; empty
+# when its tag isn't on main (history rewritten, see changes-base.sh).
+PREV="$(git describe --tags --exact-match --match 'v[0-9]*' "$BASE" 2>/dev/null || true)"
 echo "Version: $CURRENT -> $VERSION   (changes since: ${BASE:-the beginning})"
 
 # Commit subjects since the previous tag: no merges, no "Release vX" commits,
@@ -64,7 +67,9 @@ open("Cargo.lock", "w").write(s)
 PY
 
 # --- archtoys.spec: Version, Release, and a new %changelog entry ------------
-sed -i -E "s/^(Version:[[:space:]]+).*/\1${VERSION}/; s/^(Release:[[:space:]]+)[0-9]+/\11/" archtoys.spec
+# -i.bak works with GNU and BSD sed, so test_prepare_release.py runs anywhere
+sed -i.bak -E "s/^(Version:[[:space:]]+).*/\1${VERSION}/; s/^(Release:[[:space:]]+)[0-9]+/\11/" archtoys.spec
+rm -f archtoys.spec.bak
 # A retry of the same tag (after a failed attempt) replaces that version's
 # entry, so fixes made in between are listed too.
 if grep -qE "^\* .* - ${VERSION//./\\.}-1$" archtoys.spec; then
