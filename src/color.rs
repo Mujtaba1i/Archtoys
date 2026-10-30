@@ -13,11 +13,12 @@ pub enum ColorField {
     Hsla,
     Oklch,
     Oklab,
+    Hwb,
 }
 
 impl ColorField {
     /// Every field, in the default order.
-    pub const ALL: [ColorField; 8] = [
+    pub const ALL: [ColorField; 9] = [
         Self::Hex,
         Self::Rgb,
         Self::Hsl,
@@ -26,6 +27,7 @@ impl ColorField {
         Self::Hsla,
         Self::Oklch,
         Self::Oklab,
+        Self::Hwb,
     ];
 
     /// The short label shown in the row, also used as its key.
@@ -39,6 +41,7 @@ impl ColorField {
             Self::Hsla => "HSLA",
             Self::Oklch => "OKLCH",
             Self::Oklab => "OKLAB",
+            Self::Hwb => "HWB",
         }
     }
 
@@ -62,6 +65,7 @@ impl ColorField {
             Self::Hsla => "hsla(330, 100%, 64%, 1)",
             Self::Oklch => "oklch(0.682 0.217 352.4)",
             Self::Oklab => "oklab(0.682 0.207 -0.066)",
+            Self::Hwb => "hwb(330 27% 0%)",
         }
     }
 }
@@ -220,6 +224,13 @@ fn fixed(v: f32, decimals: usize) -> String {
     }
 }
 
+/// CSS syntax: hwb(H W% B%): hue, how much white, how much black.
+pub fn format_hwb(r: u8, g: u8, b: u8) -> String {
+    let (hue, max, min) = hue_parts((r, g, b));
+    let pct = |v: f32| (v * 100.0).round().clamp(0.0, 100.0);
+    format!("hwb({:.0} {:.0}% {:.0}%)", round_hue(hue), pct(min), pct(1.0 - max))
+}
+
 /// CSS syntax: oklch(L C H) with L 0–1.
 pub fn format_oklch(r: u8, g: u8, b: u8) -> String {
     let [l, a, bb] = rgb_to_oklab((r, g, b));
@@ -250,6 +261,7 @@ pub fn format_canonical(field: ColorField, rgb: Rgb) -> String {
         ColorField::Hsla => format_hsla(r, g, b),
         ColorField::Oklch => format_oklch(r, g, b),
         ColorField::Oklab => format_oklab(r, g, b),
+        ColorField::Hwb => format_hwb(r, g, b),
     }
 }
 
@@ -274,6 +286,10 @@ pub fn format_bare(field: ColorField, rgb: Rgb) -> String {
             format!("{hue}°, {}", rest.replace(',', ", "))
         }
         ColorField::Rgb => inner.replace(',', ", "),
+        ColorField::Hwb => {
+            let (hue, rest) = inner.split_once(' ').unwrap_or((inner, ""));
+            format!("{hue}°, {}", rest.replace(' ', ", "))
+        }
     }
 }
 
@@ -463,7 +479,68 @@ pub fn parse_oklab_permissive(value: &str) -> Option<Rgb> {
     Some(oklab_to_rgb(l.clamp(0.0, 1.0), a, b))
 }
 
+pub fn parse_hwb_permissive(value: &str) -> Option<Rgb> {
+    let parts = components(value, "hwb");
+    if parts.len() != 3 && parts.len() != 4 {
+        return None;
+    }
+    let h = degrees(&parts[0])?.rem_euclid(360.0);
+    // plain numbers are percentages, like CMYK
+    let pct = |s: &str| -> Option<f32> {
+        let raw = s.strip_suffix('%').unwrap_or(s).trim().parse::<f32>().ok()?;
+        Some((raw / 100.0).clamp(0.0, 1.0))
+    };
+    let (w, b) = (pct(&parts[1])?, pct(&parts[2])?);
+    if w + b >= 1.0 {
+        let gray = w / (w + b); // CSS: too much white + black is a gray
+        return Some(to_rgb(gray, gray, gray));
+    }
+    Some(from_hue(h, w, 1.0 - b - w))
+}
+
+/// Reads a typed color. Colors are 8-bit RGB, so the closest one doesn't
+/// always show the same numbers back: hsl(50, 60%, 70%) is closest to #E0D185,
+/// which shows as 59%. Then a color one step away that does show what was
+/// typed is used (#E0D184 here), so the value stays as typed when any color
+/// can show it.
 pub fn parse_color(field: ColorField, value: &str) -> Option<Rgb> {
+    let rgb = parse_nearest(field, value)?;
+    if matches!(field, ColorField::Hex | ColorField::Rgb) {
+        return Some(rgb); // already exact
+    }
+    let typed = numbers(value);
+    // the typed numbers, at the start of the shown ones (HSLA's alpha may be left out)
+    let shows_typed = |c: Rgb| {
+        let shown = numbers(&format_canonical(field, c));
+        !typed.is_empty() && typed.len() <= shown.len() && typed.iter().zip(&shown).all(|(a, b)| (a - b).abs() < 1e-9)
+    };
+    if shows_typed(rgb) {
+        return Some(rgb);
+    }
+    let step = |v: u8, d: i16| (v as i16 + d).clamp(0, 255) as u8;
+    let mut best: Option<(i16, Rgb)> = None;
+    for dr in -1..=1 {
+        for dg in -1..=1 {
+            for db in -1..=1 {
+                let c = (step(rgb.0, dr), step(rgb.1, dg), step(rgb.2, db));
+                let moved = dr.abs() + dg.abs() + db.abs();
+                if best.map_or(true, |(m, _)| moved < m) && shows_typed(c) {
+                    best = Some((moved, c));
+                }
+            }
+        }
+    }
+    Some(best.map_or(rgb, |(_, c)| c))
+}
+
+/// The numbers in a color's text: "hsl(50, 60%, 70%)" and "50,60,70" both give [50, 60, 70].
+fn numbers(text: &str) -> Vec<f64> {
+    text.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .filter_map(|part| part.parse::<f64>().ok())
+        .collect()
+}
+
+fn parse_nearest(field: ColorField, value: &str) -> Option<Rgb> {
     match field {
         ColorField::Hex => parse_hex_flexible(value),
         ColorField::Rgb => parse_rgb_permissive(value),
@@ -473,6 +550,7 @@ pub fn parse_color(field: ColorField, value: &str) -> Option<Rgb> {
         ColorField::Hsla => parse_hsla_permissive(value),
         ColorField::Oklch => parse_oklch_permissive(value),
         ColorField::Oklab => parse_oklab_permissive(value),
+        ColorField::Hwb => parse_hwb_permissive(value),
     }
 }
 
@@ -597,6 +675,34 @@ mod tests {
         assert_eq!(parse_color(ColorField::Hsl, "120°, 100%, 50%"), Some((0, 255, 0)));
         assert_eq!(parse_color(ColorField::Oklch, "62.8 0.2577 29.23"), Some((255, 0, 0)));
         assert_eq!(parse_color(ColorField::Oklch, "0.628 0.2577 29.23"), Some((255, 0, 0)));
+    }
+
+    #[test]
+    fn typed_values_stay_as_typed() {
+        // closest is #E0D185, which shows saturation 59%; #E0D184 shows 60%
+        let rgb = parse_color(ColorField::Hsl, "50,60,70").unwrap();
+        assert_eq!(rgb, (224, 209, 132));
+        assert_eq!(format_bare(ColorField::Hsl, rgb), "50°, 60%, 70%");
+        // every whole-number HSL that some color can show comes back unchanged
+        let mut kept = 0;
+        for (h, s, l) in [(50, 60, 70), (210, 40, 30), (0, 100, 50), (300, 15, 85), (120, 33, 47)] {
+            let text = format!("{h},{s},{l}");
+            let shown = format_bare(ColorField::Hsl, parse_color(ColorField::Hsl, &text).unwrap());
+            kept += (shown == format!("{h}°, {s}%, {l}%")) as i32;
+        }
+        assert_eq!(kept, 5);
+        assert_eq!(parse_color(ColorField::Hex, "#FF46A2"), Some((255, 70, 162))); // exact formats untouched
+    }
+
+    #[test]
+    fn hwb_formats_and_parses() {
+        let pink = (255, 70, 162);
+        assert_eq!(format_canonical(ColorField::Hwb, pink), "hwb(330 27% 0%)");
+        assert_eq!(format_bare(ColorField::Hwb, pink), "330°, 27%, 0%");
+        let back = parse_color(ColorField::Hwb, "hwb(330 27% 0%)").unwrap();
+        assert!(back.0 == 255 && back.1.abs_diff(70) <= 2 && back.2.abs_diff(162) <= 2, "{back:?}");
+        assert_eq!(parse_color(ColorField::Hwb, "0, 60, 60"), Some((128, 128, 128))); // white + black > 100%
+        assert_eq!(parse_color(ColorField::Hwb, "hwb(0 0% 100%)"), Some((0, 0, 0)));
     }
 
     #[test]

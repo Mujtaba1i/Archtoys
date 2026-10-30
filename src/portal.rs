@@ -128,6 +128,14 @@ pub fn register_host_app(conn: &Connection, app_id: &str) {
         });
     if let Err(err) = result {
         eprintln!("portal: host app registration not available ({err})");
+        if err.to_string().contains("App info not found") {
+            // the desktop knows apps by their .desktop file; packages install it
+            eprintln!(
+                "portal: {app_id}.desktop isn't installed, so the desktop doesn't know this app: \
+                 no global shortcut through the desktop and no app icon. Running from source? \
+                 See \"Building from source\" in the README."
+            );
+        }
     }
 }
 

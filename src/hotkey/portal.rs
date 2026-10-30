@@ -40,7 +40,11 @@ impl PortalShortcut {
         let thread_fallback = fallback.clone();
         thread::spawn(move || {
             if let Err(err) = run(&text, trigger.clone(), on_status.clone(), rx) {
-                eprintln!("hotkey: {err}; using the X11 hotkey instead");
+                // only the hotkey falls back; the window stays on Wayland
+                eprintln!(
+                    "hotkey: {err}; using the X11 hotkey instead (the window stays on Wayland; \
+                     the X11 hotkey only works while an X11 app has the keyboard)"
+                );
                 let (service, _) = HotkeyService::start_x11(&text, trigger);
                 *thread_fallback.lock().unwrap() = Some(service);
                 on_status(HotkeyStatus::AppManaged);

@@ -41,6 +41,8 @@ pub struct AppConfig {
     pub formats: Vec<FormatEntry>,
     /// The color shown when the app was last used, restored at startup.
     pub last_color: Option<[u8; 3]>,
+    /// The window's size (logical pixels) when the app was last used.
+    pub window_size: Option<[u32; 2]>,
 }
 
 fn default_true() -> bool {
@@ -62,6 +64,7 @@ impl Default for AppConfig {
             history: vec![],
             formats: vec![],
             last_color: None,
+            window_size: None,
         }
     }
 }
@@ -164,6 +167,7 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
             let (r, g, b) = crate::ui_state::committed_rgb();
             Some([r, g, b])
         },
+        window_size: crate::ui_state::window_size(ui).map(|(w, h)| [w, h]),
     }
 }
 
@@ -183,6 +187,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     ui.set_setting_autostart(cfg.setting_autostart);
     ui.set_setting_hotkey(cfg.setting_hotkey.clone().into());
     crate::ui_state::set_formats(ui, FormatList::from_saved(&cfg.formats));
+    crate::ui_state::set_window_size(cfg.window_size);
 
     if !cfg.history.is_empty() {
         let mut guard = history_store.lock().unwrap();

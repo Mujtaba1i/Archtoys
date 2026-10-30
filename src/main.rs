@@ -32,10 +32,10 @@ use ui_state::{
     show_message, sync_history_model, update_ui_colors, update_ui_preview_except_field,
 };
 
-const WINDOW_MIN_WIDTH: f64 = 480.0;
-const WINDOW_MIN_HEIGHT: f64 = 420.0;
-const WINDOW_MAX_WIDTH: f64 = 900.0;
-const WINDOW_MAX_HEIGHT: f64 = 1000.0;
+pub(crate) const WINDOW_MIN_WIDTH: f64 = 480.0;
+pub(crate) const WINDOW_MIN_HEIGHT: f64 = 420.0;
+pub(crate) const WINDOW_MAX_WIDTH: f64 = 900.0;
+pub(crate) const WINDOW_MAX_HEIGHT: f64 = 1000.0;
 
 fn apply_native_window_constraints(ui: &AppWindow) {
     use slint::winit_030::{winit, WinitWindowAccessor};
@@ -467,9 +467,12 @@ fn main() -> Result<(), slint::PlatformError> {
 
     if !start_hidden {
         ui.show()?;
+        ui_state::restore_size(&ui);
     }
 
     let result = slint::run_event_loop_until_quit();
+    // Quit from the tray: save the window size (and everything else) too.
+    persist_config(&ui, &history_store);
     drop(hotkey_service);
     result
 }

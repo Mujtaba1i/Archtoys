@@ -37,25 +37,35 @@ export struct ShadeCell {
     value: string,
     // what shade-clicked gets back
     factor: float,
+    // the same as the selected color (the middle one): marked, not clickable
+    current: bool,
 }
 
 export global Skin {
     // 0 = light, 1 = dark, 2 = follow the desktop
     in-out property <int> theme: 2;
     out property <bool> dark-mode: theme == 1 || (theme == 2 && Palette.color-scheme == ColorScheme.dark);
+    // 0 = light, 1 = dark, in between while the theme changes. A global can't
+    // animate, so AppWindow animates it and copies it here.
+    in-out property <float> dark-t;
 
-    out property <color> bg-color: dark-mode ? #111216 : #f6f7f9;
-    out property <color> surface: dark-mode ? #1d1f25 : #ffffff;
-    out property <color> surface-hover: dark-mode ? #262931 : #eceef2;
-    out property <color> border: dark-mode ? #2c2f37 : #dde1e8;
-    out property <color> text-main: dark-mode ? #f2f3f6 : #16181d;
-    out property <color> text-muted: dark-mode ? #a3a7b3 : #5d6270;
-    out property <color> icon-tint: dark-mode ? #c9ccd4 : #3a3e48;
-    out property <color> accent: dark-mode ? #1e8ccf : #1a7fc1;
+    // the dark color, the light one, or a mix while the theme changes
+    public pure function pick(dark: color, light: color) -> color {
+        dark.mix(light, dark-t)
+    }
+
+    out property <color> bg-color: pick(#111216, #f6f7f9);
+    out property <color> surface: pick(#1d1f25, #ffffff);
+    out property <color> surface-hover: pick(#262931, #eceef2);
+    out property <color> border: pick(#2c2f37, #dde1e8);
+    out property <color> text-main: pick(#f2f3f6, #16181d);
+    out property <color> text-muted: pick(#a3a7b3, #5d6270);
+    out property <color> icon-tint: pick(#c9ccd4, #3a3e48);
+    out property <color> accent: pick(#1e8ccf, #1a7fc1);
     // the track of a switch that is off, and of the segmented buttons
-    out property <color> track: dark-mode ? #2c2f37 : #e3e6ec;
+    out property <color> track: pick(#2c2f37, #e3e6ec);
     // how strong the aurora glow is
-    out property <float> aurora-strength: dark-mode ? 0.30 : 0.28;
+    out property <float> aurora-strength: 0.28 + 0.02 * dark-t;
 }
 
 // A round icon button in the header.
@@ -395,7 +405,7 @@ component ColorBubble inherits Rectangle {
     background: bubble-color;
     border-width: 1px;
     // so a color close to the background still shows
-    border-color: Skin.dark-mode ? #ffffff30 : #00000020;
+    border-color: Skin.pick(#ffffff30, #00000020);
     TouchArea { clicked => { root.clicked(); } }
 }
 
@@ -426,18 +436,20 @@ component ColorCard inherits Rectangle {
 
     // the color and text color glide to a new color instead of jumping
     property <color> shown: root.card-color;
-    animate shown { duration: 220ms; easing: ease-out; }
+    // false while the app starts: the saved color shows at once
+    in property <bool> animated: true;
+    animate shown { duration: root.animated ? 220ms : 0ms; easing: ease-out; }
     property <color> shown-ink: root.ink;
-    animate shown-ink { duration: 220ms; easing: ease-out; }
+    animate shown-ink { duration: root.animated ? 220ms : 0ms; easing: ease-out; }
 
     border-radius: 22px;
     // The gradient starts behind the text, so the text color still fits.
-    property <color> sheen: root.shown.mix(Skin.dark-mode ? #000000 : #ffffff, 0.5);
+    property <color> sheen: root.shown.mix(Skin.pick(#000000, #ffffff), 0.5);
     background: !root.gradient ? root.shown
         : @linear-gradient(45deg, root.shown 0%, root.shown 35%, self.sheen 100%);
     drop-shadow-blur: 28px;
     drop-shadow-offset-y: 10px;
-    drop-shadow-color: root.shown.transparentize(Skin.dark-mode ? 0.6 : 0.7);
+    drop-shadow-color: root.shown.transparentize(0.7 - 0.1 * Skin.dark-t);
 
     focus-release := FocusScope {
         width: 1px;
@@ -577,16 +589,29 @@ component ShadeTile inherits Rectangle {
     in property <string> label;
     callback clicked;
 
+    in property <bool> animated: true; // see ColorCard
     background: root.cell.color;
-    animate background { duration: 220ms; easing: ease-out; }
+    animate background { duration: root.animated ? 220ms : 0ms; easing: ease-out; }
     accessible-role: button;
-    accessible-label: root.cell.value;
-    accessible-action-default => { root.clicked(); }
+    accessible-label: root.cell.current ? root.cell.value + " (the selected color)" : root.cell.value;
+    accessible-action-default => { touch.clicked(); }
 
     // hover: a soft tint over the whole tile (the strip's round corners clip it)
     Rectangle {
         background: root.cell.ink.transparentize(touch.pressed ? 0.8 : touch.has-hover ? 0.88 : 1);
         animate background { duration: 150ms; }
+    }
+
+    // the selected color itself: a check mark instead of being clickable
+    Image {
+        x: parent.width - self.width - 8px;
+        y: 8px;
+        width: 14px;
+        height: 14px;
+        source: @image-url("check.svg");
+        colorize: root.cell.ink;
+        opacity: root.cell.current ? 0.85 : 0;
+        animate opacity { duration: 150ms; }
     }
 
     VerticalLayout {
@@ -620,7 +645,10 @@ component ShadeTile inherits Rectangle {
         font-size: 11px;
     }
 
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := TouchArea {
+        enabled: !root.cell.current;
+        clicked => { root.clicked(); }
+    }
 }
 
 // Small square button with an icon (the up/down arrows).
@@ -914,6 +942,11 @@ export component AppWindow inherits Window {
     // the boxes and shades fade out
     property <float> search-t: root.search-open ? 1 : 0;
     animate search-t { duration: 200ms; easing: ease-out; }
+    // light <-> dark fades instead of jumping (see Skin.dark-t)
+    property <float> theme-t: Skin.dark-mode ? 1 : 0;
+    animate theme-t { duration: root.started ? 200ms : 0ms; easing: ease-in-out; }
+    init => { Skin.dark-t = self.theme-t; }
+    changed theme-t => { Skin.dark-t = self.theme-t; }
     callback search-changed(string);
     callback search-hovered(int);
     callback search-applied(int);
@@ -937,7 +970,15 @@ export component AppWindow inherits Window {
     }
     // the aurora follows the color smoothly
     property <color> aurora: root.current-color;
-    animate aurora { duration: 500ms; easing: ease-in-out; }
+    animate aurora { duration: root.started ? 500ms : 0ms; easing: ease-in-out; }
+    // Colors and the theme only fade once the app is up: at startup the saved
+    // theme and color replace the defaults at once, without a flash.
+    property <bool> started: false;
+    Timer {
+        interval: 400ms;
+        running: !root.started;
+        triggered => { root.started = true; }
+    }
 
     function open-search() {
         root.formats-open = false;
@@ -1187,7 +1228,7 @@ export component AppWindow inherits Window {
                         x: root.pad;
                         y: 0;
                         width: body.inner-w;
-                        height: body.visible-height - body.card-h - 16px;
+                        height: body.visible-height - body.card-h - root.pad - 16px;
                         opacity: root.search-t;
 
                         TouchArea { } // clicks between the cards don't close it
@@ -1309,6 +1350,7 @@ export component AppWindow inherits Window {
                         opacity: 1 - root.search-t;
                         visible: root.search-t < 0.99;
                         for cell[i] in root.shades : ShadeTile {
+                            animated: root.started;
                             x: i * parent.width / 5;
                             width: parent.width / 5;
                             height: parent.height;
@@ -1319,8 +1361,9 @@ export component AppWindow inherits Window {
                     }
 
                     ColorCard {
+                        animated: root.started;
                         x: root.pad;
-                        y: root.search-t * (body.visible-height - body.card-h - 4px);
+                        y: root.search-t * (body.visible-height - body.card-h - root.pad);
                         width: body.inner-w;
                         height: body.card-h;
                         card-color: root.current-color;
@@ -1514,10 +1557,15 @@ export component AppWindow inherits Window {
         border-color: Skin.accent;
         drop-shadow-blur: 6px;
         drop-shadow-color: Skin.accent.transparentize(0.6);
+        clip: true;
 
         TouchArea { } // clicks on the bar don't close it
 
+        // Full width from the first moment, so typing works while the bar is
+        // still growing; the growing bar only reveals it.
         HorizontalLayout {
+            x: 0;
+            width: parent.full;
             padding-left: 12px;
             padding-right: 14px;
             spacing: 8px;

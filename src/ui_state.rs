@@ -6,7 +6,7 @@ use crate::config::{persist_config, HistoryStore};
 use crate::formats::FormatList;
 use crate::{AppWindow, FieldRow, FormatOption, SearchCard, ShadeCell};
 use arboard::{Clipboard, SetExtLinux};
-use slint::{Color, ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, VecModel};
+use slint::{Color, ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition, VecModel};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::thread;
@@ -33,8 +33,11 @@ thread_local! {
     static SEARCH_HITS: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
     /// The cards in the search grid.
     static SEARCH_CARDS: RefCell<Option<Rc<VecModel<SearchCard>>>> = const { RefCell::new(None) };
-    /// Where the main window was and how big, while it is hidden.
-    static WINDOW_PLACE: Cell<Option<(PhysicalPosition, PhysicalSize)>> = const { Cell::new(None) };
+    /// Where the main window was, while it is hidden.
+    static WINDOW_PLACE: Cell<Option<PhysicalPosition>> = const { Cell::new(None) };
+    /// The window's size in logical pixels: saved in config.json, and given
+    /// back to the window whenever it is shown.
+    static WINDOW_SIZE: Cell<Option<(u32, u32)>> = const { Cell::new(None) };
 }
 
 /// Cards added to the search grid at a time (about 10 are on screen).
@@ -195,6 +198,7 @@ fn update_shades(ui: &AppWindow, rgb: Rgb) {
             name: if names { crate::names::display_name(shade).into() } else { "".into() },
             value: format_bare(first, shade).into(),
             factor,
+            current: shade == rgb,
         })
         .collect();
     SHADES.with(|s| {
@@ -274,9 +278,35 @@ pub fn update_ui_preview_except_field(ui: &AppWindow, editing_field: ColorField,
 pub fn hide_window(ui: &AppWindow) {
     let window = ui.window();
     if window.is_visible() {
-        WINDOW_PLACE.with(|p| p.set(Some((window.position(), window.size()))));
+        remember_size(ui);
+        WINDOW_PLACE.with(|p| p.set(Some(window.position())));
     }
     window.hide().ok();
+}
+
+fn remember_size(ui: &AppWindow) {
+    let window = ui.window();
+    if window.is_visible() {
+        let size = window.size().to_logical(window.scale_factor());
+        WINDOW_SIZE.with(|s| s.set(Some((size.width.round() as u32, size.height.round() as u32))));
+    }
+}
+
+/// The window size to save in config.json (the last one seen on screen).
+pub fn window_size(ui: &AppWindow) -> Option<(u32, u32)> {
+    remember_size(ui);
+    WINDOW_SIZE.with(Cell::get)
+}
+
+/// The size saved last time, kept within the window's limits.
+pub fn set_window_size(size: Option<[u32; 2]>) {
+    let fit = |[w, h]: [u32; 2]| {
+        (
+            w.clamp(crate::WINDOW_MIN_WIDTH as u32, crate::WINDOW_MAX_WIDTH as u32),
+            h.clamp(crate::WINDOW_MIN_HEIGHT as u32, crate::WINDOW_MAX_HEIGHT as u32),
+        )
+    };
+    WINDOW_SIZE.with(|s| s.set(size.map(fit)));
 }
 
 /// Shows the main window again with the size and place it had. On Wayland a
@@ -289,20 +319,44 @@ pub fn show_window(ui: &AppWindow) {
         return;
     }
     window.show().ok();
-    let Some((position, size)) = WINDOW_PLACE.with(Cell::take) else { return };
-    window.set_position(position); // X11 only; Wayland ignores it
-    window.set_size(size);
+    if let Some(position) = WINDOW_PLACE.with(Cell::take) {
+        window.set_position(position); // X11 only; Wayland ignores it
+    }
+    restore_size(ui);
+}
+
+/// Gives the window its saved size (from before it was hidden, or from the
+/// last time the app ran), no bigger than the screen.
+pub fn restore_size(ui: &AppWindow) {
+    let Some((w, h)) = WINDOW_SIZE.with(Cell::get) else { return };
+    let size = LogicalSize::new(w as f32, h as f32);
+    ui.window().set_size(size);
     // shortcut: Slint resets a re-created window to its default size while it
     // creates it, so the size is set again once the window is up. Drop this when
     // Slint keeps the size of a re-shown window on Wayland.
     let weak = ui.as_weak();
     slint::Timer::single_shot(Duration::from_millis(150), move || {
-        if let Some(ui) = weak.upgrade() {
-            if ui.window().size() != size {
-                ui.window().set_size(size);
-            }
+        let Some(ui) = weak.upgrade() else { return };
+        let size = fit_screen(&ui, size);
+        let window = ui.window();
+        if window.size().to_logical(window.scale_factor()) != size {
+            window.set_size(size);
         }
     });
+}
+
+/// `size`, shrunk to the screen the window is on (a size saved on a bigger
+/// screen). The whole screen: the desktop keeps the window clear of panels.
+fn fit_screen(ui: &AppWindow, size: LogicalSize) -> LogicalSize {
+    use slint::winit_030::WinitWindowAccessor;
+    let screen = ui
+        .window()
+        .with_winit_window(|w| w.current_monitor().map(|m| m.size().to_logical::<f32>(m.scale_factor())))
+        .flatten();
+    match screen {
+        Some(s) => LogicalSize::new(size.width.min(s.width), size.height.min(s.height)),
+        None => size,
+    }
 }
 
 // ------------------------------------------------------------ search
@@ -381,8 +435,12 @@ pub fn sync_history_model(ui: &AppWindow, history_store: &HistoryStore) {
     ui.set_history_model(ModelRc::from(Rc::new(VecModel::from(colors))));
 }
 
+/// Adds a color to the front of the history, unless it is already the newest.
 pub fn push_history(history_store: &HistoryStore, rgb: Rgb) {
-    history_store.lock().unwrap().insert(0, rgb);
+    let mut history = history_store.lock().unwrap();
+    if history.first() != Some(&rgb) {
+        history.insert(0, rgb);
+    }
 }
 
 pub fn copy_text_async(text: String) {
@@ -413,6 +471,15 @@ pub fn apply_selected_color(ui: &AppWindow, history_store: &HistoryStore, rgb: R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_skips_a_repeat_of_the_newest_color() {
+        let store: HistoryStore = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        for rgb in [(1, 2, 3), (1, 2, 3), (4, 5, 6), (1, 2, 3)] {
+            push_history(&store, rgb);
+        }
+        assert_eq!(*store.lock().unwrap(), vec![(1, 2, 3), (4, 5, 6), (1, 2, 3)]);
+    }
 
     #[test]
     fn search_summary_reads_well() {
