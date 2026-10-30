@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -142,6 +142,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Fri Oct 30 2026 Mujtaba1i <mujtaba1i@github> - 0.5.1-1
+- fixed corrupted package-test script
+- New HWB color format, typed values like hsl(50, 60%%, 70%%) stay as typed, the window remembers its size, the theme fades between light and dark, typing works right after Ctrl+F, the selected shade is marked, and history skips repeats
+- Release notes list only the changes since the previous release, and every release is benchmarked against the previous one
+- README: HWB and new screenshots
+
 * Wed Oct 28 2026 Mujtaba1i <mujtaba1i@github> - 0.5.0-1
 - UI finished
 - README
