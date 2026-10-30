@@ -34,9 +34,9 @@ NEWEST="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n 1)"
 [ "$NEWEST" = "$VERSION" ] \
   || fail "Tag $TAG is older than the version already in Cargo.toml ($CURRENT). Use a higher version."
 
-PREV="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$TAG_SHA^" 2>/dev/null || true)"
-RANGE="${PREV:+$PREV..}$TAG_SHA"
-echo "Version: $CURRENT -> $VERSION   (changes since: ${PREV:-the beginning})"
+BASE="$(bash "$(dirname "$0")/changes-base.sh" "$TAG" "$TAG_SHA")"
+RANGE="${BASE:+$BASE..}$TAG_SHA"
+echo "Version: $CURRENT -> $VERSION   (changes since: ${BASE:-the beginning})"
 
 # Commit subjects since the previous tag: no merges, no "Release vX" commits,
 # each distinct message once, in the order they were made.

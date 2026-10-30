@@ -131,7 +131,8 @@ def main(argv):
     run_url = f"{os.environ['GITHUB_SERVER_URL']}/{repo}/actions/runs/{run_id}"
     failures = []
     for job in api_jobs(repo, run_id):
-        if job.get("conclusion") != "failure":
+        # the benchmark only reports, in the run summary; it's not a package failure
+        if job.get("conclusion") != "failure" or job.get("name", "").startswith("Benchmark"):
             continue
         step = next((s["name"] for s in job.get("steps", []) if s.get("conclusion") == "failure"), "(unknown step)")
         errors, tail = log_excerpt(repo, job["id"])
