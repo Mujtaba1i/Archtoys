@@ -147,6 +147,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 - New HWB color format, typed values like hsl(50, 60%%, 70%%) stay as typed, the window remembers its size, the theme fades between light and dark, typing works right after Ctrl+F, the selected shade is marked, and history skips repeats
 - Release notes list only the changes since the previous release, and every release is benchmarked against the previous one
 - README: HWB and new screenshots
+- Fixed the release script stopping before publishing
 
 * Wed Oct 28 2026 Mujtaba1i <mujtaba1i@github> - 0.5.0-1
 - UI finished
