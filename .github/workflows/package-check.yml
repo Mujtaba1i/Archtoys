@@ -95,10 +95,16 @@ jobs:
         with:
           sparse-checkout: .github/scripts
 
-      - name: Install a virtual display and xdotool
+      # The app's runtime libraries: the .deb's `depends` (Cargo.toml), which
+      # winit loads at startup (without libxkbcommon-x11 / libxcursor / libxi the
+      # app quits before its window shows), plus a font, the GL driver, a
+      # virtual display and xdotool.
+      - name: Install the app's libraries, a virtual display and xdotool
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb xdotool libgl1 libegl1 libgl1-mesa-dri libfontconfig1 >/dev/null
+          sudo apt-get install -y -qq libx11-6 libxkbcommon0 libxkbcommon-x11-0 libxcursor1 libxi6 libxrender1 \
+            libgl1 libegl1 libwayland-client0 libwayland-egl1 libfontconfig1 fonts-dejavu-core libgl1-mesa-dri \
+            xvfb xdotool >/dev/null
 
       - name: Download this release and the one before
         id: get
