@@ -26,10 +26,12 @@ Wayland and X11 · at home on KDE Plasma · works offline
 |                                                                                                              |                                                                                                                          |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
 | **Pixel magnifier**<br>The pixels around your cursor, 10× larger, with the one you'll get outlined. | **Live preview, on Wayland too**<br>The color follows your mouse. On Wayland, Archtoys picks from one frozen screenshot. |
-| **The color card** · new<br>Your first format, big, on the color itself. Click the value to type a new one. | **Color search**<br>Press `Ctrl+F` and type a name, a word like _sky_, or a code like `#FF46A2`. |
+| **The color card**<br>Your first format, big, on the color itself. Click the value to type a new one. | **Color search**<br>Press `Ctrl+F` and type a name, a word like _sky_, or a code like `#FF46A2`. |
 | **Your formats, your order**<br>HEX, RGB, HSL, HSV, CMYK, HSLA, OKLCH, OKLab and HWB. Type plain numbers like `255, 70, 162`; copying gives `rgb(255,70,162)`. | **Color names**<br>The CSS name when there is one ("Hot Pink"), otherwise the closest of ~32,000 ("≈ Barbie Pink"). |
 | **Shades and history**<br>Five shades under the card, each with its value and name, and every color you pick is kept. | **Auto copy**<br>Copies the value on the card the moment you click, without opening the window. |
-| **Global hotkey**<br>`Ctrl+Super+C` from anywhere. On Wayland it uses your desktop's own shortcuts. | **Light, dark or your desktop's theme** · new<br>A faint glow in the corner follows your color, and so does the dot on the tray icon. |
+| **Global hotkey**<br>`Ctrl+Super+C` from anywhere. On Wayland it uses your desktop's own shortcuts. | **Light, dark or your desktop's theme**<br>A faint glow in the corner follows your color, and so does the dot on the tray icon. |
+| **Color editor** · new<br>The pen on the middle shade opens it: drag saturation, brightness and hue, or type in your formats. Nothing changes until you press Use. | **Compare two colors** · new<br>Put a picked or typed color next to yours and see their contrast ratio (21 : 1 is black on white). |
+| **Pixel-precise picking** · new<br>The arrow keys move the pick one pixel, `Enter` picks. The value next to the cursor is in your first format. | **Every monitor** · new<br>Pick on any of your monitors, right up to their edges, also with different scaling per monitor. |
 
 `Esc` or right-click cancels a pick and brings the previous color back. Archtoys lives in the tray and can start on login.
 
@@ -38,6 +40,8 @@ Wayland and X11 · at home on KDE Plasma · works offline
 |                                 Light                                 |                                Dark                                 |
 | :-------------------------------------------------------------------: | :-----------------------------------------------------------------: |
 | ![Archtoys main window, light theme](docs/screenshots/main-light.png) | ![Archtoys main window, dark theme](docs/screenshots/main-dark.png) |
+
+![The color editor with Compare on: the selected yellow on the left, a typed navy on the right, 6.49 : 1 contrast between them](docs/screenshots/editor.png)
 
 <details>
 <summary>Settings, and the Customize formats panel</summary>
@@ -71,12 +75,13 @@ Wayland and X11 · at home on KDE Plasma · works offline
 
 | To                                        | Do                                                                                     |
 | ----------------------------------------- | -------------------------------------------------------------------------------------- |
-| Pick a color                              | Click **Pick** or press `Ctrl+Super+C`, then left-click. `Esc` or right-click cancels. |
+| Pick a color                              | Click **Pick** or press `Ctrl+Super+C`, then left-click (or move with the arrow keys and press `Enter`). `Esc` or right-click cancels. |
 | Find a color by name                      | Press `Ctrl+F` or click 🔍 (see [Color search](#color-search))                         |
 | Copy a value                              | Click the copy icon next to it. You get the full form, like `rgb(255,70,162)`.         |
 | Enter a color by hand                     | Click the big value on the card, or a box, type, and press `Enter`. Plain numbers work. |
 | Choose and reorder formats                | The sliders button, next to ⚙ (you can hide it; then it's in the ⚙ settings)           |
 | Use a shade or an old color               | Click it in the shades or the history row                                              |
+| Edit a color, or compare two              | Click the pen on the middle shade. **Compare** splits the card; **Pick** (or your hotkey) picks the second color; **Use** applies. `Esc` closes and keeps your edit. |
 | Change the hotkey, theme, startup…        | The ⚙ settings                                                                         |
 | Pick from a terminal or your own shortcut | `archtoys --pick` (starts Archtoys if it isn't running)                                |
 | Report a problem                          | **Report a problem** in the ⚙ settings                                                 |
@@ -106,11 +111,13 @@ Hovering a result shows it on the color card and shows its value in your first f
 |                                        | KDE Plasma (Wayland) |               GNOME (Wayland)               | X11 (any desktop) |
 | -------------------------------------- | :------------------: | :-----------------------------------------: | :---------------: |
 | Picker with live preview and magnifier |   ✅ freeze frame    |               ✅ freeze frame               |      ✅ live      |
+| Several monitors                       |          ✅          |                     ✅³                     |        ✅         |
 | Global hotkey                          |          ✅          | ✅ GNOME 48+ · ⚠️ older: `archtoys --pick`² |        ✅         |
 | Tray icon                              |          ✅          |     ✅ with the AppIndicator extension¹     |        ✅         |
 
 ¹ Ubuntu enables it by default. On other GNOME setups, install _AppIndicator and KStatusNotifierItem Support_.<br>
-² GNOME before 48 (including Ubuntu 22.04 and 24.04) can't register a global hotkey. Add your own in **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts**, with the command `archtoys --pick`.
+² GNOME before 48 (including Ubuntu 22.04 and 24.04) can't register a global hotkey. Add your own in **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts**, with the command `archtoys --pick`.<br>
+³ If the desktop's screenshot doesn't line up with your monitors, Archtoys uses the desktop's own picker instead (same color, no magnifier). Please report it if that happens.
 
 <details>
 <summary>How picking works on Wayland</summary>
@@ -144,7 +151,7 @@ ARCHTOYS_HOTKEY_BACKEND=x11 archtoys
 <details>
 <summary><b>No magnifier on Wayland with several monitors</b></summary>
 
-The freeze frame currently supports one monitor. With several, Archtoys falls back to your desktop's built-in color picker. It still picks the right color, but without the live preview. Multi-monitor support is on the roadmap.
+The freeze frame shows one screenshot across all your monitors. If your desktop's screenshot doesn't line up with the monitors (an unusual layout or scaling), Archtoys falls back to the desktop's built-in color picker: it still picks the right color, but without the live preview. Run `archtoys` from a terminal to see why, and please **Report a problem** with that line.
 
 </details>
 
@@ -196,6 +203,10 @@ cp packaging/archtoys-256.png ~/.local/share/icons/hicolor/256x256/apps/archtoys
 
 Remove both files again before installing a package, or they take its place.
 
+The window is drawn on the CPU (Slint's software renderer: it looks the same as OpenGL and uses about a third of the memory). To draw it with OpenGL instead, build with `cargo build --release --locked --no-default-features --features opengl`.
+
+The color names and the search index are prebuilt into `data/names-index.*`. After changing `data/colornames.csv` (or how names are normalized), run `cargo test --locked write_name_index -- --ignored`; a test fails until you do.
+
 **Project layout**
 
 ```
@@ -203,7 +214,8 @@ src/
 ├── main.rs             startup and wiring
 ├── color.rs            color formats, parsing, shades (unit-tested)
 ├── formats.rs          which formats are shown, their order, Auto Copy
-├── names.rs            color names (CSS names + data/colornames.csv)
+├── names.rs            color names (CSS names + the names list)
+├── name_index.rs       the names and search index, prebuilt from data/colornames.csv
 ├── search.rs           color search: families, typos, codes (unit-tested)
 ├── config.rs           settings (saved safely) and autostart
 ├── single_instance.rs  one copy at a time, archtoys --pick
@@ -225,10 +237,10 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, with the color
 
 - [x] Color search
 - [x] A new look: the color card, shades with names, themes, and a new logo
-- [ ] A color editor, and comparing two colors (contrast and how alike they look)
+- [x] A color editor, and comparing two colors (contrast ratio)
+- [x] Picking on every monitor, pixel by pixel with the arrow keys
 - [ ] **Text Extractor**: select any area of the screen and copy the text in it (OCR)
 - [ ] A sidebar with multiple tools, in the style of PowerToys
-- [ ] Freeze-frame picking across multiple monitors
 - [ ] Ideas for later: **Awake** (keep your PC from sleeping) and **Screen Ruler** (measure things on screen)
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.
