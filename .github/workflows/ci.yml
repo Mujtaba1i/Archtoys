@@ -42,6 +42,15 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+      # Real picks on a virtual X11 screen split into two monitors: arrow keys,
+      # Enter, a click and Esc, at the edge between the monitors and in the
+      # corner (the monitor maths itself is covered by the unit tests above).
+      - name: Pick on two monitors (X11)
+        run: |
+          sudo apt-get install -y xvfb x11-xserver-utils xdotool feh picom dbus \
+            libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 fonts-dejavu-core
+          bash .github/scripts/x11-pick-test.sh target/debug/archtoys
+
       # Color search must answer each keystroke in under 2 ms. This is a
       # report, not a gate: shared runners vary in speed, so a slow run shows a
       # warning and the timings in the run's summary instead of failing CI
