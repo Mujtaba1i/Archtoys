@@ -193,13 +193,16 @@ fn update_shades(ui: &AppWindow, rgb: Rgb) {
     let cells: Vec<ShadeCell> = [l2, l1, rgb, d1, d2]
         .into_iter()
         .zip(SHADE_FACTORS)
-        .map(|(shade, factor)| ShadeCell {
+        .enumerate()
+        .map(|(i, (shade, factor))| ShadeCell {
             color: to_color(shade),
             ink: ink(shade),
             name: if names { crate::names::display_name(shade).into() } else { "".into() },
             value: format_bare(first, shade).into(),
             factor,
-            current: shade == rgb,
+            // the middle one is the selected color (its pen opens the editor);
+            // not every shade that equals it: black's or white's all do
+            current: i == 2,
         })
         .collect();
     SHADES.with(|s| {
@@ -420,6 +423,41 @@ pub fn load_more_search() {
             }
         });
     });
+}
+
+/// Frees the results once the search has faded out (they stay visible while
+/// it fades), unless a new search started meanwhile.
+pub fn release_search(ui: &AppWindow) {
+    let weak = ui.as_weak();
+    let generation = ui.get_search_generation();
+    slint::Timer::single_shot(Duration::from_millis(400), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        if ui.get_search_generation() != generation {
+            return;
+        }
+        SEARCH_HITS.with(|h| *h.borrow_mut() = Vec::new());
+        SEARCH_CARDS.with(|c| {
+            if let Some(model) = c.borrow().as_ref() {
+                model.set_vec(Vec::new());
+            }
+        });
+        return_free_memory();
+    });
+}
+
+/// Hands memory the app freed back to the system. glibc keeps freed memory
+/// for later otherwise, and it still counts as the app's.
+pub(crate) fn return_free_memory() {
+    #[cfg(target_env = "gnu")]
+    {
+        extern "C" {
+            fn malloc_trim(pad: usize) -> std::ffi::c_int;
+        }
+        // SAFETY: glibc's malloc_trim only gives free heap pages back; it is thread-safe.
+        unsafe {
+            malloc_trim(0);
+        }
+    }
 }
 
 /// The color of the search card at `index`, if there is one.

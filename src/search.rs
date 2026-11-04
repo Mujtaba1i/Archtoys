@@ -7,14 +7,12 @@
 //! * A color code ("#FF46A2", "rgb(255,70,162)") shows the nearest named colors.
 //! * A typo is corrected only when nothing matches, and the result says so.
 //!
-//! Everything comes from the names already built into the app (`names.rs`), so
-//! the search adds nothing to the download. The index is built once, in the
-//! background at startup (`prepare`), so the first search is instant.
+//! Everything comes from the names built into the app. The index is prebuilt
+//! too (`name_index.rs`): nothing is set up at startup, and the first search is
+//! instant.
 
 use crate::color::{parse_color, parse_hex_flexible, rgb_to_oklab, ColorField, Rgb};
-use crate::names::{self, CSS_NAMES};
-use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
+use crate::name_index::{is_word, item, items, words, Item};
 
 /// What a search found.
 #[derive(Debug, Default, PartialEq)]
@@ -27,15 +25,8 @@ pub struct Results {
 
 /// Name and color of a search hit.
 pub fn entry(index: u32) -> (&'static str, Rgb) {
-    let item = &pool().items[index as usize];
-    (item.name, item.rgb)
-}
-
-/// Builds the index on a background thread, so the first search doesn't wait.
-pub fn prepare() {
-    std::thread::spawn(|| {
-        pool();
-    });
+    let item = item(index as usize);
+    (item.name(), item.rgb())
 }
 
 pub fn search(query: &str) -> Results {
@@ -80,89 +71,6 @@ pub fn search(query: &str) -> Results {
             "No color matches '{query}'. Try a name like 'sky', a code like #FF46A2, or pick a color from your screen."
         )),
     }
-}
-
-// ------------------------------------------------------------------ the index
-
-struct Item {
-    name: &'static str,
-    rgb: Rgb,
-    /// The name as `normalize` writes it, e.g. "a l orange" for "À l’Orange".
-    norm: String,
-    /// Where each word of `norm` starts.
-    starts: Vec<u16>,
-    lab: [f32; 3],
-    /// OKLCH: lightness, chroma, hue in degrees.
-    lch: [f32; 3],
-    /// Points for a good name: 5 if marked "good name", 3 if a CSS name, 2 if short.
-    quality: u8,
-    /// Position in alphabetical order, the last tie-breaker.
-    rank: u32,
-}
-
-struct Pool {
-    items: Vec<Item>,
-    /// Every distinct word in the names, with how many names use it.
-    words: HashMap<String, u32>,
-}
-
-fn pool() -> &'static Pool {
-    static POOL: OnceLock<Pool> = OnceLock::new();
-    POOL.get_or_init(build_pool)
-}
-
-fn lch(lab: [f32; 3]) -> [f32; 3] {
-    let hue = lab[2].atan2(lab[1]).to_degrees().rem_euclid(360.0);
-    [lab[0], lab[1].hypot(lab[2]), hue]
-}
-
-/// The names list plus the CSS names. A CSS name keeps its CSS color (Crimson is
-/// #DC143C, as the color card says), the same name with the same color is kept
-/// once, and the same name with different colors keeps every color.
-fn build_pool() -> Pool {
-    let csv = names::entries();
-    let good: HashSet<String> = csv.iter().filter(|e| e.good).map(|e| normalize(e.name)).collect();
-    let css: HashMap<String, Rgb> = CSS_NAMES.iter().map(|(n, rgb)| (normalize(n), *rgb)).collect();
-
-    let mut items = Vec::with_capacity(csv.len() + CSS_NAMES.len());
-    let mut seen: HashSet<(String, Rgb)> = HashSet::new();
-    let mut add = |name: &'static str, rgb: Rgb, is_css: bool| {
-        let norm = normalize(name);
-        if !seen.insert((norm.clone(), rgb)) {
-            return;
-        }
-        let lab = rgb_to_oklab(rgb);
-        let quality = if good.contains(&norm) { 5 } else { 0 }
-            + if is_css { 3 } else { 0 }
-            + if norm.len() <= 10 { 2 } else { 0 };
-        let starts = std::iter::once(0)
-            .chain(norm.match_indices(' ').map(|(i, _)| i + 1))
-            .map(|i| i as u16)
-            .collect();
-        items.push(Item { name, rgb, norm, starts, lab, lch: lch(lab), quality, rank: 0 });
-    };
-    for (name, rgb) in CSS_NAMES {
-        add(name, *rgb, true);
-    }
-    for e in csv {
-        if !css.contains_key(&normalize(e.name)) {
-            add(e.name, e.rgb, false);
-        }
-    }
-
-    let mut order: Vec<usize> = (0..items.len()).collect();
-    order.sort_by(|&a, &b| items[a].norm.cmp(&items[b].norm));
-    for (rank, i) in order.into_iter().enumerate() {
-        items[i].rank = rank as u32;
-    }
-
-    let mut words: HashMap<String, u32> = HashMap::new();
-    for item in &items {
-        for word in item.norm.split(' ') {
-            *words.entry(word.to_string()).or_default() += 1;
-        }
-    }
-    Pool { items, words }
 }
 
 // -------------------------------------------------------------- normalizing
@@ -244,12 +152,11 @@ fn color_code(query: &str) -> Option<Result<Rgb, &'static str>> {
 /// The `count` named colors that look closest (OKLab distance).
 fn nearest(rgb: Rgb, count: usize) -> Vec<u32> {
     let lab = rgb_to_oklab(rgb);
-    let mut scored: Vec<(f32, u32)> = pool()
-        .items
-        .iter()
+    let mut scored: Vec<(f32, u32)> = items()
         .enumerate()
         .map(|(i, item)| {
-            let d = (item.lab[0] - lab[0]).powi(2) + (item.lab[1] - lab[1]).powi(2) + (item.lab[2] - lab[2]).powi(2);
+            let l = item.lab();
+            let d = (l[0] - lab[0]).powi(2) + (l[1] - lab[1]).powi(2) + (l[2] - lab[2]).powi(2);
             (d, i as u32)
         })
         .collect();
@@ -388,11 +295,17 @@ fn contains(name: &str, needle: &str) -> bool {
     }
 }
 
+/// Does `needle` start a word of the name? (A byte scan: names are short.)
+fn starts_a_word(norm: &str, needle: &str) -> bool {
+    let (name, needle) = (norm.as_bytes(), needle.as_bytes());
+    name.starts_with(needle) || name.iter().enumerate().any(|(i, &b)| b == b' ' && name[i + 1..].starts_with(needle))
+}
+
 /// 24 if `needle` starts a word of the name, 12 if it is somewhere else in it, 0 if not.
 fn word_fit(item: &Item, needle: &str) -> u8 {
-    if item.starts.iter().any(|&s| item.norm[s as usize..].starts_with(needle)) {
+    if starts_a_word(item.norm, needle) {
         24
-    } else if contains(&item.norm, needle) {
+    } else if contains(item.norm, needle) {
         12
     } else {
         0
@@ -433,7 +346,8 @@ fn matches(text: &str) -> Vec<u32> {
     // Sort key, packed into one number so sorting thousands of hits stays fast:
     // exact name first, then tier, more points, shorter name, alphabetical.
     let mut found: Vec<(u64, u32)> = Vec::with_capacity(4096);
-    for (i, item) in pool().items.iter().enumerate() {
+    for (i, item) in items().enumerate() {
+        let item = &item;
         let exact = item.norm == text;
         let (tier, points) = match by_color {
             Some((family, shade)) => {
@@ -516,11 +430,10 @@ fn allowed_mistakes(word: &str) -> usize {
 /// The text with each unknown word replaced by the closest word in the names,
 /// or None if nothing could be corrected. Real words are never changed.
 fn correct(text: &str) -> Option<String> {
-    let words = &pool().words;
     let mut changed = false;
     let mut out = vec![];
     for word in text.split(' ') {
-        if words.contains_key(word) {
+        if is_word(word) {
             out.push(word.to_string());
             continue;
         }
@@ -528,14 +441,13 @@ fn correct(text: &str) -> Option<String> {
         if limit == 0 {
             return None;
         }
-        let best = words
-            .iter()
+        let best = words()
             .filter(|(w, _)| w.len().abs_diff(word.len()) <= limit)
-            .map(|(w, count)| (edit_distance(word, w, limit), *count, w))
+            .map(|(w, count)| (edit_distance(word, w, limit), count, w))
             .filter(|(d, _, _)| *d <= limit)
             .min_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(b.2)));
         let (_, _, w) = best?;
-        out.push(w.clone());
+        out.push(w.to_string());
         changed = true;
     }
     changed.then(|| out.join(" "))
@@ -553,8 +465,8 @@ mod tests {
         names(results).iter().position(|n| *n == name)
     }
 
-    fn item(name: &str) -> &'static Item {
-        pool().items.iter().find(|i| i.name == name).unwrap_or_else(|| panic!("{name} is not in the list"))
+    fn named(name: &str) -> Item {
+        items().find(|i| i.name() == name).unwrap_or_else(|| panic!("{name} is not in the list"))
     }
 
     #[test]
@@ -568,11 +480,11 @@ mod tests {
 
     #[test]
     fn every_name_folds_to_plain_letters() {
-        for item in &pool().items {
+        for item in items() {
             assert!(
                 item.norm.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == ' ' || c == 'я'),
                 "{} -> {}",
-                item.name,
+                item.name(),
                 item.norm
             );
         }
@@ -580,15 +492,14 @@ mod tests {
 
     #[test]
     fn the_pool_is_the_built_in_names_with_no_double_entries() {
-        let items = &pool().items;
-        assert!(items.len() > 31_900, "{}", items.len());
-        let mut seen = HashSet::new();
-        for i in items {
-            assert!(seen.insert((i.norm.clone(), i.rgb)), "{} twice", i.name);
+        assert!(items().count() > 31_900, "{}", items().count());
+        let mut seen = std::collections::HashSet::new();
+        for i in items() {
+            assert!(seen.insert((i.norm, i.rgb())), "{} twice", i.name());
         }
         // CSS names keep their CSS color, and the missing ones are added.
-        assert_eq!(item("Crimson").rgb, (220, 20, 60));
-        assert_eq!(item("Deep Pink").rgb, (255, 20, 147));
+        assert_eq!(named("Crimson").rgb(), (220, 20, 60));
+        assert_eq!(named("Deep Pink").rgb(), (255, 20, 147));
     }
 
     #[test]
@@ -612,7 +523,7 @@ mod tests {
         let old = position(&r, "Old Gungeon Red").expect("Old Gungeon Red missing");
         assert!(old > 0);
         for &i in &r.hits {
-            let lch = pool().items[i as usize].lch;
+            let lch = item(i as usize).lch;
             for other in [Family::Red, Family::Green, Family::Gray] {
                 assert!(fit(other, lch) < SHOWN, "{} is {other:?}", entry(i).0);
             }
@@ -631,7 +542,7 @@ mod tests {
         assert!(position(&r, "Maroon").is_some() && position(&r, "Dark Red").is_some());
         assert!(position(&r, "Red").is_none(), "bright Red shown for dark red");
         for &i in r.hits.iter().take(30) {
-            assert!(pool().items[i as usize].lch[0] < 0.6, "{} is not dark", entry(i).0);
+            assert!(item(i as usize).lch[0] < 0.6, "{} is not dark", entry(i).0);
         }
     }
 
@@ -705,16 +616,25 @@ mod tests {
     }
 
     /// Run with: cargo test --release search::tests::speed -- --ignored --nocapture
+    /// Each keystroke is timed 7 times and the median counts, so one hiccup of
+    /// a busy machine doesn't decide.
     #[test]
     #[ignore]
     fn speed() {
-        pool();
+        search("warm up"); // the first touch of the index pages it in
         let mut worst = std::time::Duration::ZERO;
         for query in ["red", "dark red", "blue sky", "pnik", "a l orange", "xqzvw", "#FF46A2", "turquoise", "midnight b"] {
             for end in 1..=query.len() {
-                let start = std::time::Instant::now();
+                let mut times: Vec<std::time::Duration> = (0..7)
+                    .map(|_| {
+                        let start = std::time::Instant::now();
+                        std::hint::black_box(search(&query[..end]));
+                        start.elapsed()
+                    })
+                    .collect();
+                times.sort();
+                let took = times[times.len() / 2];
                 let r = search(&query[..end]);
-                let took = start.elapsed();
                 worst = worst.max(took);
                 println!("{:>8.3} ms  {:>5} hits  {:?}", took.as_secs_f64() * 1e3, r.hits.len(), &query[..end]);
             }
@@ -731,7 +651,7 @@ mod tests {
         for word in ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta", "pink", "brown", "gray", "black", "white", "dark red", "pale blue"] {
             let r = search(word);
             let (shown, bottom): (Vec<u32>, Vec<u32>) = r.hits.iter().partition(|&&i| {
-                let item = &pool().items[i as usize];
+                let item = item(i as usize);
                 let text = normalize(word);
                 let ws: Vec<&str> = text.split(' ').collect();
                 let fam = ws.iter().find_map(|w| family(w)).unwrap();
@@ -747,10 +667,11 @@ mod tests {
             println!("REPORT\t{word}\t{}\t{}\t{}\t{}", shown.len(), bottom.len(), show(&shown[..shown.len().min(40)]), show(&bottom[..bottom.len().min(15)]));
         }
         for name in ["Chocolate Red", "Hot Pink", "Brown", "Rosy Brown", "Slate Gray", "Indian Red", "Olive", "Teal", "Indigo", "Coral"] {
-            let it = item(name);
+            let it = named(name);
             let fits: Vec<String> = [Family::Red, Family::Orange, Family::Pink, Family::Brown, Family::Blue, Family::Purple, Family::Magenta, Family::Gray, Family::Green, Family::Cyan, Family::Yellow]
                 .iter().map(|f| format!("{f:?}={:.2}", fit(*f, it.lch))).collect();
-            println!("EDGE\t{name}\t#{:02X}{:02X}{:02X}\t{}", it.rgb.0, it.rgb.1, it.rgb.2, fits.join(" "));
+            let (r, g, b) = it.rgb();
+            println!("EDGE\t{name}\t#{r:02X}{g:02X}{b:02X}\t{}", fits.join(" "));
         }
     }
 }

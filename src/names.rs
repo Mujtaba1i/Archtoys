@@ -5,14 +5,13 @@
 //! data/colornames-LICENSE.txt). "Closest" is measured in OKLab, where the
 //! distance matches how different two colors look to people.
 //!
-//! The list is built into the app (no internet needed) and parsed once on
-//! first use; a lookup takes well under a millisecond.
+//! The list is built into the app, prebuilt and sorted (`name_index.rs`, no
+//! internet needed); a lookup takes well under a millisecond.
 
 use crate::color::{rgb_to_oklab, Rgb};
+use crate::name_index::{lightness, name, name_count, Name};
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-
-const NAMES_CSV: &str = include_str!("../data/colornames.csv");
+use std::sync::Mutex;
 
 /// The standard CSS color names (one per color; "Gray"/"Cyan"/"Magenta"
 /// for the colors that have two spellings).
@@ -158,60 +157,38 @@ pub(crate) const CSS_NAMES: &[(&str, Rgb)] = &[
     ("Yellow Green", (154, 205, 50)),
 ];
 
-pub(crate) struct Entry {
-    pub name: &'static str,
-    pub rgb: Rgb,
-    pub lab: [f32; 3],
-    /// Marked "good name" in the data.
-    pub good: bool,
-}
-
-/// Sorted by lightness (OKLab L), so a lookup only has to check the names
-/// whose lightness is close enough to possibly be the nearest.
-pub(crate) fn entries() -> &'static [Entry] {
-    static LIST: OnceLock<Vec<Entry>> = OnceLock::new();
-    LIST.get_or_init(|| {
-        let mut list = Vec::with_capacity(32_000);
-        for line in NAMES_CSV.lines().skip(1) {
-            // name,#rrggbb,good-name-flag   (names contain no commas)
-            let mut parts = line.split(',');
-            let (Some(name), Some(hex)) = (parts.next(), parts.next()) else { continue };
-            let good = parts.next().is_some_and(|flag| flag.trim() == "x");
-            if let Some(rgb) = crate::color::parse_hex_flexible(hex) {
-                list.push(Entry { name, rgb, lab: rgb_to_oklab(rgb), good });
-            }
-        }
-        list.sort_by(|a, b| a.lab[0].total_cmp(&b.lab[0]));
-        list
-    })
-}
-
 fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
     (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)
 }
 
-/// The nearest entry. Walks outwards from the entries with the same
-/// lightness and stops once the lightness difference alone is already
-/// bigger than the best distance found, so the answer is exact but most of
-/// the list is never looked at.
-fn nearest(lab: &[f32; 3]) -> Option<(&'static Entry, f32)> {
-    let list = entries();
-    let start = list.partition_point(|e| e.lab[0] < lab[0]);
-    let mut best: Option<(&'static Entry, f32)> = None;
+/// The nearest name. The names are sorted by lightness: this walks outwards
+/// from the ones with the same lightness and stops once the lightness
+/// difference alone is already bigger than the best distance found, so the
+/// answer is exact but most of the list is never looked at.
+fn nearest(lab: &[f32; 3]) -> Option<(Name, f32)> {
+    let len = name_count();
+    let (mut lo, mut hi) = (0, len); // first name at least as light as `lab`
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if lightness(mid) < lab[0] { lo = mid + 1 } else { hi = mid }
+    }
+    let start = lo;
+    let mut best: Option<(Name, f32)> = None;
     let (mut lo, mut hi) = (start, start); // lo: next below (exclusive), hi: next above
     loop {
         let bound = best.map_or(f32::INFINITY, |(_, d)| d);
-        let down = (lo > 0).then(|| (lab[0] - list[lo - 1].lab[0]).powi(2)).filter(|dl| *dl < bound);
-        let up = (hi < list.len()).then(|| (list[hi].lab[0] - lab[0]).powi(2)).filter(|dl| *dl < bound);
+        let down = (lo > 0).then(|| (lab[0] - lightness(lo - 1)).powi(2)).filter(|dl| *dl < bound);
+        let up = (hi < len).then(|| (lightness(hi) - lab[0]).powi(2)).filter(|dl| *dl < bound);
         let index = match (down, up) {
             (None, None) => break,
             (Some(d), Some(u)) if d <= u => { lo -= 1; lo }
             (Some(_), None) => { lo -= 1; lo }
             _ => { hi += 1; hi - 1 }
         };
-        let d = distance(&list[index].lab, lab);
+        let entry = name(index);
+        let d = distance(&entry.lab, lab);
         if best.is_none_or(|(_, bd)| d < bd) {
-            best = Some((&list[index], d));
+            best = Some((entry, d));
         }
     }
     best
@@ -264,7 +241,7 @@ mod tests {
 
     #[test]
     fn list_is_loaded_and_exact_matches_are_found() {
-        assert!(entries().len() > 30_000);
+        assert!(name_count() > 30_000);
         assert_eq!(name_of((0xa5, 0x93, 0x44)), ("18th Century Green", true));
     }
 
@@ -276,8 +253,8 @@ mod tests {
             seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
             let rgb = ((seed >> 8) as u8, (seed >> 16) as u8, (seed >> 24) as u8);
             let lab = rgb_to_oklab(rgb);
-            let brute = entries()
-                .iter()
+            let brute = (0..name_count())
+                .map(name)
                 .map(|e| (e, distance(&e.lab, &lab)))
                 .min_by(|a, b| a.1.total_cmp(&b.1))
                 .unwrap();

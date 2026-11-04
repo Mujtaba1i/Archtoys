@@ -11,6 +11,7 @@ mod formats;
 mod hotkey;
 mod kwin;
 mod launch;
+mod name_index;
 mod names;
 mod picker;
 mod portal;
@@ -122,6 +123,13 @@ fn install_panic_hook() {
     }));
 }
 
+/// Drawn on the CPU there are no blurred shadows or rounded clipping: the UI
+/// draws its stand-ins instead. Each window has its own `Skin`, so each sets it.
+/// (A build has one renderer only, so this is decided at compile time.)
+pub(crate) fn cpu_drawn() -> bool {
+    !cfg!(feature = "opengl")
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     install_panic_hook();
     let autostart = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
@@ -143,7 +151,6 @@ fn main() -> Result<(), slint::PlatformError> {
     // `archtoys --pick` with no copy running starts in the tray and picks, like the hotkey.
     let start_hidden = autostart || pick_now;
 
-    search::prepare(); // builds the search index in the background
     let ui = AppWindow::new()?;
 
     // The Wayland app_id / X11 WM_CLASS. It must match archtoys.desktop, or
@@ -154,6 +161,7 @@ fn main() -> Result<(), slint::PlatformError> {
         eprintln!("app id: couldn't set it: {err:?}");
     }
     apply_native_window_constraints(&ui);
+    ui.global::<Skin>().set_real_shadows(!cpu_drawn());
     if start_hidden {
         apply_hidden_startup_state(&ui);
     }
@@ -273,6 +281,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_settings_opened(move || refresh_service.refresh());
 
     ui.on_cancel_pick(picker::cancel_picker);
+    ui.on_pick_nudge(picker::nudge_picker);
+    ui.on_pick_point(picker::pick_point);
 
     let pick_ui = ui_handle.clone();
     let pick_history = history_store.clone();
@@ -337,6 +347,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_search_closed(move || {
         if let Some(ui) = closed_ui.upgrade() {
             update_ui_colors(&ui, committed_rgb());
+            ui_state::release_search(&ui);
         }
     });
 
@@ -540,6 +551,9 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.show()?;
         ui_state::restore_size(&ui);
     }
+
+    // what starting up needed and freed (fonts, the first frames)
+    slint::Timer::single_shot(Duration::from_secs(3), ui_state::return_free_memory);
 
     let result = slint::run_event_loop_until_quit();
     // Quit from the tray: save the window size (and everything else) too.

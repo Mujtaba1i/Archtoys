@@ -133,6 +133,22 @@ pub fn cancel_picker() {
     freeze::cancel_active(); // freeze frame
 }
 
+/// Arrow keys in the main window during a freeze-frame pick: moves the pick
+/// point by one pixel. (The X11 live picker gets its keys from the X server.)
+pub fn nudge_picker(dx: i32, dy: i32) {
+    freeze::nudge_active(dx, dy);
+}
+
+/// Enter in the main window during a freeze-frame pick: picks the point.
+pub fn pick_point() {
+    freeze::pick_active_point();
+}
+
+/// The value next to the pick cursor: the first format, without its wrapper.
+pub(crate) fn preview_text(rgb: Rgb) -> slint::SharedString {
+    crate::color::format_bare(crate::ui_state::formats().auto_copy_field(), rgb).into()
+}
+
 /// Live preview while hovering: swatch, shades and all four values.
 pub(crate) fn show_hover(ui: &AppWindow, rgb: Rgb) {
     if !crate::editor::preview_pick(ui, rgb) {
@@ -187,6 +203,8 @@ pub(crate) fn finish_picker(
         }
 
         PICKER_ACTIVE.store(false, Ordering::SeqCst);
+        // the freeze frame's screenshot and windows are gone by then
+        slint::Timer::single_shot(std::time::Duration::from_millis(500), crate::ui_state::return_free_memory);
     });
     if let Err(err) = result {
         eprintln!("finish_picker: invoke_from_event_loop error: {err:?}");

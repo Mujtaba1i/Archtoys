@@ -66,6 +66,185 @@ export global Skin {
     out property <color> track: pick(#2c2f37, #e3e6ec);
     // how strong the aurora glow is
     out property <float> aurora-strength: 0.28 + 0.02 * dark-t;
+    // Blurred shadows and rounded clipping need OpenGL. Drawn on the CPU (the
+    // `cpu` build), Rust sets this off: `RingGlow` stands in for the shadows,
+    // and rounded parts get their own corners instead of being clipped.
+    in property <bool> real-shadows: true;
+}
+
+// The CPU stand-in for drop-shadow-blur, drawn the way OpenGL (femtovg) draws
+// it: a Gaussian blur of the shape, sigma = blur / 2 in physical pixels, that
+// samples only R = ceil(1.5 * min(sigma, 8)) - 1 pixels each way, so the glow
+// fades over R physical pixels on each side of the edge and stops there.
+// Every pixel is painted once (stacked translucent layers drift darker from
+// 8-bit rounding): the straight edges are 1px strips, each with its pixel's
+// opacity; the corners are radial gradients (thin curved rings leave a dotted
+// seam on the CPU); the middle is one plain fill.
+global GlowMath {
+    // normal distribution up to x >= 0 (erf by Abramowitz-Stegun 7.1.26)
+    public pure function cdf(x: float) -> float {
+        let z = x / Math.sqrt(2);
+        let t = 1 / (1 + 0.3275911 * z);
+        1 - 0.5 * t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-z * z)
+    }
+    // the glow's opacity d physical pixels outside the edge (inside: d < 0),
+    // 1 to 0 between -(reach + 0.5) and reach + 0.5
+    public pure function at(d: float, sigma: float, reach: int) -> float {
+        let top = GlowMath.cdf((reach + 0.5) / sigma);
+        let tail = Math.clamp((top - GlowMath.cdf(Math.abs(d) / sigma)) / (2 * top - 1), 0, 1);
+        d >= 0 ? tail : 1 - tail
+    }
+}
+
+// Put it inside the element, first, sized like it, with `cover` = the
+// element's background (and border): that is drawn again over the glow, so the
+// glow only shows outside. Beside an element that clips, leave `cover` out.
+// shortcut: assumes radius >= the glow's reach (true for every use here); a
+// sharper corner would paint a few pixels twice.
+component RingGlow inherits Rectangle {
+    in property <color> glow;
+    in property <length> blur;
+    in property <length> radius;
+    in property <length> bottom-radius: self.radius;
+    in property <length> offset-y: 0px;
+    in property <brush> cover: transparent;
+    in property <color> cover-border: transparent;
+    in property <length> cover-border-width: 0px;
+    visible: !Skin.real-shadows;
+    background: transparent;
+    property <float> sigma: Math.max(0.01, root.blur / 1phx / 2);
+    property <int> reach: Math.max(0, Math.ceil(1.5 * Math.min(root.sigma, 8)) - 1);
+    property <length> r: root.reach * 1phx;
+    // a corner's 8 gradient stops around its arc centre, from full (reach + 0.5
+    // inside the edge) to none (as far outside); in between, off by < 1/255
+    pure function d(i: int) -> float { -(root.reach + 0.5) + i * (2 * root.reach + 1) / 7 }
+    pure function stop(i: int) -> color { root.glow.transparentize(1 - GlowMath.at(root.d(i), root.sigma, root.reach)) }
+    pure function pos(i: int, rad: length) -> float { (rad + root.d(i) * 1phx) / ((rad + root.r) * Math.sqrt(2)) }
+
+    Rectangle {
+        y: root.offset-y;
+        width: root.width;
+        height: root.height;
+        // k < 4: corner k (a radial gradient, cut to the corner's square);
+        // then 1px strips: side k % 4 (top, bottom, left, right), strip j from
+        // the innermost (j = 0) to the outermost, o = its outer edge
+        for k in 4 + root.reach * 8 : Rectangle {
+            property <bool> corner: k < 4;
+            property <bool> right: Math.mod(k, 2) == 1;
+            property <bool> bottom: k >= 2;
+            property <int> side: Math.mod(k, 4);
+            property <int> j: Math.floor((k - 4) / 4);
+            property <length> o: (self.j - root.reach + 1) * 1phx;
+            property <length> rad: (self.corner ? self.bottom : self.side == 1) ? root.bottom-radius : root.radius;
+            property <length> sq: self.rad + root.r;
+            property <length> long: Math.max(0px, self.side < 2 ? root.width - 2 * self.rad : root.height - root.radius - root.bottom-radius);
+            x: self.corner ? (self.right ? root.width - self.rad : -root.r)
+                : self.side < 2 ? self.rad
+                : self.side == 2 ? -self.o : root.width + self.o - 1phx;
+            y: self.corner ? (self.bottom ? root.height - self.rad : -root.r)
+                : self.side == 0 ? -self.o
+                : self.side == 1 ? root.height + self.o - 1phx : root.radius;
+            width: self.corner ? self.sq : self.side < 2 ? self.long : 1phx;
+            height: self.corner ? self.sq : self.side < 2 ? 1phx : self.long;
+            clip: self.corner;
+            Rectangle {
+                x: parent.corner && parent.right ? -parent.sq : 0px;
+                y: parent.corner && parent.bottom ? -parent.sq : 0px;
+                width: parent.corner ? 2 * parent.sq : parent.width;
+                height: parent.corner ? 2 * parent.sq : parent.height;
+                background: parent.corner ? @radial-gradient(circle,
+                    root.stop(0) root.pos(0, parent.rad),
+                    root.stop(1) root.pos(1, parent.rad),
+                    root.stop(2) root.pos(2, parent.rad),
+                    root.stop(3) root.pos(3, parent.rad),
+                    root.stop(4) root.pos(4, parent.rad),
+                    root.stop(5) root.pos(5, parent.rad),
+                    root.stop(6) root.pos(6, parent.rad),
+                    root.stop(7) root.pos(7, parent.rad))
+                    : root.glow.transparentize(1 - GlowMath.at(parent.j - root.reach + 0.5, root.sigma, root.reach));
+            }
+        }
+        // the full middle, around the corners' squares
+        Rectangle {
+            x: root.radius;
+            y: root.r;
+            width: Math.max(0px, root.width - 2 * root.radius);
+            height: Math.max(0px, root.height - 2 * root.r);
+            background: root.glow;
+        }
+        Rectangle {
+            x: root.r;
+            y: root.radius;
+            width: Math.max(0px, root.radius - root.r);
+            height: Math.max(0px, root.height - root.radius - root.bottom-radius);
+            background: root.glow;
+        }
+        Rectangle {
+            x: root.width - root.radius;
+            y: root.radius;
+            width: Math.max(0px, root.radius - root.r);
+            height: Math.max(0px, root.height - root.radius - root.bottom-radius);
+            background: root.glow;
+        }
+    }
+    Rectangle {
+        background: root.cover;
+        border-top-left-radius: root.radius;
+        border-top-right-radius: root.radius;
+        border-bottom-left-radius: root.bottom-radius;
+        border-bottom-right-radius: root.bottom-radius;
+        border-width: root.cover-border-width;
+        border-color: root.cover-border;
+    }
+}
+
+// A rounded rectangle filled with an opaque gradient, for the CPU build (it
+// draws gradients square, ignoring the corners). The gradient is drawn whole
+// behind every piece, each piece cut out by a rectangle clip, so every pixel
+// has its exact color: three bands for the middle, and the corners pixel row
+// by pixel row (the fully covered pixels as one strip, each edge pixel on its
+// own with its share of coverage as opacity, like anti-aliasing).
+component RoundGradient inherits Rectangle {
+    in property <brush> fill;
+    in property <length> radius;
+    property <float> rp: root.radius / 1phx;
+    property <int> n: Math.ceil(root.rp);
+    for b in 3 : Rectangle {
+        x: b == 0 ? root.radius : b == 1 ? 0px : root.width - root.radius;
+        y: b == 0 ? 0px : root.radius;
+        width: b == 0 ? Math.max(0px, root.width - 2 * root.radius) : root.radius;
+        height: b == 0 ? root.height : Math.max(0px, root.height - 2 * root.radius);
+        clip: true;
+        Rectangle { x: -parent.x; y: -parent.y; width: root.width; height: root.height; background: root.fill; }
+    }
+    // corner c (0 top left, 1 top right, 2 bottom left, 3 bottom right), in
+    // pixels u across and v down from its outer corner; line i is row v = i
+    // (kinds 0-3: its full strip, its edge pixels) or column u = i (kinds 4-6:
+    // its edge pixels). Rows take the edge pixels with u < v, columns the rest.
+    for k in root.n * 28 : Rectangle {
+        property <int> c: Math.floor(k / (root.n * 7));
+        property <int> kind: Math.mod(Math.floor(k / root.n), 7);
+        property <int> i: Math.mod(k, root.n);
+        property <float> dl: root.rp - (self.i + 0.5);
+        // the line's pixels from `first` touch the shape, from `full` are inside
+        property <int> first: Math.max(0, Math.ceil(root.rp - Math.sqrt(Math.max(0, (root.rp + 0.5) * (root.rp + 0.5) - self.dl * self.dl)) - 0.5));
+        property <int> full: Math.max(0, Math.ceil(root.rp - Math.sqrt(Math.max(0, (root.rp - 0.5) * (root.rp - 0.5) - self.dl * self.dl)) - 0.5));
+        property <int> p: self.first + Math.mod(self.kind + 2, 3);
+        property <float> cover: Math.clamp(0.5 - (Math.sqrt((root.rp - self.p - 0.5) * (root.rp - self.p - 0.5) + self.dl * self.dl) - root.rp), 0, 1);
+        property <bool> on-row: self.kind <= 3;
+        property <int> u: self.on-row ? (self.kind == 0 ? self.full : self.p) : self.i;
+        property <int> v: self.on-row ? self.i : self.p;
+        property <int> len: self.kind == 0 ? root.n - self.full : 1;
+        visible: self.kind == 0 ? self.full < root.n
+            : self.p < self.full && self.cover > 0 && (self.on-row ? self.p < self.i : self.p <= self.i);
+        x: (self.c == 1 || self.c == 3) ? root.width - (self.u + self.len) * 1phx : self.u * 1phx;
+        y: self.c >= 2 ? root.height - (self.v + 1) * 1phx : self.v * 1phx;
+        width: self.len * 1phx;
+        height: 1phx;
+        opacity: self.kind == 0 ? 1 : self.cover;
+        clip: true;
+        Rectangle { x: -parent.x; y: -parent.y; width: root.width; height: root.height; background: root.fill; }
+    }
 }
 
 // A round icon button in the header.
@@ -73,7 +252,6 @@ component HeaderButton inherits Rectangle {
     in property <image> icon;
     in property <string> label;
     in property <bool> active;
-    in property <angle> icon-angle;
     callback clicked;
 
     width: 36px;
@@ -90,7 +268,6 @@ component HeaderButton inherits Rectangle {
         width: 20px;
         height: 20px;
         colorize: root.active ? Skin.accent : Skin.icon-tint;
-        transform-rotation: root.icon-angle;
     }
     touch := TouchArea { clicked => { root.clicked(); } }
 }
@@ -445,11 +622,27 @@ component ColorCard inherits Rectangle {
     border-radius: 22px;
     // The gradient starts behind the text, so the text color still fits.
     property <color> sheen: root.shown.mix(Skin.pick(#000000, #ffffff), 0.5);
-    background: !root.gradient ? root.shown
-        : @linear-gradient(45deg, root.shown 0%, root.shown 35%, self.sheen 100%);
+    property <brush> sheen-fill: @linear-gradient(45deg, root.shown 0%, root.shown 35%, self.sheen 100%);
+    // drawn on the CPU, RoundGradient below draws the gradient (with corners)
+    background: !root.gradient ? root.shown : Skin.real-shadows ? self.sheen-fill : transparent;
     drop-shadow-blur: 28px;
     drop-shadow-offset-y: 10px;
-    drop-shadow-color: root.shown.transparentize(0.7 - 0.1 * Skin.dark-t);
+    drop-shadow-color: Skin.real-shadows ? root.shown.transparentize(0.7 - 0.1 * Skin.dark-t) : transparent;
+    RingGlow {
+        width: root.width;
+        height: root.height;
+        glow: root.shown.transparentize(0.7 - 0.1 * Skin.dark-t);
+        blur: 28px;
+        radius: root.border-radius;
+        offset-y: 10px;
+        cover: root.background;
+    }
+    if root.gradient && !Skin.real-shadows : RoundGradient {
+        width: root.width;
+        height: root.height;
+        fill: root.sheen-fill;
+        radius: root.border-radius;
+    }
 
     focus-release := FocusScope {
         width: 1px;
@@ -599,14 +792,26 @@ component ShadeTile inherits Rectangle {
     callback pen-hover(bool);
 
     in property <bool> animated: true; // see ColorCard
+    // the round ends of the strip: the first tile's left corners, the last one's
+    // right (the strip clips too, but rounded clipping needs OpenGL)
+    in property <length> left-radius;
+    in property <length> right-radius;
     background: root.cell.color;
     animate background { duration: root.animated ? 220ms : 0ms; easing: ease-out; }
+    border-top-left-radius: root.left-radius;
+    border-bottom-left-radius: root.left-radius;
+    border-top-right-radius: root.right-radius;
+    border-bottom-right-radius: root.right-radius;
     accessible-role: button;
     accessible-label: root.cell.current ? root.cell.value + " (the selected color)" : root.cell.value;
     accessible-action-default => { touch.clicked(); }
 
-    // hover: a soft tint over the whole tile (the strip's round corners clip it)
+    // hover: a soft tint over the whole tile
     Rectangle {
+        border-top-left-radius: root.left-radius;
+        border-bottom-left-radius: root.left-radius;
+        border-top-right-radius: root.right-radius;
+        border-bottom-right-radius: root.right-radius;
         background: root.cell.ink.transparentize(touch.pressed ? 0.8 : touch.has-hover ? 0.88 : 1);
         animate background { duration: 150ms; }
     }
@@ -727,6 +932,18 @@ component Magnifier inherits Rectangle {
         image-fit: fill;
         image-rendering: pixelated;
     }
+    // the round corners when drawn on the CPU (it clips square): the preview
+    // card's color over the image's corners
+    Rectangle {
+        visible: !Skin.real-shadows;
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: root.border-radius + 3px;
+        border-width: 3px;
+        border-color: #1f1f1fe6;
+    }
     // outline of the pixel that will be picked
     Rectangle {
         x: 49px;
@@ -746,25 +963,41 @@ component Magnifier inherits Rectangle {
     }
 }
 
-// --- Preview card: magnifier + swatch + HEX (used by both pickers) ---
+// --- Preview card: magnifier + swatch + the value in the first format (both pickers) ---
 component PreviewCard inherits Rectangle {
     in property <image> magnifier;
     in property <color> preview-color;
     in property <string> preview-hex;
 
-    width: 126px;
+    // wider for long values (CMYK, HSL ...); an even number of pixels, so the
+    // centred magnifier sits on whole pixels (else OpenGL blurs its marker)
+    width: 2px * Math.ceil(max(126px, value.preferred-width + 46px) / 2px);
     height: 158px;
     border-radius: 8px;
-    background: #1f1f1fe6;
+    // drawn on the CPU, the glow's cover paints it (once: it's see-through)
+    background: Skin.real-shadows ? #1f1f1fe6 : transparent;
     border-width: 1px;
-    border-color: #00000030;
+    border-color: Skin.real-shadows ? #00000030 : transparent;
     drop-shadow-blur: 10px;
-    drop-shadow-color: #00000060;
+    drop-shadow-color: Skin.real-shadows ? #00000060 : transparent;
+    RingGlow {
+        width: root.width;
+        height: root.height;
+        glow: #00000060;
+        blur: 10px;
+        radius: root.border-radius;
+        cover: #1f1f1fe6;
+        cover-border: #00000030;
+        cover-border-width: root.border-width;
+    }
 
     VerticalLayout {
         padding: 8px;
         spacing: 8px;
-        Magnifier { source: root.magnifier; }
+        HorizontalLayout {
+            alignment: center;
+            Magnifier { source: root.magnifier; }
+        }
         HorizontalLayout {
             spacing: 8px;
             Rectangle {
@@ -775,7 +1008,7 @@ component PreviewCard inherits Rectangle {
                 border-width: 1px;
                 border-color: #ffffff40;
             }
-            Text {
+            value := Text {
                 text: root.preview-hex;
                 color: #ffffff;
                 font-size: 13px;
@@ -788,7 +1021,7 @@ component PreviewCard inherits Rectangle {
 
 // --- Live Picker Overlay (X11: follows the cursor) ---
 export component PickerOverlay inherits Window {
-    width: 126px;
+    width: card.width;
     height: 158px;
     background: #00000000;
     no-frame: true;
@@ -797,8 +1030,10 @@ export component PickerOverlay inherits Window {
     in-out property <color> preview-color: #ffffff;
     in-out property <string> preview-hex: "#ffffff";
     in-out property <image> magnifier;
+    // wider for long values; Rust needs it to keep the overlay on the monitor
+    out property <length> card-width: card.width;
 
-    PreviewCard {
+    card := PreviewCard {
         magnifier: root.magnifier;
         preview-color: root.preview-color;
         preview-hex: root.preview-hex;
@@ -825,32 +1060,55 @@ export component PickerShieldWindow inherits Window {
     }
 }
 
-// --- Freeze-frame picker: shows a screenshot fullscreen; you pick from it ---
+// --- Freeze-frame picker: one window per monitor, each showing its part of
+// the screenshot; you pick from it ---
 // No fixed width/height here: `width: 1px` would shrink the *contents* to
 // one pixel even though the window itself is fullscreen.
 export component FreezePickerWindow inherits Window {
     full-screen: true;
     no-frame: true;
     always-on-top: true;
-    background: #000000;
+    // see-through until Rust knows which part of the screenshot this monitor
+    // shows (the screen looks the same as the screenshot meanwhile)
+    background: #00000000;
     title: "Archtoys Picker";
 
     in-out property <image> screenshot-image;
+    in-out property <bool> ready: false;
+    // this monitor's part of the screenshot, in screenshot pixels
+    in-out property <int> clip-x;
+    in-out property <int> clip-y;
+    in-out property <int> clip-width;
+    in-out property <int> clip-height;
     in-out property <image> magnifier;
     in-out property <color> preview-color: #000000;
     in-out property <string> preview-hex: "";
     in-out property <length> cursor-x: -1000px;
     in-out property <length> cursor-y: -1000px;
+    // the arrow keys moved the pick point (the mouse pointer stays where it is)
+    in-out property <bool> marker: false;
+    // where the mouse is over this window, read once the windows are laid out
+    out property <bool> hovered: area.has-hover;
+    out property <length> hover-x: area.mouse-x;
+    out property <length> hover-y: area.mouse-y;
 
     // logical pixel coordinates inside this window
     callback pointer-moved(length, length);
     callback pick-at(length, length);
     callback cancel-pick();
+    // arrow keys: one pixel; Enter picks the point
+    callback nudge(int, int);
+    callback pick-point();
 
     Image {
         width: parent.width;
         height: parent.height;
+        visible: root.ready;
         source: root.screenshot-image;
+        source-clip-x: root.clip-x;
+        source-clip-y: root.clip-y;
+        source-clip-width: root.clip-width;
+        source-clip-height: root.clip-height;
         image-fit: fill;
     }
 
@@ -875,7 +1133,45 @@ export component FreezePickerWindow inherits Window {
                 root.cancel-pick();
                 return accept;
             }
+            if event.text == Key.LeftArrow {
+                root.nudge(-1, 0);
+                return accept;
+            }
+            if event.text == Key.RightArrow {
+                root.nudge(1, 0);
+                return accept;
+            }
+            if event.text == Key.UpArrow {
+                root.nudge(0, -1);
+                return accept;
+            }
+            if event.text == Key.DownArrow {
+                root.nudge(0, 1);
+                return accept;
+            }
+            if event.text == Key.Return {
+                root.pick-point();
+                return accept;
+            }
             reject
+        }
+    }
+
+    // the pixel the arrow keys moved to
+    if root.marker : Rectangle {
+        x: root.cursor-x - 7px;
+        y: root.cursor-y - 7px;
+        width: 14px;
+        height: 14px;
+        border-width: 1px;
+        border-color: #ffffff;
+        Rectangle {
+            x: 1px;
+            y: 1px;
+            width: 12px;
+            height: 12px;
+            border-width: 1px;
+            border-color: #000000;
         }
     }
 
@@ -884,8 +1180,11 @@ export component FreezePickerWindow inherits Window {
         preview-color: root.preview-color;
         preview-hex: root.preview-hex;
         // beside the cursor; flips to the other side near the screen edges
-        x: root.cursor-x + 20px + self.width > root.width ? root.cursor-x - 20px - self.width : root.cursor-x + 20px;
-        y: root.cursor-y + 20px + self.height > root.height ? root.cursor-y - 20px - self.height : root.cursor-y + 20px;
+        // on whole pixels (the cursor is a pixel's centre), else OpenGL blurs it
+        property <length> cx: Math.floor(root.cursor-x / 1phx) * 1phx;
+        property <length> cy: Math.floor(root.cursor-y / 1phx) * 1phx;
+        x: self.cx + 20px + self.width > root.width ? self.cx - 20px - self.width : self.cx + 20px;
+        y: self.cy + 20px + self.height > root.height ? self.cy - 20px - self.height : self.cy + 20px;
     }
 }
 
@@ -1022,6 +1321,8 @@ export component AppWindow inherits Window {
     callback format-toggled(string, bool);
     callback format-moved(string, int);
     callback cancel-pick();
+    callback pick-nudge(int, int);
+    callback pick-point();
     callback open-hotkey-settings();
     callback clear-history();
     callback report-problem();
@@ -1160,7 +1461,8 @@ export component AppWindow inherits Window {
         background: @radial-gradient(circle, root.aurora.transparentize(1 - Skin.aurora-strength) 0%, root.aurora.transparentize(1) 50%);
     }
 
-    // Esc cancels a pick while this window has the keyboard.
+    // Esc cancels a pick while this window has the keyboard; the arrow keys
+    // move the pick point and Enter picks it (freeze frame).
     pick-scope := FocusScope {
         enabled: root.picking;
         width: 1px;
@@ -1168,6 +1470,26 @@ export component AppWindow inherits Window {
         key-pressed(event) => {
             if event.text == Key.Escape {
                 root.cancel-pick();
+                return accept;
+            }
+            if event.text == Key.LeftArrow {
+                root.pick-nudge(-1, 0);
+                return accept;
+            }
+            if event.text == Key.RightArrow {
+                root.pick-nudge(1, 0);
+                return accept;
+            }
+            if event.text == Key.UpArrow {
+                root.pick-nudge(0, -1);
+                return accept;
+            }
+            if event.text == Key.DownArrow {
+                root.pick-nudge(0, 1);
+                return accept;
+            }
+            if event.text == Key.Return {
+                root.pick-point();
                 return accept;
             }
             reject
@@ -1457,8 +1779,13 @@ export component AppWindow inherits Window {
                         visible: root.search-t < 0.99;
                         for cell[i] in root.shades : ShadeTile {
                             animated: root.started;
-                            x: i * parent.width / 5;
-                            width: parent.width / 5;
+                            left-radius: i == 0 ? 16px : 0px;
+                            right-radius: i == root.shades.length - 1 ? 16px : 0px;
+                            // edges on whole pixels, so neighbours meet exactly: on
+                            // half pixels the CPU drawing could leave a dark 1px gap
+                            // (and OpenGL a faint seam)
+                            x: Math.round(i * parent.width / 5 / 1phx) * 1phx;
+                            width: Math.round((i + 1) * parent.width / 5 / 1phx) * 1phx - self.x;
                             height: parent.height;
                             cell: cell;
                             label: root.card.label;
@@ -1524,9 +1851,8 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             spacing: 6px;
                             HeaderButton {
-                                icon: @image-url("chevron-up.svg");
+                                icon: @image-url("chevron-left.svg");
                                 label: "Back";
-                                icon-angle: -90deg;
                                 clicked => { root.close-settings(); }
                             }
                             Text {
@@ -1694,8 +2020,19 @@ export component AppWindow inherits Window {
         }
     } // defocus-scope
 
+    // its glow (CPU drawing), beside it: the bar clips what is inside
+    RingGlow {
+        visible: !Skin.real-shadows && search-bar.visible;
+        x: search-bar.x;
+        y: search-bar.y;
+        width: search-bar.width;
+        height: search-bar.height;
+        glow: Skin.accent.transparentize(0.6);
+        radius: search-bar.height / 2;
+        blur: 6px;
+    }
     // The search bar grows out of the search button, over the history row.
-    Rectangle {
+    search-bar := Rectangle {
         // from the start of the history row to the end of the search button,
         // whatever the window's width
         property <length> right: search-button.absolute-position.x + search-button.width;
@@ -1711,7 +2048,7 @@ export component AppWindow inherits Window {
         border-width: 1px;
         border-color: Skin.accent;
         drop-shadow-blur: 6px;
-        drop-shadow-color: Skin.accent.transparentize(0.6);
+        drop-shadow-color: Skin.real-shadows ? Skin.accent.transparentize(0.6) : transparent;
         clip: true;
 
         TouchArea { } // clicks on the bar don't close it
@@ -1863,6 +2200,9 @@ export component AppWindow inherits Window {
                 width: parent.width / 2 * root.compare-t;
                 visible: root.compare-t > 0.001;
                 background: root.editor-compare-color;
+                // the card's round corners (rounded clipping needs OpenGL)
+                border-top-right-radius: Math.min(22px, self.width / 2);
+                border-bottom-right-radius: Math.min(22px, self.width / 2);
                 clip: true;
                 VerticalLayout {
                     x: parent.width - self.width;
@@ -1973,7 +2313,19 @@ export component AppWindow inherits Window {
             border-color: Skin.border;
             drop-shadow-blur: 32px;
             drop-shadow-offset-y: -12px;
-            drop-shadow-color: #00000070;
+            drop-shadow-color: Skin.real-shadows ? #00000070 : transparent;
+            RingGlow {
+                width: parent.width;
+                height: parent.height;
+                glow: #00000070;
+                blur: 32px;
+                radius: 22px;
+                bottom-radius: 0px;
+                offset-y: -12px;
+                cover: Skin.surface;
+                cover-border: Skin.border;
+                cover-border-width: 1px;
+            }
 
             TouchArea { } // clicks inside don't close it
 
@@ -2078,6 +2430,20 @@ export component AppWindow inherits Window {
                             border-radius: 12px;
                             background: @linear-gradient(180deg, #00000000 0%, #000000 100%);
                         }
+                        // the round corners when drawn on the CPU (it draws gradients
+                        // square): the panel's color over the gradient's corners
+                        if !Skin.real-shadows : Rectangle {
+                            clip: true;
+                            Rectangle {
+                                x: -6px;
+                                y: -6px;
+                                width: parent.width + 12px;
+                                height: parent.height + 12px;
+                                border-radius: 18px;
+                                border-width: 6px;
+                                border-color: Skin.surface;
+                            }
+                        }
                         Rectangle {
                             x: root.editor-s * parent.width - 9px;
                             y: (1 - root.editor-v) * parent.height - 9px;
@@ -2088,7 +2454,17 @@ export component AppWindow inherits Window {
                             border-color: #ffffff;
                             background: root.editor-use-color;
                             drop-shadow-blur: 3px;
-                            drop-shadow-color: #00000090;
+                            drop-shadow-color: Skin.real-shadows ? #00000090 : transparent;
+                            RingGlow {
+                                width: parent.width;
+                                height: parent.height;
+                                glow: #00000090;
+                                blur: 3px;
+                                radius: parent.border-radius;
+                                cover: parent.background;
+                                cover-border: parent.border-color;
+                                cover-border-width: parent.border-width;
+                            }
                         }
                         TouchArea {
                             pointer-event(event) => {
@@ -2109,6 +2485,20 @@ export component AppWindow inherits Window {
                         background: @linear-gradient(90deg, #ff0000 0%, #ffff00 16.67%, #00ff00 33.33%, #00ffff 50%, #0000ff 66.67%, #ff00ff 83.33%, #ff0000 100%);
                         accessible-role: slider;
                         accessible-label: "Hue";
+                        // the round corners when drawn on the CPU (it draws gradients
+                        // square): the panel's color over the gradient's corners
+                        if !Skin.real-shadows : Rectangle {
+                            clip: true;
+                            Rectangle {
+                                x: -4px;
+                                y: -4px;
+                                width: parent.width + 8px;
+                                height: parent.height + 8px;
+                                border-radius: 11px;
+                                border-width: 4px;
+                                border-color: Skin.surface;
+                            }
+                        }
                         Rectangle {
                             x: root.editor-h / 360 * parent.width - 10px;
                             y: -3px;
@@ -2119,7 +2509,17 @@ export component AppWindow inherits Window {
                             border-color: #ffffff;
                             background: root.editor-hue-color;
                             drop-shadow-blur: 3px;
-                            drop-shadow-color: #00000090;
+                            drop-shadow-color: Skin.real-shadows ? #00000090 : transparent;
+                            RingGlow {
+                                width: parent.width;
+                                height: parent.height;
+                                glow: #00000090;
+                                blur: 3px;
+                                radius: parent.border-radius;
+                                cover: parent.background;
+                                cover-border: parent.border-color;
+                                cover-border-width: parent.border-width;
+                            }
                         }
                         TouchArea {
                             pointer-event(event) => {
@@ -2135,8 +2535,11 @@ export component AppWindow inherits Window {
 
                     HorizontalLayout {
                         spacing: 10px;
+                        // the same width: both start from 0 and share the row
                         for row in root.editor-fields : FormatBox {
                             horizontal-stretch: 1;
+                            min-width: 0px;
+                            preferred-width: 0px;
                             label: row.label;
                             value: row.value;
                             rev: row.rev;
@@ -2150,14 +2553,19 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         height: 36px;
                         spacing: 10px;
+                        // the same width: both start from 0 and share the row
                         PillButton {
                             horizontal-stretch: 1;
+                            min-width: 0px;
+                            preferred-width: 0px;
                             height: 36px;
                             text: "Cancel";
                             clicked => { root.editor-cancel(); }
                         }
                         Rectangle {
                             horizontal-stretch: 1;
+                            min-width: 0px;
+                            preferred-width: 0px;
                             border-radius: 10px;
                             background: root.editor-use-color;
                             border-width: 1px;
@@ -2193,7 +2601,17 @@ export component AppWindow inherits Window {
         opacity: root.formats-t;
         TouchArea { clicked => { root.formats-open = false; } }
 
-        Rectangle {
+        // beside the panel, not in it: the panel clips what is inside
+        RingGlow {
+            x: formats-panel.x;
+            y: formats-panel.y;
+            width: formats-panel.width;
+            height: formats-panel.height;
+            glow: #00000050;
+            blur: 16px;
+            radius: 16px;
+        }
+        formats-panel := Rectangle {
             x: parent.width - self.width - root.pad;
             y: 66px - (1 - root.formats-t) * 10px;
             width: 260px;
@@ -2203,7 +2621,7 @@ export component AppWindow inherits Window {
             border-width: 1px;
             border-color: Skin.border;
             drop-shadow-blur: 16px;
-            drop-shadow-color: #00000050;
+            drop-shadow-color: Skin.real-shadows ? #00000050 : transparent;
             clip: true;
 
             TouchArea { }
@@ -2276,7 +2694,18 @@ export component AppWindow inherits Window {
         border-color: #e5484d;
         drop-shadow-blur: 16px;
         drop-shadow-offset-y: 4px;
-        drop-shadow-color: #00000050;
+        drop-shadow-color: Skin.real-shadows ? #00000050 : transparent;
+        RingGlow {
+            width: parent.width;
+            height: parent.height;
+            glow: #00000050;
+            blur: 16px;
+            radius: parent.height / 2;
+            offset-y: 4px;
+            cover: Skin.surface;
+            cover-border: #e5484d;
+            cover-border-width: 1px;
+        }
 
         toast-row := HorizontalLayout {
             padding-left: 10px;
