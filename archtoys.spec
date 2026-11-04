@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.5.1
+Version:        0.6.2
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -142,6 +142,15 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Wed Nov 04 2026 Mujtaba1i <mujtaba1i@github> - 0.6.2-1
+- The release benchmark installs the app's libraries and shows why a build didn't start
+- Color editor with compare: the pen on the middle shade opens it to change saturation, brightness and hue or type in your first two formats, and Compare puts a picked or typed color next to yours with their contrast ratio. Clicking anywhere on a format box now puts the cursor in it
+- Tests: pick colors on a virtual screen with two monitors in CI
+- Picking works on every monitor: on Wayland the frozen screenshot covers all your monitors (also with different scaling per monitor) and the magnifier shows at once; on X11 the preview stays on the monitor you pick on. The arrow keys move the pick one pixel and Enter picks it, and the value next to the cursor is in your first format. Lighter and quicker: the window is now drawn on the CPU instead of with OpenGL, so Archtoys uses about a third of the memory (about 35 MB), starts in half the time and looks the same; the color names and the search index come ready-built instead of being worked out at every start, and memory the app no longer needs goes back to the system. Also: the color editor's Cancel and Use buttons and its two format boxes are the same width, on black or white only the middle shade has the pen, the little square in the picker's magnifier is sharp, and no thin dark lines between the shades
+- Benchmark: shows the first (cold) start apart from the later ones and the app's own memory, and warns above 100 MB; the search speed test takes the median of 7 timings
+- README: the color editor, picking on every monitor and with the arrow keys, and the window drawn on the CPU (and how to build the OpenGL version)
+- New README images
+
 * Fri Oct 30 2026 Mujtaba1i <mujtaba1i@github> - 0.5.1-1
 - fixed corrupted package-test script
 - New HWB color format, typed values like hsl(50, 60%%, 70%%) stay as typed, the window remembers its size, the theme fades between light and dark, typing works right after Ctrl+F, the selected shade is marked, and history skips repeats
