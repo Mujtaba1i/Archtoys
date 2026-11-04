@@ -6,6 +6,7 @@ slint::slint! { export * from "ui/app.slint"; }
 mod color;
 mod config;
 mod diagnostics;
+mod editor;
 mod formats;
 mod hotkey;
 mod kwin;
@@ -169,6 +170,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let history_store: HistoryStore = Arc::new(Mutex::new(vec![(203, 182, 172), (85, 85, 85)]));
     ui_state::install_models(&ui);
+    editor::install(&ui);
 
     // The color to show at startup: the last one used, if saved.
     let mut start_color = (203, 182, 172);
@@ -397,6 +399,75 @@ fn main() -> Result<(), slint::PlatformError> {
             sync_history_model(&ui, &shade_history);
             update_ui_colors(&ui, rgb);
             persist_config(&ui, &shade_history);
+        }
+    });
+
+    // --- The color editor (the pen on the middle shade) ---
+    let ed_ui = ui_handle.clone();
+    ui.on_editor_open_requested(move || {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::open(&ui);
+        }
+    });
+    let ed_ui = ui_handle.clone();
+    ui.on_editor_close(move || {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::close(&ui);
+        }
+    });
+    let (ed_ui, ed_history) = (ui_handle.clone(), history_store.clone());
+    ui.on_editor_cancel(move || {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::cancel(&ui, &ed_history);
+        }
+    });
+    let (ed_ui, ed_history) = (ui_handle.clone(), history_store.clone());
+    ui.on_editor_use(move || {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::use_color(&ui, &ed_history);
+        }
+    });
+    let ed_ui = ui_handle.clone();
+    ui.on_editor_sv(move |s, v| {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::set_sv(&ui, s, v);
+        }
+    });
+    let ed_ui = ui_handle.clone();
+    ui.on_editor_hue(move |h| {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::set_hue(&ui, h);
+        }
+    });
+    let ed_ui = ui_handle.clone();
+    ui.on_editor_field_edited(move |key, text| {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::field_edited(&ui, &key, &text);
+        }
+    });
+    let ed_ui = ui_handle.clone();
+    ui.on_editor_field_accepted(move |key, text| {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::field_accepted(&ui, &key, &text);
+        }
+    });
+    let ed_ui = ui_handle.clone();
+    ui.on_editor_copy(move |key| {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::copy(&ui, &key);
+        }
+    });
+    let (ed_ui, ed_history) = (ui_handle.clone(), history_store.clone());
+    ui.on_editor_compare_toggled(move || {
+        if let Some(ui) = ed_ui.upgrade() {
+            editor::toggle_compare(&ui, &ed_history);
+        }
+    });
+    // Pick on the card's right half: the same as the hotkey while Compare is on.
+    let (ed_ui, ed_history) = (ui_handle.clone(), history_store.clone());
+    ui.on_editor_pick(move || {
+        if let Some(ui) = ed_ui.upgrade() {
+            start_picker(&ui, ed_history.clone(), PickerSource::Button);
         }
     });
 

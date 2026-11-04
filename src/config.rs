@@ -43,6 +43,17 @@ pub struct AppConfig {
     pub last_color: Option<[u8; 3]>,
     /// The window's size (logical pixels) when the app was last used.
     pub window_size: Option<[u32; 2]>,
+    /// The color editor's Compare button.
+    pub editor_compare: bool,
+    /// Cancel forgets the edit (off: it keeps it, like clicking outside).
+    #[serde(default = "default_true")]
+    pub editor_cancel_forgets: bool,
+    /// Keep the edit after a restart (then `editor_saved` holds it).
+    pub editor_keep: bool,
+    /// A new selected color starts the edit fresh.
+    #[serde(default = "default_true")]
+    pub editor_reset_on_new_color: bool,
+    pub editor_saved: Option<crate::editor::SavedEdit>,
 }
 
 fn default_true() -> bool {
@@ -65,6 +76,11 @@ impl Default for AppConfig {
             formats: vec![],
             last_color: None,
             window_size: None,
+            editor_compare: false,
+            editor_cancel_forgets: true,
+            editor_keep: false,
+            editor_reset_on_new_color: true,
+            editor_saved: None,
         }
     }
 }
@@ -168,6 +184,11 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
             Some([r, g, b])
         },
         window_size: crate::ui_state::window_size(ui).map(|(w, h)| [w, h]),
+        editor_compare: ui.get_setting_editor_compare(),
+        editor_cancel_forgets: ui.get_setting_editor_cancel_forgets(),
+        editor_keep: ui.get_setting_editor_keep(),
+        editor_reset_on_new_color: ui.get_setting_editor_reset(),
+        editor_saved: crate::editor::saved(ui),
     }
 }
 
@@ -188,6 +209,13 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     ui.set_setting_hotkey(cfg.setting_hotkey.clone().into());
     crate::ui_state::set_formats(ui, FormatList::from_saved(&cfg.formats));
     crate::ui_state::set_window_size(cfg.window_size);
+    ui.set_setting_editor_compare(cfg.editor_compare);
+    ui.set_setting_editor_cancel_forgets(cfg.editor_cancel_forgets);
+    ui.set_setting_editor_keep(cfg.editor_keep);
+    ui.set_setting_editor_reset(cfg.editor_reset_on_new_color);
+    if let (true, Some(saved)) = (cfg.editor_keep, &cfg.editor_saved) {
+        crate::editor::restore(saved);
+    }
 
     if !cfg.history.is_empty() {
         let mut guard = history_store.lock().unwrap();
@@ -238,5 +266,12 @@ mod tests {
         assert!(show_name(&named));
         assert!(show_name(&serde_json::from_str::<AppConfig>("{}").unwrap()));
         assert!(serde_json::from_str::<AppConfig>("{}").unwrap().show_formats_button);
+    }
+
+    #[test]
+    fn configs_from_before_the_color_editor_get_its_defaults() {
+        let old: AppConfig = serde_json::from_str(r#"{"setting_autocopy":true}"#).unwrap();
+        assert!(!old.editor_compare && !old.editor_keep && old.editor_saved.is_none());
+        assert!(old.editor_cancel_forgets && old.editor_reset_on_new_color);
     }
 }

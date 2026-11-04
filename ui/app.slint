@@ -540,6 +540,12 @@ component FormatBox inherits Rectangle {
     border-color: input.has-focus ? Skin.accent : Skin.border;
     animate border-color { duration: 150ms; }
 
+    // a click anywhere on the box (the label too) puts the cursor in it
+    TouchArea {
+        mouse-cursor: text;
+        clicked => { input.focus(); }
+    }
+
     focus-release := FocusScope {
         width: 1px;
         height: 1px;
@@ -588,6 +594,9 @@ component ShadeTile inherits Rectangle {
     in property <ShadeCell> cell;
     in property <string> label;
     callback clicked;
+    // the pen on the selected color: opens the color editor
+    callback edit;
+    callback pen-hover(bool);
 
     in property <bool> animated: true; // see ColorCard
     background: root.cell.color;
@@ -648,6 +657,30 @@ component ShadeTile inherits Rectangle {
     touch := TouchArea {
         enabled: !root.cell.current;
         clicked => { root.clicked(); }
+    }
+
+    // the selected color: a pen opens the color editor
+    if root.cell.current : Rectangle {
+        x: 6px;
+        y: 6px;
+        width: 26px;
+        height: 26px;
+        border-radius: 13px;
+        background: root.cell.ink.transparentize(pen-touch.pressed ? 0.7 : pen-touch.has-hover ? 0.78 : 0.86);
+        animate background { duration: 120ms; }
+        accessible-role: button;
+        accessible-label: "Edit or compare this color";
+        accessible-action-default => { root.edit(); }
+        Image {
+            source: @image-url("pen.svg");
+            width: 14px;
+            height: 14px;
+            colorize: root.cell.ink;
+        }
+        pen-touch := TouchArea {
+            clicked => { root.edit(); }
+            changed has-hover => { root.pen-hover(self.has-hover); }
+        }
     }
 }
 
@@ -886,6 +919,74 @@ export component AppWindow inherits Window {
     in property <[ShadeCell]> shades;
     in property <[FormatOption]> format-options;
 
+    // --- The color editor (the pen on the middle shade) ---
+    in-out property <bool> editor-open: false;
+    in-out property <bool> setting-editor-compare: false;
+    in-out property <bool> setting-editor-cancel-forgets: true;
+    in-out property <bool> setting-editor-keep: false;
+    in-out property <bool> setting-editor-reset: true;
+    // the edited color (the whole card while Compare is off)
+    in property <color> editor-color: #808080;
+    in property <color> editor-ink: #ffffff;
+    in property <string> editor-name;
+    in property <string> editor-value;
+    // the second color (the right half while Compare is on)
+    in property <color> editor-compare-color: #808080;
+    in property <color> editor-compare-ink: #ffffff;
+    in property <string> editor-compare-name;
+    in property <string> editor-compare-value;
+    in property <string> editor-ratio;
+    // the color the square, the hue slider and the fields work on
+    in property <float> editor-h;
+    in property <float> editor-s;
+    in property <float> editor-v;
+    in property <color> editor-hue-color: #ff0000;
+    in property <color> editor-use-color: #808080;
+    in property <color> editor-use-ink: #ffffff;
+    in property <string> editor-use-label: "Use";
+    // the first two formats (one when only one is on)
+    in property <[FieldRow]> editor-fields;
+    callback editor-open-requested();
+    callback editor-close();
+    callback editor-cancel();
+    callback editor-use();
+    callback editor-sv(float, float);
+    callback editor-hue(float);
+    callback editor-field-edited(string, string);
+    callback editor-field-accepted(string, string);
+    callback editor-copy(string);
+    callback editor-compare-toggled();
+    callback editor-pick();
+    // the panel rises; the right half of the card grows in with Compare on
+    property <float> editor-t: root.editor-open ? 1 : 0;
+    animate editor-t { duration: 220ms; easing: ease-out; }
+    property <float> compare-t: root.editor-open && root.setting-editor-compare ? 1 : 0;
+    animate compare-t { duration: 200ms; easing: ease-out; }
+    property <length> card-w: root.width - 2 * root.pad;
+    // the pen's hint shows after the mouse rests on it for a moment
+    property <bool> pen-hover: false;
+    property <bool> pen-hint: false;
+    changed pen-hover => {
+        if !self.pen-hover {
+            self.pen-hint = false;
+        }
+    }
+    // a pick for the compare half took the keyboard: give it back to the panel
+    changed picking => {
+        if !self.picking && self.editor-open {
+            editor-keys.focus();
+        }
+    }
+    changed editor-open => {
+        if self.editor-open {
+            body.viewport-y = 0;
+            root.pen-hover = false;
+            editor-keys.focus();
+        } else {
+            defocus-scope.focus();
+        }
+    }
+
     property <bool> settings-open: false;
     in-out property <bool> setting-minimize: false;
     in-out property <bool> setting-minimize-tray: true;
@@ -978,6 +1079,11 @@ export component AppWindow inherits Window {
         interval: 400ms;
         running: !root.started;
         triggered => { root.started = true; }
+    }
+    Timer {
+        interval: 600ms;
+        running: root.pen-hover && !root.pen-hint;
+        triggered => { root.pen-hint = true; }
     }
 
     function open-search() {
@@ -1357,6 +1463,25 @@ export component AppWindow inherits Window {
                             cell: cell;
                             label: root.card.label;
                             clicked => { root.shade-clicked(cell.factor); }
+                            edit => { root.editor-open-requested(); }
+                            pen-hover(on) => { root.pen-hover = on; }
+                        }
+                    }
+                    if root.pen-hint && root.search-t < 0.01 : Rectangle {
+                        x: root.pad + body.inner-w / 2 - self.width / 2;
+                        y: body.shades-y + 24px - self.height - 6px;
+                        width: hint-text.preferred-width + 24px;
+                        height: 28px;
+                        border-radius: 10px;
+                        background: #2c2f37;
+                        hint-text := Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: "Edit or compare this color";
+                            color: #f2f3f6;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
                     }
 
@@ -1496,6 +1621,36 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        SectionLabel { text: "COLOR EDITOR"; }
+
+                        SettingCard {
+                            title: "Cancel forgets the edit";
+                            subtitle: "Off: Cancel keeps it, like clicking outside";
+                            Switch {
+                                label: "Cancel forgets the edit";
+                                checked: root.setting-editor-cancel-forgets;
+                                toggled(on) => { root.setting-editor-cancel-forgets = on; root.settings-changed(); }
+                            }
+                        }
+                        SettingCard {
+                            title: "Keep the edit after a restart";
+                            subtitle: "Reopen the editor where you left it";
+                            Switch {
+                                label: "Keep the edit after a restart";
+                                checked: root.setting-editor-keep;
+                                toggled(on) => { root.setting-editor-keep = on; root.settings-changed(); }
+                            }
+                        }
+                        SettingCard {
+                            title: "Start fresh when the color changes";
+                            subtitle: "A new pick, a history color or a search result resets the edit";
+                            Switch {
+                                label: "Start fresh when the color changes";
+                                checked: root.setting-editor-reset;
+                                toggled(on) => { root.setting-editor-reset = on; root.settings-changed(); }
+                            }
+                        }
+
                         SectionLabel { text: "APP"; }
 
                         SettingCard {
@@ -1632,6 +1787,399 @@ export component AppWindow inherits Window {
                     color: Skin.text-muted;
                     font-size: 15px;
                     vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    // --- The color editor. The card shows the edit live (with Compare: the
+    // selected color and the second color on the right half); a panel rises
+    // from the bottom. A click on the dimmed rest closes it and keeps the edit.
+    Rectangle {
+        // visible from the first moment, so its keyboard handler can take focus
+        visible: root.editor-open || root.editor-t > 0.01;
+
+        Rectangle {
+            background: #000000;
+            opacity: 0.45 * root.editor-t;
+        }
+        TouchArea { clicked => { root.editor-close(); } }
+
+        Rectangle {
+            x: root.pad;
+            y: root.pad + 40px + 14px;
+            width: root.card-w;
+            height: 150px;
+            border-radius: 22px;
+            clip: true;
+            opacity: root.editor-t;
+            background: root.setting-editor-compare ? root.current-color : root.editor-color;
+            animate background { duration: 200ms; easing: ease-out; }
+
+            TouchArea { } // a click on the card doesn't close the panel
+
+            VerticalLayout {
+                x: 0;
+                width: parent.width * (1 - 0.5 * root.compare-t);
+                padding-left: 20px;
+                padding-right: 12px;
+                padding-bottom: 16px;
+                alignment: end;
+                // split: SELECTED, name, value (like the compare half);
+                // whole: name, format, value (like the main card)
+                if root.setting-editor-compare : Text {
+                    text: "SELECTED";
+                    color: root.card-ink;
+                    opacity: 0.75;
+                    font-size: 11px;
+                    letter-spacing: 1px;
+                }
+                if (root.setting-editor-compare ? root.card-name : root.editor-name) != "" : Text {
+                    text: root.setting-editor-compare ? root.card-name : root.editor-name;
+                    color: root.setting-editor-compare ? root.card-ink : root.editor-ink;
+                    opacity: 0.9;
+                    font-size: root.setting-editor-compare ? 13px : 14px;
+                    overflow: elide;
+                }
+                if !root.setting-editor-compare : Text {
+                    text: root.card.label;
+                    color: root.editor-ink;
+                    opacity: 0.75;
+                    font-size: 11px;
+                    letter-spacing: 1px;
+                }
+                Text {
+                    text: root.setting-editor-compare ? root.card.value : root.editor-value;
+                    color: root.setting-editor-compare ? root.card-ink : root.editor-ink;
+                    font-size: root.setting-editor-compare ? 24px : 38px;
+                    font-weight: 600;
+                    overflow: elide;
+                }
+            }
+
+            // the second color: grows in from the right edge, its text fading in
+            right-half := Rectangle {
+                x: parent.width - self.width;
+                width: parent.width / 2 * root.compare-t;
+                visible: root.compare-t > 0.001;
+                background: root.editor-compare-color;
+                clip: true;
+                VerticalLayout {
+                    x: parent.width - self.width;
+                    width: root.card-w / 2;
+                    padding-left: 12px;
+                    padding-right: 16px;
+                    padding-top: 12px;
+                    padding-bottom: 14px;
+                    opacity: root.compare-t;
+                    HorizontalLayout {
+                        alignment: end;
+                        Rectangle {
+                            height: 30px;
+                            width: pick-row.preferred-width;
+                            border-radius: 15px;
+                            border-width: 1px;
+                            border-color: root.editor-compare-ink.transparentize(0.65);
+                            background: root.editor-compare-ink.transparentize(pick-touch.has-hover ? 0.78 : 0.88);
+                            accessible-role: button;
+                            accessible-label: "Pick a color to compare";
+                            accessible-action-default => { root.editor-pick(); }
+                            pick-row := HorizontalLayout {
+                                padding-left: 12px;
+                                padding-right: 12px;
+                                spacing: 6px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        source: @image-url("pick.svg");
+                                        width: 14px;
+                                        height: 14px;
+                                        colorize: root.editor-compare-ink;
+                                    }
+                                }
+                                Text {
+                                    text: "Pick";
+                                    color: root.editor-compare-ink;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            pick-touch := TouchArea { clicked => { root.editor-pick(); } }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    Text {
+                        text: "COMPARE";
+                        color: root.editor-compare-ink;
+                        opacity: 0.75;
+                        font-size: 11px;
+                        letter-spacing: 1px;
+                        horizontal-alignment: right;
+                    }
+                    if root.editor-compare-name != "" : Text {
+                        text: root.editor-compare-name;
+                        color: root.editor-compare-ink;
+                        opacity: 0.9;
+                        font-size: 13px;
+                        overflow: elide;
+                        horizontal-alignment: right;
+                    }
+                    Text {
+                        text: root.editor-compare-value;
+                        color: root.editor-compare-ink;
+                        font-size: 24px;
+                        font-weight: 600;
+                        overflow: elide;
+                        horizontal-alignment: right;
+                    }
+                }
+            }
+
+            // the contrast ratio, on the seam
+            Rectangle {
+                visible: root.compare-t > 0.01;
+                opacity: root.compare-t;
+                x: right-half.x - self.width / 2;
+                y: 12px;
+                width: ratio-text.preferred-width + 24px;
+                height: 26px;
+                border-radius: 13px;
+                background: #141418;
+                ratio-text := Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.editor-ratio;
+                    color: #f2f3f6;
+                    font-size: 13px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // the panel
+        Rectangle {
+            property <length> h: Math.min(440px, Math.max(330px, root.height - 236px));
+            x: 0;
+            y: root.height - self.h * root.editor-t;
+            width: root.width;
+            height: self.h;
+            background: Skin.surface;
+            border-top-left-radius: 22px;
+            border-top-right-radius: 22px;
+            border-width: 1px;
+            border-color: Skin.border;
+            drop-shadow-blur: 32px;
+            drop-shadow-offset-y: -12px;
+            drop-shadow-color: #00000070;
+
+            TouchArea { } // clicks inside don't close it
+
+            // Esc: like clicking outside (closes, keeps the edit). Enter: Use.
+            // In a format field the first Enter takes the typed value; the
+            // field then gives the keyboard back here, so the next one is Use.
+            editor-keys := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Escape {
+                        root.editor-close();
+                        return accept;
+                    }
+                    if event.text == Key.Return {
+                        root.editor-use();
+                        return accept;
+                    }
+                    reject
+                }
+
+                VerticalLayout {
+                    padding-left: root.pad;
+                    padding-right: root.pad;
+                    padding-top: 8px;
+                    padding-bottom: root.pad;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 36px;
+                            height: 4px;
+                            border-radius: 2px;
+                            background: Skin.border;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        height: 36px;
+                        spacing: 8px;
+                        Text {
+                            text: "Edit color";
+                            color: Skin.text-main;
+                            font-size: 15px;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                height: 32px;
+                                width: compare-row.preferred-width;
+                                border-radius: 9px;
+                                background: root.setting-editor-compare ? root.editor-compare-color : Skin.track;
+                                animate background { duration: 150ms; }
+                                border-width: 1px;
+                                border-color: root.setting-editor-compare ? root.editor-compare-ink.transparentize(0.75) : Skin.border;
+                                accessible-role: checkbox;
+                                accessible-checked: root.setting-editor-compare;
+                                accessible-label: "Compare";
+                                accessible-action-default => { root.editor-compare-toggled(); }
+                                compare-row := HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 14px;
+                                    spacing: 7px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Image {
+                                            source: @image-url("compare.svg");
+                                            width: 18px;
+                                            height: 18px;
+                                            colorize: root.setting-editor-compare ? root.editor-compare-ink : Skin.text-main;
+                                        }
+                                    }
+                                    Text {
+                                        text: "Compare";
+                                        color: root.setting-editor-compare ? root.editor-compare-ink : Skin.text-main;
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                TouchArea { clicked => { root.editor-compare-toggled(); } }
+                            }
+                        }
+                        HeaderButton {
+                            icon: @image-url("close.svg");
+                            label: "Close (Esc)";
+                            clicked => { root.editor-close(); }
+                        }
+                    }
+
+                    // saturation (left to right) and brightness (bottom to top)
+                    Rectangle {
+                        vertical-stretch: 1;
+                        min-height: 90px;
+                        border-radius: 12px;
+                        background: @linear-gradient(90deg, #ffffff 0%, root.editor-hue-color 100%);
+                        accessible-role: slider;
+                        accessible-label: "Saturation and brightness";
+                        Rectangle {
+                            border-radius: 12px;
+                            background: @linear-gradient(180deg, #00000000 0%, #000000 100%);
+                        }
+                        Rectangle {
+                            x: root.editor-s * parent.width - 9px;
+                            y: (1 - root.editor-v) * parent.height - 9px;
+                            width: 18px;
+                            height: 18px;
+                            border-radius: 9px;
+                            border-width: 2px;
+                            border-color: #ffffff;
+                            background: root.editor-use-color;
+                            drop-shadow-blur: 3px;
+                            drop-shadow-color: #00000090;
+                        }
+                        TouchArea {
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.down {
+                                    root.editor-sv(Math.max(0, Math.min(1, self.mouse-x / self.width)), Math.max(0, Math.min(1, 1 - self.mouse-y / self.height)));
+                                }
+                            }
+                            moved => {
+                                root.editor-sv(Math.max(0, Math.min(1, self.mouse-x / self.width)), Math.max(0, Math.min(1, 1 - self.mouse-y / self.height)));
+                            }
+                        }
+                    }
+
+                    // hue
+                    Rectangle {
+                        height: 14px;
+                        border-radius: 7px;
+                        background: @linear-gradient(90deg, #ff0000 0%, #ffff00 16.67%, #00ff00 33.33%, #00ffff 50%, #0000ff 66.67%, #ff00ff 83.33%, #ff0000 100%);
+                        accessible-role: slider;
+                        accessible-label: "Hue";
+                        Rectangle {
+                            x: root.editor-h / 360 * parent.width - 10px;
+                            y: -3px;
+                            width: 20px;
+                            height: 20px;
+                            border-radius: 10px;
+                            border-width: 3px;
+                            border-color: #ffffff;
+                            background: root.editor-hue-color;
+                            drop-shadow-blur: 3px;
+                            drop-shadow-color: #00000090;
+                        }
+                        TouchArea {
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.down {
+                                    root.editor-hue(Math.max(0, Math.min(1, self.mouse-x / self.width)) * 360);
+                                }
+                            }
+                            moved => {
+                                root.editor-hue(Math.max(0, Math.min(1, self.mouse-x / self.width)) * 360);
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        for row in root.editor-fields : FormatBox {
+                            horizontal-stretch: 1;
+                            label: row.label;
+                            value: row.value;
+                            rev: row.rev;
+                            copy => { root.editor-copy(row.key); }
+                            edited(text) => { root.editor-field-edited(row.key, text); }
+                            accepted(text) => { root.editor-field-accepted(row.key, text); }
+                            blurred(text) => { }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        height: 36px;
+                        spacing: 10px;
+                        PillButton {
+                            horizontal-stretch: 1;
+                            height: 36px;
+                            text: "Cancel";
+                            clicked => { root.editor-cancel(); }
+                        }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            border-radius: 10px;
+                            background: root.editor-use-color;
+                            border-width: 1px;
+                            border-color: root.editor-use-ink.transparentize(0.8);
+                            accessible-role: button;
+                            accessible-label: root.editor-use-label;
+                            accessible-action-default => { root.editor-use(); }
+                            Text {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: parent.height;
+                                text: root.editor-use-label;
+                                color: root.editor-use-ink;
+                                font-size: 13px;
+                                font-weight: 600;
+                                overflow: elide;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            TouchArea { clicked => { root.editor-use(); } }
+                        }
+                    }
                 }
             }
         }

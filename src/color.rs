@@ -293,11 +293,35 @@ pub fn format_bare(field: ColorField, rgb: Rgb) -> String {
     }
 }
 
+/// WCAG relative luminance: 0 for black, 1 for white.
+fn luminance(rgb: Rgb) -> f32 {
+    0.2126 * to_linear(rgb.0) + 0.7152 * to_linear(rgb.1) + 0.0722 * to_linear(rgb.2)
+}
+
 /// Whether text on this color reads better dark than white (WCAG contrast:
 /// dark text when the color's relative luminance is above about 0.18).
 pub fn wants_dark_text(rgb: Rgb) -> bool {
-    let lum = 0.2126 * to_linear(rgb.0) + 0.7152 * to_linear(rgb.1) + 0.0722 * to_linear(rgb.2);
-    lum > 0.179
+    luminance(rgb) > 0.179
+}
+
+/// WCAG contrast ratio of two colors: 1 (the same) to 21 (black on white).
+pub fn contrast_ratio(a: Rgb, b: Rgb) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// Hue (degrees, 0 to 360), saturation and brightness (0 to 1): what the
+/// color editor's square and hue slider show.
+pub fn to_hsv(rgb: Rgb) -> (f32, f32, f32) {
+    let (hue, max, min) = hue_parts(rgb);
+    let s = if max == 0.0 { 0.0 } else { (max - min) / max };
+    (hue.rem_euclid(360.0), s, max)
+}
+
+/// The color for a hue (degrees), saturation and brightness (0 to 1).
+pub fn from_hsv(h: f32, s: f32, v: f32) -> Rgb {
+    let (s, v) = (s.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+    from_hue(h, v - v * s, v * s)
 }
 
 /// Multiplies each channel by `factor`, clamped to 0..=255.
@@ -703,6 +727,21 @@ mod tests {
         assert!(back.0 == 255 && back.1.abs_diff(70) <= 2 && back.2.abs_diff(162) <= 2, "{back:?}");
         assert_eq!(parse_color(ColorField::Hwb, "0, 60, 60"), Some((128, 128, 128))); // white + black > 100%
         assert_eq!(parse_color(ColorField::Hwb, "hwb(0 0% 100%)"), Some((0, 0, 0)));
+    }
+
+    #[test]
+    fn hsv_round_trips_and_contrast_matches_known_cases() {
+        for c in [(0, 0, 0), (255, 255, 255), (255, 196, 0), (30, 58, 138), (201, 43, 30), (12, 200, 99)] {
+            let (h, s, v) = to_hsv(c);
+            let back = from_hsv(h, s, v);
+            let close = |a: u8, b: u8| a.abs_diff(b) <= 1;
+            assert!(close(back.0, c.0) && close(back.1, c.1) && close(back.2, c.2), "{c:?} -> {back:?}");
+        }
+        assert_eq!(from_hsv(0.0, 1.0, 1.0), (255, 0, 0));
+        assert_eq!(from_hsv(120.0, 0.0, 0.5), (128, 128, 128)); // no saturation: gray, whatever the hue
+        assert!((contrast_ratio((0, 0, 0), (255, 255, 255)) - 21.0).abs() < 0.01);
+        assert!((contrast_ratio((255, 196, 0), (255, 196, 0)) - 1.0).abs() < 0.001);
+        assert!((contrast_ratio((255, 196, 0), (30, 58, 138)) - 6.49).abs() < 0.01);
     }
 
     #[test]

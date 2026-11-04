@@ -159,6 +159,7 @@ fn rebuild_rows(ui: &AppWindow) {
             model.set_vec(options);
         }
     });
+    crate::editor::refresh(ui, None); // the panel shows the first two formats
 }
 
 /// Updates the card, every box and the shades, except the value the user is typing in.
@@ -241,6 +242,7 @@ pub fn move_format(ui: &AppWindow, field: ColorField, delta: i32) {
 /// Re-draws the card, boxes and shades (e.g. after names were switched on or off).
 pub fn refresh_rows(ui: &AppWindow) {
     refresh_values(ui, committed_rgb(), None);
+    crate::editor::refresh(ui, None);
 }
 
 // ------------------------------------------------------------ the color
@@ -256,6 +258,7 @@ pub fn update_ui_colors(ui: &AppWindow, rgb: Rgb) {
     update_preview_color(ui, rgb);
     refresh_values(ui, rgb, None);
     crate::tray::set_dot(rgb);
+    crate::editor::selected_changed(ui, rgb);
 }
 
 /// Shows a color everywhere without making it the current one (hovering a

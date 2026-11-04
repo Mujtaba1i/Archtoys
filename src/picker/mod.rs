@@ -41,6 +41,8 @@ pub(crate) struct PickerContext {
     /// "Minimize on Pick" made the window transparent through KWin instead of
     /// hiding it (KDE Wayland), so it keeps its place.
     faded: bool,
+    /// The color goes to the color editor's compare half, not the selected color.
+    to_editor: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -96,6 +98,7 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
         was_visible_before_trigger: was_visible,
         previous: current_rgb(ui),
         faded,
+        to_editor: crate::editor::begin_pick(ui),
     };
     let ui_weak = ui.as_weak();
     // Give the compositor a moment to remove our window before a screenshot.
@@ -132,7 +135,9 @@ pub fn cancel_picker() {
 
 /// Live preview while hovering: swatch, shades and all four values.
 pub(crate) fn show_hover(ui: &AppWindow, rgb: Rgb) {
-    update_ui_colors(ui, rgb);
+    if !crate::editor::preview_pick(ui, rgb) {
+        update_ui_colors(ui, rgb);
+    }
 }
 
 /// Ends picking. Safe to call from any thread.
@@ -148,9 +153,18 @@ pub(crate) fn finish_picker(
         if let Some(ui) = ui_weak.upgrade() {
             freeze::end_main_window_raise(&ui);
             let selected = match outcome {
+                PickOutcome::Picked(rgb) if context.to_editor => {
+                    crate::editor::end_pick(&ui, Some(rgb));
+                    true
+                }
                 PickOutcome::Picked(rgb) => {
                     apply_selected_color(&ui, &history_store, rgb);
+                    crate::editor::settle(&ui, rgb);
                     true
+                }
+                PickOutcome::Cancelled if context.to_editor => {
+                    crate::editor::end_pick(&ui, None);
+                    false
                 }
                 PickOutcome::Cancelled => {
                     update_ui_colors(&ui, context.previous);
