@@ -68,9 +68,9 @@ jobs:
               echo "### ⚠️ Search speed: the test didn't run"
               echo '```'; tail -n 30 <<<"$out"; echo '```'
             elif [ "$status" -eq 0 ]; then
-              echo "### ✅ Search speed: slowest keystroke ${worst} ms (budget 2 ms)"
+              echo "### ✅ Search speed: slowest keystroke ${worst} ms (budget 2 ms; each the median of 7 timings)"
             else
-              echo "### ⚠️ Search speed: slowest keystroke ${worst} ms, over the 2 ms budget"
+              echo "### ⚠️ Search speed: slowest keystroke ${worst} ms, over the 2 ms budget (each the median of 7 timings)"
             fi
             if [ -n "$slowest" ]; then
               echo; echo "Slowest keystrokes (time, results, text typed so far):"
