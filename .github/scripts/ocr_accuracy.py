@@ -7,10 +7,12 @@ in English, German and Russian, has Archtoys read each image
 table to the run summary: how much of the text came back right, the language
 it named, how sure it was, and how long it took.
 
-English and Arabic at 14 px and up must come back at least 90% right in both
-themes, or the step fails (Arabic: a short line read as English garble once,
-so a sentence and a short line are both checked). Everything else is
-reported, not a gate (the other languages are downloaded on the first run,
+English at 14 px and up must come back at least 90% right in both themes, or
+the step fails. Arabic at 14 px and up below 90% is a warning on the run (a
+sentence and a short line are checked: a short line was once read as
+English garble), never a failure: the README says languages other than
+English may not be read accurately yet. Everything else is reported, not a
+gate (the other languages are downloaded on the first run,
 which also tests that). Arabic is drawn with pango-view: ImageMagick's
 label: doesn't join or order right-to-left letters.
 
@@ -31,8 +33,9 @@ CASES = [
     ("Arabic", "Arabic", "يقرأ مستخرج النصوص أي نص على الشاشة حتى في الصور والفيديو", "Noto Sans Arabic"),
     ("Arabic short", "Arabic", "هذا نص عربي قصير", "Noto Sans Arabic"),
 ]
-# the cases that must pass the gate
-GATED = ("English", "Arabic")
+# the cases that must pass the gate, and the ones that only warn below it
+GATED = ("English",)
+WARNED = ("Arabic",)
 SIZES = [11, 14, 18, 24, 32]
 THEMES = {"light": ("#ffffff", "#16181d"), "dark": ("#1d1f25", "#e6e8ec")}
 GATE = 0.90
@@ -90,7 +93,7 @@ def read(binary, path):
 
 def main():
     binary = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "target/debug/archtoys")
-    rows, failures = [], []
+    rows, failures, warnings = [], [], []
     with tempfile.TemporaryDirectory() as tmp:
         for name, language, text, font in CASES:
             for size in SIZES:
@@ -100,8 +103,12 @@ def main():
                     fields, got, ms, err = read(binary, path)
                     acc = accuracy(text, got)
                     rows.append((name, size, theme, acc, language, fields.get("language", "—"), fields.get("sure", "—"), ms))
-                    if name.startswith(GATED) and size >= 14 and acc < GATE:
-                        failures.append(f"{name} {size}px {theme}: {acc:.0%} right, read: {got!r} {err}")
+                    if size >= 14 and acc < GATE:
+                        line = f"{name} {size}px {theme}: {acc:.0%} right, read: {got!r} {err}"
+                        if name.startswith(GATED):
+                            failures.append(line)
+                        elif name.startswith(WARNED):
+                            warnings.append(line)
 
     lines = [
         "### Text Extractor accuracy",
@@ -113,7 +120,10 @@ def main():
         mark = "✅" if expected == named else "⚠️"
         lines.append(f"| {name} | {size} px | {theme} | {acc:.0%} | {mark} {expected} → {named} | {sure}% | {ms:.0f} ms |")
     gated = [r[3] for r in rows if r[0].startswith(GATED) and r[1] >= 14]
-    lines += ["", f"English and Arabic at 14 px and up: lowest {min(gated):.0%} (gate {GATE:.0%})."]
+    warned = [r[3] for r in rows if r[0].startswith(WARNED) and r[1] >= 14]
+    lines += ["", f"English at 14 px and up: lowest {min(gated):.0%} (gate {GATE:.0%})."]
+    if warned:
+        lines.append(f"Arabic at 14 px and up: lowest {min(warned):.0%} (below {GATE:.0%} only warns).")
     named_right = sum(1 for r in rows if r[4] == r[5])
     lines.append(f"Language named right: {named_right} of {len(rows)}.")
     report = "\n".join(lines)
@@ -122,6 +132,9 @@ def main():
     if summary:
         with open(summary, "a") as f:
             f.write(report + "\n")
+    for line in warnings:
+        # a yellow annotation on the run, not a failure
+        print(f"::warning title=Text Extractor accuracy::{line}")
     if failures:
         print("\nBelow the gate:\n" + "\n".join(failures), file=sys.stderr)
         sys.exit(1)
