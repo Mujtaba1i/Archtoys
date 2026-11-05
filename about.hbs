@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Archtoys: open-source licences</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 860px; margin: 32px auto; padding: 0 16px; color: #16181d; background: #f6f7f9; }
+  h1 { font-size: 24px; } h2 { font-size: 18px; margin-top: 36px; }
+  pre { white-space: pre-wrap; background: #fff; border: 1px solid #dde1e8; border-radius: 10px; padding: 14px; font-size: 12px; }
+  ul.crates { columns: 2; font-size: 13px; }
+  @media (prefers-color-scheme: dark) { body { color: #f2f3f6; background: #111216; } pre { background: #1d1f25; border-color: #2c2f37; } }
+</style>
+</head>
+<body>
+<h1>Archtoys: open-source licences</h1>
+<p>Archtoys is MIT-licensed. It is built from these libraries, each under its own licence, listed in full below. Text Extractor runs Tesseract OCR (Apache-2.0), installed from your system's packages, and downloads Tesseract's language data (Apache-2.0) when a language is first needed. Slint, the user interface toolkit, is used under the <a href="https://github.com/slint-ui/slint/blob/master/LICENSES/LicenseRef-Slint-Royalty-free-2.0.md">Slint Royalty-free Desktop, Mobile, and Web Applications License 2.0</a>.</p>
+<h2>Licences used</h2>
+<ul>
+{{#each overview}}
+  <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+{{#each licenses}}
+<h2 id="{{id}}">{{name}}</h2>
+<p>Used by:</p>
+<ul class="crates">
+{{#each used_by}}
+  <li>{{crate.name}} {{crate.version}}</li>
+{{/each}}
+</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

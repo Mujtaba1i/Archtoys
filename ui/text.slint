@@ -1,0 +1,471 @@
+// Text Extractor (v0.7.0): turning it on (installing Tesseract), the latest
+// text, the history, and one history entry opened.
+import { ScrollView } from "std-widgets.slint";
+import { Skin, PillButton, ActionButton } from "common.slint";
+
+// One extraction, as the history shows it.
+export struct TextEntry {
+    text: string,
+    // the text on one line (for a history row)
+    preview: string,
+    // "English"
+    language: string,
+    // how sure Tesseract was, 0-100
+    sure: int,
+    // the text's height on screen, in pixels
+    size: int,
+    words: int,
+    // "Today 9:41", "Yesterday", "3 Nov"
+    when: string,
+}
+
+component Card inherits Rectangle {
+    border-radius: 18px;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: Skin.border;
+}
+
+// The toy's icon, big, at the top of a centered page.
+component BigIcon inherits HorizontalLayout {
+    in property <image> icon;
+    in property <bool> muted;
+    alignment: center;
+    Rectangle {
+        width: 64px;
+        height: 64px;
+        border-radius: 18px;
+        background: root.muted ? Skin.surface : Skin.accent;
+        border-width: root.muted ? 1px : 0px;
+        border-color: Skin.border;
+        Image {
+            source: root.icon;
+            width: 30px;
+            height: 30px;
+            colorize: root.muted ? Skin.text-muted : #ffffff;
+        }
+    }
+}
+
+component Fact inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    border-radius: 12px;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: Skin.border;
+    min-height: 60px;
+    VerticalLayout {
+        padding: 10px;
+        padding-left: 12px;
+        spacing: 2px;
+        alignment: center;
+        Text { text: root.label; color: Skin.text-muted; font-size: 11px; font-weight: 700; letter-spacing: 0.8px; }
+        Text { text: root.value; color: Skin.text-main; font-size: 17px; font-weight: 600; overflow: elide; }
+    }
+}
+
+component SmallLink inherits Text {
+    callback clicked;
+    font-size: 14px;
+    font-weight: 600;
+    color: touch.has-hover ? Skin.text-main : Skin.text-muted;
+    accessible-role: button;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component SectionTitle inherits Text {
+    color: Skin.text-muted;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    vertical-alignment: center;
+}
+
+// A progress bar; fraction < 0 means "working, size unknown" (a sliding bar).
+component Progress inherits Rectangle {
+    in property <float> fraction;
+    height: 10px;
+    border-radius: 5px;
+    background: Skin.track;
+    clip: true;
+    Rectangle {
+        property <float> phase: Math.mod(animation-tick() / 1ms, 1400) / 1400;
+        x: root.fraction >= 0 ? 0px : (self.phase * 1.4 - 0.4) * parent.width;
+        width: root.fraction >= 0 ? parent.width * Math.min(1, root.fraction) : parent.width * 0.4;
+        border-radius: 5px;
+        background: Skin.accent;
+    }
+}
+
+export component TextExtractorPage inherits Rectangle {
+    // 0 off, 1 installing, 2 ready, 3 Archtoys can't install it here
+    in property <int> state;
+    // "Arch Linux"
+    in property <string> distro;
+    // the Tesseract already there before turning on ("4.1.1"), or ""
+    in property <string> installed-version;
+    in property <float> install-fraction: -1;
+    // "9.3 of 15.0 MB · 2.1 MB/s · about 3 s left"
+    in property <string> install-stats;
+    // "Downloading tesseract with pacman"
+    in property <string> install-stage;
+    // why it can't be installed, or what went wrong
+    in property <string> message;
+    in property <string> hotkey;
+    in property <[TextEntry]> history;
+    // the history entry opened (-1: none)
+    in-out property <int> detail: -1;
+    callback turn-on();
+    callback cancel-install();
+    callback check-again();
+    callback extract();
+    callback copy-text(string);
+    callback delete-entry(int);
+    callback clear-history();
+
+    // the centered column of the off and installing pages
+    property <length> column-w: Math.min(root.width - 48px, 500px);
+
+    // --- Off (or can't be installed here): what it is, and Turn on ---
+    if root.state == 0 || root.state == 3 : VerticalLayout {
+        padding: 24px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            VerticalLayout {
+                width: root.column-w;
+                spacing: 16px;
+                BigIcon { icon: @image-url("extract.svg"); }
+                Text {
+                    text: "Copy text from anywhere on screen";
+                    color: Skin.text-main;
+                    font-size: 22px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.state == 3 ? root.message
+                        : "Text Extractor reads the text in any part of your screen, even in images and videos, with Tesseract, a free text-recognition engine. Archtoys installs it for you from "
+                            + (root.distro == "" ? "your system" : root.distro) + "'s packages, about 15 MB.";
+                    color: Skin.text-muted;
+                    font-size: 15px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                if root.state == 0 && root.installed-version != "" : Text {
+                    text: "Tesseract " + root.installed-version + " is already installed. Archtoys still asks for your password to update it from your system's packages, so you have a version Archtoys works with.";
+                    color: Skin.text-muted;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                if root.state == 0 && root.message != "" : Text {
+                    text: root.message;
+                    color: #e5484d;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                if root.state == 0 : Card {
+                    // room for the note on two lines (wrapped text doesn't grow its box)
+                    min-height: 58px;
+                    border-radius: 14px;
+                    HorizontalLayout {
+                        padding: 12px;
+                        padding-left: 14px;
+                        spacing: 12px;
+                        VerticalLayout {
+                            alignment: center;
+                            Image {
+                                source: @image-url("lock.svg");
+                                width: 18px;
+                                height: 18px;
+                                colorize: Skin.text-muted;
+                            }
+                        }
+                        Text {
+                            text: "Your system asks for your password in its own window. Archtoys never sees it.";
+                            color: Skin.text-muted;
+                            font-size: 14px;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    if root.state == 0 : ActionButton {
+                        icon: @image-url("power.svg");
+                        text: "Turn on";
+                        primary: true;
+                        clicked => { root.turn-on(); }
+                    }
+                    if root.state == 3 : ActionButton {
+                        icon: @image-url("search.svg");
+                        text: "Check again";
+                        clicked => { root.check-again(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Installing ---
+    if root.state == 1 : VerticalLayout {
+        padding: 24px;
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            VerticalLayout {
+                width: root.column-w;
+                spacing: 16px;
+                BigIcon { icon: @image-url("extract.svg"); }
+                Text {
+                    text: "Installing Tesseract";
+                    color: Skin.text-main;
+                    font-size: 22px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: root.install-stage;
+                    color: Skin.text-muted;
+                    font-size: 15px;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Progress { fraction: root.install-fraction; }
+                if root.install-stats != "" : Text {
+                    text: root.install-stats;
+                    color: Skin.text-muted;
+                    font-size: 13px;
+                    font-family: "monospace";
+                    horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    PillButton { text: "Cancel"; clicked => { root.cancel-install(); } }
+                }
+            }
+        }
+    }
+
+    // --- Ready: Extract, the latest text, the history ---
+    if root.state == 2 && root.detail < 0 : ScrollView {
+        viewport-width: self.visible-width;
+        viewport-height: ready-list.preferred-height;
+        ready-list := VerticalLayout {
+            width: parent.visible-width;
+            padding: 20px;
+            padding-top: 10px;
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 12px;
+                ActionButton {
+                    icon: @image-url("extract.svg");
+                    text: "Extract text";
+                    label: "Extract text from the screen";
+                    clicked => { root.extract(); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                // the hotkey, as a key
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 30px;
+                        width: key-text.preferred-width + 20px;
+                        border-radius: 8px;
+                        background: Skin.surface;
+                        border-width: 1px;
+                        border-color: Skin.border;
+                        key-text := Text {
+                            text: root.hotkey;
+                            color: Skin.text-muted;
+                            font-size: 13px;
+                            font-family: "monospace";
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // nothing yet: how it works
+            if root.history.length == 0 : Card {
+                min-height: 280px;
+                VerticalLayout {
+                    padding: 28px;
+                    spacing: 12px;
+                    alignment: center;
+                    BigIcon { icon: @image-url("extract.svg"); muted: true; }
+                    Text {
+                        text: "Nothing extracted yet";
+                        color: Skin.text-main;
+                        font-size: 18px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "Press Extract text (or " + root.hotkey + "), then drag over any text on your screen. Archtoys finds its language by itself, and Enter copies it.";
+                        color: Skin.text-muted;
+                        font-size: 15px;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            if root.history.length > 0 : VerticalLayout {
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    SectionTitle {
+                        text: "LATEST · " + root.history[0].language + " · " + root.history[0].sure + "% sure";
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    PillButton {
+                        text: "Copy";
+                        clicked => { root.copy-text(latest.text); }
+                    }
+                }
+                Card {
+                    height: Math.max(96px, Math.min(latest.preferred-height + 28px, 240px));
+                    clip: true;
+                    latest := TextInput {
+                        x: 16px;
+                        y: 14px;
+                        width: parent.width - 32px;
+                        text: root.history[0].text;
+                        color: Skin.text-main;
+                        font-size: 15px;
+                        wrap: word-wrap;
+                        single-line: false;
+                    }
+                }
+            }
+
+            if root.history.length > 0 : HorizontalLayout {
+                padding-top: 4px;
+                SectionTitle {
+                    text: "HISTORY · " + root.history.length;
+                    horizontal-stretch: 1;
+                }
+                SmallLink {
+                    text: "Clear all";
+                    clicked => { root.clear-history(); }
+                }
+            }
+            for entry[i] in root.history : Rectangle {
+                height: 54px;
+                border-radius: 14px;
+                background: row-touch.has-hover ? Skin.surface-hover : Skin.surface;
+                border-width: 1px;
+                border-color: Skin.border;
+                animate background { duration: 120ms; }
+                accessible-role: button;
+                accessible-label: entry.text;
+                row-touch := TouchArea { clicked => { root.detail = i; } }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 6px;
+                    spacing: 12px;
+                    Text {
+                        text: entry.preview;
+                        color: Skin.text-main;
+                        font-size: 15px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: entry.language + " · " + entry.when;
+                        color: Skin.text-muted;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 40px;
+                        accessible-role: button;
+                        accessible-label: "Delete this entry";
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 8px;
+                            background: del-touch.has-hover ? #e5484d26 : transparent;
+                        }
+                        Text {
+                            text: "✕";
+                            color: del-touch.has-hover ? #e5484d : Skin.text-muted;
+                            font-size: 15px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        del-touch := TouchArea { clicked => { root.delete-entry(i); } }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- One history entry, opened ---
+    if root.state == 2 && root.detail >= 0 && root.detail < root.history.length : detail-view := ScrollView {
+        property <TextEntry> entry: root.history[root.detail];
+        viewport-width: self.visible-width;
+        viewport-height: detail-list.preferred-height;
+        detail-list := VerticalLayout {
+            width: parent.visible-width;
+            padding: 20px;
+            padding-top: 10px;
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 8px;
+                SmallLink {
+                    text: "‹ History · " + detail-view.entry.when;
+                    vertical-alignment: center;
+                    clicked => { root.detail = -1; }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                PillButton {
+                    text: "Copy";
+                    clicked => { root.copy-text(full.text); }
+                }
+            }
+            Card {
+                height: Math.max(96px, full.preferred-height + 28px);
+                full := TextInput {
+                    x: 16px;
+                    y: 14px;
+                    width: parent.width - 32px;
+                    text: detail-view.entry.text;
+                    color: Skin.text-main;
+                    font-size: 15px;
+                    wrap: word-wrap;
+                    single-line: false;
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                Fact { label: "LANGUAGE"; value: detail-view.entry.language; }
+                Fact { label: "SURE"; value: detail-view.entry.sure + "%"; }
+                Fact { label: "TEXT SIZE"; value: detail-view.entry.size + " px"; }
+                Fact { label: "WORDS"; value: detail-view.entry.words; }
+            }
+            HorizontalLayout {
+                alignment: end;
+                SmallLink {
+                    text: "Delete this entry";
+                    color: #e5484d;
+                    clicked => {
+                        root.delete-entry(root.detail);
+                        root.detail = -1;
+                    }
+                }
+            }
+        }
+    }
+}

@@ -55,7 +55,7 @@ pub(super) fn start(
 }
 
 /// Non-interactive screenshot through the portal. Returns the PNG's path.
-fn take_screenshot() -> Result<Option<PathBuf>, String> {
+pub(super) fn take_screenshot() -> Result<Option<PathBuf>, String> {
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     portal::register_host_app(&conn, "archtoys");
 

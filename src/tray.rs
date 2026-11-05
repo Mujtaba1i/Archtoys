@@ -130,6 +130,16 @@ impl Tray for AppTray {
             }
             .into(),
             StandardItem {
+                label: "Extract text".into(),
+                activate: Box::new(|this: &mut AppTray| {
+                    let _ = this.ui.upgrade_in_event_loop(|ui: AppWindow| {
+                        crate::ocr::start_capture(&ui);
+                    });
+                }),
+                ..Default::default()
+            }
+            .into(),
+            StandardItem {
                 label: "Quit".into(),
                 activate: Box::new(|_this: &mut AppTray| {
                     let _ = slint::invoke_from_event_loop(|| {

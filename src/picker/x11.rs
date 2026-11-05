@@ -518,7 +518,7 @@ pub(super) fn start_freeze(
 }
 
 /// Saves the whole screen as a temporary PNG, like the portal does on Wayland.
-fn capture_screen_to_png() -> Result<PathBuf, String> {
+pub(super) fn capture_screen_to_png() -> Result<PathBuf, String> {
     let sampler = Sampler::connect()?;
     let rgba = sampler.rect(0, 0, sampler.width, sampler.height)?;
     let path = std::env::temp_dir().join(format!("archtoys-freeze-{}.png", std::process::id()));

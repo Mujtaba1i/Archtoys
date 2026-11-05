@@ -58,6 +58,9 @@ Requires:       libEGL.so.1()(64bit)
 Requires:       libGL.so.1()(64bit)
 Recommends:     xdg-desktop-portal
 Recommends:     mesa-dri-drivers
+# Text Extractor (v0.7.0); Archtoys can also install it when it is turned on
+Suggests:       tesseract
+Suggests:       tesseract-langpack-eng
 
 %description
 Archtoys is a fast, system-wide color picker for Linux, inspired by PowerToys

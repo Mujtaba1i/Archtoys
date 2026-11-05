@@ -1,0 +1,346 @@
+// The app's frame (v0.7.0): the bar with the menu, the sidebar and the Home page.
+import { Skin } from "common.slint";
+
+// A button in the bar (the menu).
+component BarButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> active;
+    out property <bool> hovered: touch.has-hover;
+    callback clicked;
+    width: 34px;
+    height: 28px;
+    border-radius: 8px;
+    background: root.active ? Skin.surface
+        : touch.pressed ? Skin.border
+        : touch.has-hover ? Skin.surface-hover : Skin.surface-hover.transparentize(1);
+    border-width: root.active ? 1px : 0px;
+    border-color: Skin.border;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    Image {
+        source: root.icon;
+        width: 16px;
+        height: 16px;
+        colorize: root.active ? Skin.accent : Skin.icon-tint;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// The bar at the top: the menu (click: keep the sidebar open; rest on it:
+// open it over the toy), the logo and the page's name.
+export component TitleBar inherits Rectangle {
+    in property <string> title;
+    in property <bool> menu-active;
+    out property <bool> menu-hovered: menu.hovered;
+    callback menu-clicked();
+    height: 40px;
+
+    HorizontalLayout {
+        padding-left: 5px;
+        padding-right: 6px;
+        spacing: 4px;
+        alignment: stretch;
+        VerticalLayout {
+            alignment: center;
+            menu := BarButton {
+                icon: @image-url("menu.svg");
+                label: "Menu";
+                active: root.menu-active;
+                clicked => { root.menu-clicked(); }
+            }
+        }
+        HorizontalLayout {
+            padding-left: 4px;
+            spacing: 7px;
+            horizontal-stretch: 1;
+            VerticalLayout {
+                alignment: center;
+                Image {
+                    source: @image-url("../packaging/archtoys-64.png");
+                    width: 18px;
+                    height: 18px;
+                }
+            }
+            Text {
+                text: root.title;
+                color: Skin.text-main;
+                font-size: 14px;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}
+
+// One row in the sidebar.
+component NavItem inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> active;
+    // only the icon (the sidebar pinned as icons)
+    in property <bool> compact;
+    out property <bool> hovered: touch.has-hover;
+    callback clicked;
+    height: 40px;
+    border-radius: 10px;
+    background: root.active ? Skin.surface : touch.has-hover ? Skin.surface-hover : Skin.surface-hover.transparentize(1);
+    border-width: root.active ? 1px : 0px;
+    border-color: Skin.border;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    HorizontalLayout {
+        padding-left: root.compact ? 0px : 11px;
+        padding-right: root.compact ? 0px : 9px;
+        spacing: 11px;
+        alignment: root.compact ? LayoutAlignment.center : LayoutAlignment.stretch;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 20px;
+                height: 20px;
+                colorize: root.active ? Skin.accent : Skin.icon-tint;
+            }
+        }
+        if !root.compact : Text {
+            text: root.label;
+            color: root.active ? Skin.accent : Skin.text-main;
+            font-size: 14px;
+            font-weight: root.active ? 600 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// The sidebar: the toys, and Settings at the bottom. Pages: 0 Home,
+// 1 Color Picker, 2 Text Extractor.
+export component Sidebar inherits Rectangle {
+    in property <int> page;
+    in property <bool> settings-open;
+    // only the icons
+    in property <bool> compact;
+    // the mouse is over it (its buttons take the hover from the area below them)
+    out property <bool> hovered: hover.has-hover || home.hovered || picker.hovered || text.hovered || settings.hovered;
+    callback navigate(int);
+    callback open-settings();
+    hover := TouchArea { }
+    VerticalLayout {
+        padding: 8px;
+        padding-top: 4px;
+        spacing: 6px;
+        home := NavItem {
+            compact: root.compact;
+            icon: @image-url("home.svg");
+            label: "Home";
+            active: root.page == 0 && !root.settings-open;
+            clicked => { root.navigate(0); }
+        }
+        picker := NavItem {
+            compact: root.compact;
+            icon: @image-url("pick.svg");
+            label: "Color Picker";
+            active: root.page == 1 && !root.settings-open;
+            clicked => { root.navigate(1); }
+        }
+        text := NavItem {
+            compact: root.compact;
+            icon: @image-url("text.svg");
+            label: "Text Extractor";
+            active: root.page == 2 && !root.settings-open;
+            clicked => { root.navigate(2); }
+        }
+        Rectangle { vertical-stretch: 1; }
+        settings := NavItem {
+            compact: root.compact;
+            icon: @image-url("settings.svg");
+            label: "Settings";
+            active: root.settings-open;
+            clicked => { root.open-settings(); }
+        }
+    }
+}
+
+// A toy on Home: its icon, name, what it does and its hotkey.
+component ToyCard inherits Rectangle {
+    in property <image> icon;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> hotkey;
+    callback clicked;
+    min-height: 190px;
+    border-radius: 18px;
+    background: touch.has-hover ? Skin.surface-hover : Skin.surface;
+    border-width: 1px;
+    border-color: touch.has-hover ? Skin.accent : Skin.border;
+    animate background, border-color { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { root.clicked(); }
+    Rectangle {
+        x: 18px;
+        y: 18px;
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
+        background: Skin.accent;
+        Image {
+            source: root.icon;
+            width: 24px;
+            height: 24px;
+            colorize: #ffffff;
+        }
+    }
+    VerticalLayout {
+        padding: 18px;
+        spacing: 5px;
+        alignment: end;
+        Text {
+            text: root.title;
+            color: Skin.text-main;
+            font-size: 18px;
+            font-weight: 700;
+        }
+        Text {
+            text: root.subtitle;
+            color: Skin.text-muted;
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.hotkey;
+            color: Skin.accent;
+            font-size: 13px;
+            font-family: "monospace";
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// A recent result on Home: the last color, the last text.
+component RecentCard inherits Rectangle {
+    in property <string> label;
+    in property <string> title;
+    in property <string> detail;
+    in property <color> swatch: transparent;
+    callback clicked;
+    height: 76px;
+    border-radius: 16px;
+    background: touch.has-hover ? Skin.surface-hover : Skin.surface;
+    border-width: 1px;
+    border-color: Skin.border;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.label + ": " + root.title;
+    accessible-action-default => { root.clicked(); }
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 12px;
+        if root.swatch.alpha > 0 : Rectangle {
+            width: 48px;
+            border-radius: 12px;
+            background: root.swatch;
+            border-width: 1px;
+            border-color: Skin.border;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.label;
+                color: Skin.text-muted;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.8px;
+            }
+            Text {
+                text: root.title;
+                color: Skin.text-main;
+                font-size: 15px;
+                font-weight: 600;
+                overflow: elide;
+            }
+            if root.detail != "" : Text {
+                text: root.detail;
+                color: Skin.text-muted;
+                font-size: 13px;
+                overflow: elide;
+            }
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Home: the toys, and what you did last with them.
+export component HomePage inherits Rectangle {
+    in property <string> picker-hotkey;
+    in property <string> text-hotkey;
+    in property <color> last-color;
+    // "#2D5C76", and its name
+    in property <string> last-color-value;
+    in property <string> last-color-name;
+    // the latest extracted text on one line ("" when there is none)
+    in property <string> last-text;
+    in property <string> last-text-detail;
+    callback open-toy(int);
+    VerticalLayout {
+        padding: 20px;
+        padding-top: 10px;
+        spacing: 14px;
+        alignment: start;
+        Text {
+            text: "YOUR TOYS";
+            color: Skin.text-muted;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        HorizontalLayout {
+            spacing: 14px;
+            ToyCard {
+                icon: @image-url("pick.svg");
+                title: "Color Picker";
+                subtitle: "Pick, name and copy any pixel";
+                hotkey: root.picker-hotkey;
+                clicked => { root.open-toy(1); }
+            }
+            ToyCard {
+                icon: @image-url("text.svg");
+                title: "Text Extractor";
+                subtitle: "Copy text from anywhere on screen";
+                hotkey: root.text-hotkey;
+                clicked => { root.open-toy(2); }
+            }
+        }
+        Text {
+            text: "RECENT";
+            color: Skin.text-muted;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        RecentCard {
+            label: "COLOR";
+            title: root.last-color-value;
+            detail: root.last-color-name;
+            swatch: root.last-color;
+            clicked => { root.open-toy(1); }
+        }
+        RecentCard {
+            label: "TEXT";
+            title: root.last-text != "" ? root.last-text : "Nothing extracted yet";
+            detail: root.last-text != "" ? root.last-text-detail : "Press " + root.text-hotkey + " and drag over any text";
+            clicked => { root.open-toy(2); }
+        }
+    }
+}

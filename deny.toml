@@ -1,0 +1,25 @@
+# `cargo deny check licenses` (CI): every library Archtoys is built from must
+# have a licence that lets an MIT app use and ship it. A new dependency with
+# any other licence (GPL, for example) fails CI.
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "Unlicense",
+    "0BSD",
+    "CDLA-Permissive-2.0",
+    "LicenseRef-Slint-Royalty-free-2.0",
+    "LicenseRef-Slint-Software-3.0",
+]
+confidence-threshold = 0.9
+
+# (Slint is "GPL-3.0 OR its royalty-free licence OR commercial": the
+# royalty-free one is allowed above, with its attribution in About and the README.)

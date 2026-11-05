@@ -29,6 +29,8 @@ ksni = { version = "0.3.3", default-features = false, features = ["blocking", "a
 image = { version = "0.25", default-features = false, features = ["png"] }
 x11rb = { version = "0.13.2", features = ["randr"] }
 zbus = "5.13.2"
+# which language a text is in (Text Extractor); pure Rust, MIT
+whatlang = "0.18"
 
 [profile.release]
 # No symbol tables in the binary: 28% smaller (27.6 MB -> 19.8 MB) at no build
@@ -52,6 +54,8 @@ priority = "optional"
 # $auto = the libraries the program links to; the rest are loaded while it runs.
 depends = "$auto, libx11-6, libxkbcommon0, libxkbcommon-x11-0, libxcursor1, libxi6, libxrender1, libgl1, libegl1, libwayland-client0, libwayland-egl1"
 recommends = "xdg-desktop-portal, hicolor-icon-theme"
+# Text Extractor (v0.7.0); Archtoys can also install it when it is turned on
+suggests = "tesseract-ocr"
 assets = [
     ["target/release/archtoys", "usr/bin/archtoys", "755"],
     ["packaging/archtoys.desktop", "usr/share/applications/archtoys.desktop", "644"],

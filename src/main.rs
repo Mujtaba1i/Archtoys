@@ -13,16 +13,18 @@ mod kwin;
 mod launch;
 mod name_index;
 mod names;
+mod ocr;
 mod picker;
 mod portal;
 mod search;
 mod single_instance;
 mod tray;
 mod ui_state;
+mod window;
 
 use color::{copy_text, parse_color, scale_rgb, ColorField};
 use config::{apply_config, load_config, persist_config, sync_autostart_entry, HistoryStore};
-use hotkey::{build_hotkey_from_capture, HotkeyService, HotkeyStatus, DEFAULT_HOTKEY_TEXT};
+use hotkey::{build_hotkey_from_capture, HotkeyService, HotkeyStatus, Shortcut, DEFAULT_HOTKEY_TEXT, DEFAULT_TEXT_HOTKEY_TEXT};
 use ksni::blocking::TrayMethods;
 use picker::{start_picker, PickerSource};
 use std::cell::RefCell;
@@ -38,16 +40,6 @@ pub(crate) const WINDOW_MIN_WIDTH: f64 = 480.0;
 pub(crate) const WINDOW_MIN_HEIGHT: f64 = 420.0;
 pub(crate) const WINDOW_MAX_WIDTH: f64 = 900.0;
 pub(crate) const WINDOW_MAX_HEIGHT: f64 = 1000.0;
-
-fn apply_native_window_constraints(ui: &AppWindow) {
-    use slint::winit_030::{winit, WinitWindowAccessor};
-
-    ui.window().with_winit_window(|window| {
-        window.set_min_inner_size(Some(winit::dpi::LogicalSize::new(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)));
-        window.set_max_inner_size(Some(winit::dpi::LogicalSize::new(WINDOW_MAX_WIDTH, WINDOW_MAX_HEIGHT)));
-        window.set_resizable(true);
-    });
-}
 
 fn apply_hidden_startup_state(ui: &AppWindow) {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -84,7 +76,7 @@ fn apply_hidden_startup_state(ui: &AppWindow) {
 
 /// Shows the window in any state (tray, minimized, behind others, another
 /// desktop). Where the desktop refuses to raise it, the taskbar entry flashes.
-fn bring_to_front(ui: &AppWindow) {
+pub(crate) fn bring_to_front(ui: &AppWindow) {
     use slint::winit_030::{winit, WinitWindowAccessor};
 
     if picker::PICKER_ACTIVE.load(std::sync::atomic::Ordering::SeqCst) {
@@ -130,16 +122,70 @@ pub(crate) fn cpu_drawn() -> bool {
     !cfg!(feature = "opengl")
 }
 
+/// Opens a web page from the About screen in the browser.
+fn open_link(url: &str) {
+    if !url.starts_with("https://") {
+        return;
+    }
+    let mut command = launch::outside_command("xdg-open");
+    command.arg(url);
+    if let Err(err) = launch::spawn_and_reap(command) {
+        eprintln!("about: couldn't open {url}: {err}");
+    }
+}
+
+/// "Open-source licences": the licence of every library Archtoys is built
+/// from (generated at build time by cargo-about), opened in the browser.
+fn open_licenses() {
+    const LICENSES: &str = include_str!("../data/third-party-licenses.html");
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let path = dir.join("archtoys-licenses.html");
+    if let Err(err) = std::fs::write(&path, LICENSES) {
+        eprintln!("about: couldn't write the licence list: {err}");
+        return;
+    }
+    let mut command = launch::outside_command("xdg-open");
+    command.arg(&path);
+    if let Err(err) = launch::spawn_and_reap(command) {
+        eprintln!("about: couldn't open the licence list: {err}");
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     install_panic_hook();
+    // Text Extractor's helpers for CI and scripts: no window, no tray
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--extract-file") {
+        let code = match args.get(i + 1) {
+            Some(path) => ocr::run_on_file(path),
+            None => {
+                eprintln!("usage: archtoys --extract-file IMAGE.png");
+                2
+            }
+        };
+        std::process::exit(code);
+    }
+    if args.iter().any(|a| a == "--print-install-script") {
+        std::process::exit(ocr::print_install_script());
+    }
+    if args.iter().any(|a| a == "--check-tesseract") {
+        std::process::exit(ocr::check_tesseract());
+    }
     let autostart = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
     let pick_now = std::env::args().any(|arg| arg == "--pick");
+    let extract_now = std::env::args().any(|arg| arg == "--extract");
 
     let _instance_lock = match single_instance::acquire() {
         single_instance::Lock::TakenByAnother => {
             // An autostart launch while a copy is running exits quietly.
             if !autostart {
-                let method = if pick_now { "Pick" } else { "Show" };
+                let method = if pick_now {
+                    "Pick"
+                } else if extract_now {
+                    "Extract"
+                } else {
+                    "Show"
+                };
                 if let Err(err) = single_instance::send(method) {
                     eprintln!("Archtoys is already running, but it didn't answer: {err}");
                 }
@@ -148,8 +194,9 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         lock => lock,
     };
-    // `archtoys --pick` with no copy running starts in the tray and picks, like the hotkey.
-    let start_hidden = autostart || pick_now;
+    // `archtoys --pick` / `--extract` with no copy running starts in the tray
+    // and picks (or captures text), like the hotkey.
+    let start_hidden = autostart || pick_now || extract_now;
 
     let ui = AppWindow::new()?;
 
@@ -160,8 +207,8 @@ fn main() -> Result<(), slint::PlatformError> {
     if let Err(err) = slint::set_xdg_app_id("archtoys") {
         eprintln!("app id: couldn't set it: {err:?}");
     }
-    apply_native_window_constraints(&ui);
     ui.global::<Skin>().set_real_shadows(!cpu_drawn());
+    ui.set_app_version(env!("CARGO_PKG_VERSION").into());
     if start_hidden {
         apply_hidden_startup_state(&ui);
     }
@@ -191,17 +238,40 @@ fn main() -> Result<(), slint::PlatformError> {
     if ui.get_setting_hotkey().trim().is_empty() {
         ui.set_setting_hotkey(DEFAULT_HOTKEY_TEXT.into());
     }
+    if ui.get_setting_text_hotkey().trim().is_empty() {
+        ui.set_setting_text_hotkey(DEFAULT_TEXT_HOTKEY_TEXT.into());
+    }
+    // the size limits, with the sidebar's width if it was pinned
+    window::apply_constraints(&ui);
     sync_autostart_entry(ui.get_setting_autostart());
+    {
+        let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
+        ocr::install_ui(&ui, move || {
+            if let Some(ui) = save_ui.upgrade() {
+                persist_config(&ui, &save_history);
+            }
+        });
+    }
 
-    // --- Global hotkey ---
+    // --- Global hotkeys: one per toy. A toy's hotkey also switches the
+    // window to that toy. ---
     let trigger: hotkey::Trigger = {
         let ui_weak = Mutex::new(ui_handle.clone());
         let history = history_store.clone();
         Arc::new(move || {
             let history = history.clone();
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(move |ui| {
+                if ui.get_page() != 1 {
+                    ui.invoke_go(1);
+                }
                 start_picker(&ui, history, PickerSource::Hotkey);
             });
+        })
+    };
+    let extract_trigger: hotkey::Trigger = {
+        let ui_weak = Mutex::new(ui_handle.clone());
+        Arc::new(move || {
+            let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| ocr::start_capture(&ui));
         })
     };
     // Shows who owns the shortcut. When the desktop does, the settings show
@@ -210,10 +280,11 @@ fn main() -> Result<(), slint::PlatformError> {
         let ui_weak = Mutex::new(ui_handle.clone());
         Arc::new(move |status: HotkeyStatus| {
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(move |ui| match status {
-                HotkeyStatus::SystemManaged(description) => {
+                HotkeyStatus::SystemManaged(descriptions) => {
                     diagnostics::set_hotkey("desktop portal (GlobalShortcuts)");
                     ui.set_hotkey_system_managed(true);
-                    ui.set_hotkey_display(description.into());
+                    ui.set_hotkey_display(descriptions.first().cloned().unwrap_or_default().into());
+                    ui.set_text_hotkey_display(descriptions.get(1).cloned().unwrap_or_default().into());
                 }
                 HotkeyStatus::AppManaged => {
                     diagnostics::set_hotkey("X11 (global-hotkey)");
@@ -222,7 +293,23 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         })
     };
-    let (hotkey_service, hotkey_text) = HotkeyService::start(&ui.get_setting_hotkey(), trigger.clone(), on_status);
+    let shortcuts = vec![
+        Shortcut {
+            id: "pick-color",
+            description: "Pick a color (Archtoys)",
+            text: ui.get_setting_hotkey().to_string(),
+            default: DEFAULT_HOTKEY_TEXT,
+            trigger: trigger.clone(),
+        },
+        Shortcut {
+            id: "extract-text",
+            description: "Extract text from the screen (Archtoys)",
+            text: ui.get_setting_text_hotkey().to_string(),
+            default: DEFAULT_TEXT_HOTKEY_TEXT,
+            trigger: extract_trigger.clone(),
+        },
+    ];
+    let (hotkey_service, hotkey_texts) = HotkeyService::start(shortcuts, on_status);
 
     // Later launches ask this copy to show itself, or to pick (`--pick`).
     let show: hotkey::Trigger = {
@@ -231,13 +318,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| bring_to_front(&ui));
         })
     };
-    let _remote = single_instance::serve(show, trigger.clone());
+    let _remote = single_instance::serve(show, trigger.clone(), extract_trigger.clone());
     if pick_now {
         trigger();
     }
+    if extract_now {
+        extract_trigger();
+    }
     let hotkey_service = Rc::new(hotkey_service);
-    let active_hotkey_text = Rc::new(RefCell::new(hotkey_text.clone()));
-    ui.set_setting_hotkey(hotkey_text.into());
+    let active_hotkey_texts = Rc::new(RefCell::new(hotkey_texts.clone()));
+    ui.set_setting_hotkey(hotkey_texts[0].clone().into());
+    ui.set_setting_text_hotkey(hotkey_texts[1].clone().into());
 
     sync_history_model(&ui, &history_store);
     update_ui_colors(&ui, start_color);
@@ -259,17 +350,27 @@ fn main() -> Result<(), slint::PlatformError> {
         let Some(ui) = hotkey_ui.upgrade() else {
             return;
         };
+        // which toy's hotkey was being recorded
+        let index = ui.get_hotkey_target().clamp(0, 1) as usize;
         let result = build_hotkey_from_capture(&key_text, ctrl, alt, shift, meta)
-            .and_then(|candidate| hotkey_service_apply.change(&candidate));
+            .and_then(|candidate| hotkey_service_apply.change(index, &candidate));
+        let set = |ui: &AppWindow, text: String| {
+            if index == 0 {
+                ui.set_setting_hotkey(text.into());
+            } else {
+                ui.set_setting_text_hotkey(text.into());
+            }
+        };
         match result {
             Ok(text) => {
-                *active_hotkey_text.borrow_mut() = text.clone();
-                ui.set_setting_hotkey(text.into());
+                active_hotkey_texts.borrow_mut()[index] = text.clone();
+                set(&ui, text);
                 persist_config(&ui, &hotkey_history);
             }
             Err(err) => {
                 eprintln!("hotkey: {err}");
-                ui.set_setting_hotkey(active_hotkey_text.borrow().clone().into());
+                show_message(&ui, &err);
+                set(&ui, active_hotkey_texts.borrow()[index].clone());
             }
         }
     });
@@ -278,7 +379,75 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_open_hotkey_settings(move || open_settings_service.open_system_settings());
 
     let refresh_service = hotkey_service.clone();
-    ui.on_settings_opened(move || refresh_service.refresh());
+    let refresh_ui = ui_handle.clone();
+    ui.on_settings_opened(move || {
+        refresh_service.refresh();
+        if let Some(ui) = refresh_ui.upgrade() {
+            ocr::page_shown(&ui); // the engine and languages in Text Extractor's settings
+        }
+    });
+
+    // --- The frame (v0.7.0): the sidebar, pages ---
+    let (w_ui, w_history) = (ui_handle.clone(), history_store.clone());
+    ui.on_sidebar_mode_changed(move |old, new| {
+        if let Some(ui) = w_ui.upgrade() {
+            window::sidebar_mode_changed(&ui, old, new);
+            persist_config(&ui, &w_history);
+        }
+    });
+    let (w_ui, w_history) = (ui_handle.clone(), history_store.clone());
+    ui.on_page_changed(move |page| {
+        if let Some(ui) = w_ui.upgrade() {
+            match page {
+                0 => ocr::ensure_history(&ui), // Home shows the latest text
+                2 => ocr::page_shown(&ui),
+                _ => {}
+            }
+            persist_config(&ui, &w_history); // reopen on this page
+        }
+    });
+    ui.on_open_link(|url| open_link(&url));
+    ui.on_open_licenses(open_licenses);
+
+    // --- Text Extractor ---
+    let t_ui = ui_handle.clone();
+    ui.on_text_turn_on(move || {
+        if let Some(ui) = t_ui.upgrade() {
+            ocr::turn_on(&ui);
+        }
+    });
+    ui.on_text_cancel_install(ocr::cancel_install);
+    let t_ui = ui_handle.clone();
+    ui.on_text_check_again(move || {
+        if let Some(ui) = t_ui.upgrade() {
+            ocr::check_again(&ui);
+        }
+    });
+    let t_ui = ui_handle.clone();
+    ui.on_text_extract(move || {
+        if let Some(ui) = t_ui.upgrade() {
+            ocr::start_capture(&ui);
+        }
+    });
+    ui.on_text_copy(|text| ocr::copy(&text));
+    let t_ui = ui_handle.clone();
+    ui.on_text_delete(move |index| {
+        if let Some(ui) = t_ui.upgrade() {
+            ocr::delete(&ui, index);
+        }
+    });
+    let t_ui = ui_handle.clone();
+    ui.on_text_clear(move || {
+        if let Some(ui) = t_ui.upgrade() {
+            ocr::clear(&ui);
+        }
+    });
+    let t_ui = ui_handle.clone();
+    ui.on_text_delete_languages(move || {
+        if let Some(ui) = t_ui.upgrade() {
+            ocr::delete_languages(&ui);
+        }
+    });
 
     ui.on_cancel_pick(picker::cancel_picker);
     ui.on_pick_nudge(picker::nudge_picker);
@@ -551,6 +720,19 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.show()?;
         ui_state::restore_size(&ui);
     }
+
+    // reopened on Text Extractor (its history and engine) or Home (the latest
+    // text), once the window is up
+    let late_ui = ui_handle.clone();
+    slint::Timer::single_shot(Duration::from_secs(1), move || {
+        if let Some(ui) = late_ui.upgrade() {
+            match ui.get_page() {
+                0 => ocr::ensure_history(&ui),
+                2 => ocr::page_shown(&ui),
+                _ => {}
+            }
+        }
+    });
 
     // what starting up needed and freed (fonts, the first frames)
     slint::Timer::single_shot(Duration::from_secs(3), ui_state::return_free_memory);

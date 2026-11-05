@@ -1,5 +1,7 @@
 //! KDE Plasma on Wayland: make the main window invisible during a pick, and
-//! visible again afterwards, through a tiny KWin script.
+//! visible again afterwards (and brought to the front, after Open in a text
+//! capture: Wayland doesn't let an app raise its own window), through a tiny
+//! KWin script.
 //!
 //! Hiding a window on Wayland destroys it, and the new window comes back where
 //! the desktop puts it (apps can't place windows there). A window that KWin
@@ -18,12 +20,22 @@ pub fn available() -> bool {
 }
 
 /// The KWin script that sets the main window's opacity (title "Archtoys"; the
-/// picker windows have other titles).
-fn script(opacity: f64) -> String {
+/// picker windows have other titles), and with `raise` un-minimizes it and
+/// makes it the active window (`activeWindow` in Plasma 6, `activeClient` in 5).
+fn script(opacity: f64, raise: bool) -> String {
+    let raise = if raise {
+        "        w.minimized = false;\n\
+         \x20       if (typeof workspace.activeWindow !== \"undefined\") workspace.activeWindow = w; else workspace.activeClient = w;\n"
+    } else {
+        ""
+    };
     format!(
         "const list = workspace.windowList ? workspace.windowList() : workspace.clientList();\n\
          for (const w of list) {{\n\
-         \x20   if (w.caption === \"Archtoys\" && w.resourceClass === \"archtoys\") w.opacity = {opacity};\n\
+         \x20   if (w.caption === \"Archtoys\" && w.resourceClass === \"archtoys\") {{\n\
+         \x20       w.opacity = {opacity};\n\
+         {raise}\
+         \x20   }}\n\
          }}\n"
     )
 }
@@ -33,9 +45,18 @@ fn script(opacity: f64) -> String {
 /// the file stays (in the runtime folder, cleared at logout) and the script is
 /// only unloaded before the next one.
 pub fn set_main_window_opacity(opacity: f64) -> Result<(), String> {
+    run(&format!("opacity-{opacity}"), &script(opacity, false))
+}
+
+/// Makes the main window visible, un-minimized and the active window.
+pub fn raise_main_window() -> Result<(), String> {
+    run("raise", &script(1.0, true))
+}
+
+fn run(name: &str, js: &str) -> Result<(), String> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    let path = dir.join(format!("archtoys-kwin-opacity-{opacity}.js"));
-    std::fs::write(&path, script(opacity)).map_err(|err| format!("writing the KWin script: {err}"))?;
+    let path = dir.join(format!("archtoys-kwin-{name}.js"));
+    std::fs::write(&path, js).map_err(|err| format!("writing the KWin script: {err}"))?;
 
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     let scripting = Proxy::new(&conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
@@ -56,10 +77,12 @@ mod tests {
 
     #[test]
     fn the_script_targets_only_the_main_window() {
-        let js = script(0.0);
+        let js = script(0.0, false);
         assert!(js.contains("w.caption === \"Archtoys\""));
         assert!(js.contains("w.resourceClass === \"archtoys\""));
-        assert!(js.contains("w.opacity = 0;"));
-        assert!(script(1.0).contains("w.opacity = 1;"));
+        assert!(js.contains("w.opacity = 0;") && !js.contains("activeWindow"));
+        let raise = script(1.0, true);
+        assert!(raise.contains("w.opacity = 1;") && raise.contains("w.minimized = false;"));
+        assert!(raise.contains("workspace.activeWindow = w") && raise.contains("workspace.activeClient = w"));
     }
 }

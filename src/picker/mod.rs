@@ -127,6 +127,102 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
     }
 }
 
+/// How to put the main window back after a text capture: it is hidden (or
+/// made see-through on KDE) during the capture, so the text behind it can be read.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TextRestore {
+    hidden: bool,
+    faded: bool,
+    /// "Open" was clicked: bring the window to the front too
+    raise: bool,
+}
+
+/// Text Extractor's capture: one screenshot, shown frozen on every monitor,
+/// where the user drags a rectangle over text. UI thread only.
+pub fn start_text_capture(ui: &AppWindow) {
+    if PICKER_ACTIVE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return; // a pick or a capture is already running
+    }
+    diagnostics::set_picker("text capture");
+    let visible = ui.window().is_visible() && !ui.window().is_minimized();
+    // "Stay minimized": out of the way now, and nothing to bring back afterwards
+    let minimize = visible && ui.get_setting_text_stay_minimized();
+    if minimize {
+        ui.window().set_minimized(true);
+    }
+    let faded = visible
+        && !minimize
+        && crate::kwin::available()
+        && crate::kwin::set_main_window_opacity(0.0)
+            .map_err(|err| eprintln!("text capture: couldn't fade the window ({err}); hiding it"))
+            .is_ok();
+    if visible && !faded && !minimize {
+        hide_window(ui);
+    }
+    let restore = TextRestore { hidden: visible && !faded && !minimize, faded, raise: false };
+    let ui_weak = ui.as_weak();
+    let session = detect_session_type();
+    std::thread::spawn(move || {
+        if visible {
+            // give the desktop a moment to take the window off the screen
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        let shot = match session {
+            SessionType::Wayland => match wayland::take_screenshot() {
+                Ok(Some(path)) => freeze::load_png(&path),
+                Ok(None) => Err("the screenshot was declined".to_string()),
+                Err(err) => Err(err),
+            },
+            _ => x11::capture_screen_to_png().and_then(|path| freeze::load_png(&path)),
+        };
+        let _ = slint::invoke_from_event_loop(move || match shot {
+            Ok(shot) => freeze::show_text(ui_weak, shot, restore),
+            Err(err) => {
+                eprintln!("text capture: {err}");
+                if let Some(ui) = ui_weak.upgrade() {
+                    crate::ui_state::show_message(&ui, "Text Extractor couldn't take a screenshot");
+                }
+                end_text_capture(ui_weak, restore);
+            }
+        });
+    });
+}
+
+/// Ends a text capture: the windows and screenshot go, the main window comes
+/// back. Safe to call from any thread.
+pub(crate) fn end_text_capture(ui_weak: slint::Weak<AppWindow>, restore: TextRestore) {
+    let result = slint::invoke_from_event_loop(move || {
+        freeze::release_window();
+        // Open on KDE's Wayland: KWin brings it forward (the app can't); it
+        // also undoes the fade, and un-minimizes it after "Stay minimized"
+        let kwin_raise = restore.raise && crate::kwin::available();
+        if restore.faded || kwin_raise {
+            let result =
+                if kwin_raise { crate::kwin::raise_main_window() } else { crate::kwin::set_main_window_opacity(1.0) };
+            if let Err(err) = result {
+                eprintln!("text capture: couldn't bring the window back ({err})");
+            }
+        } else if restore.hidden {
+            if let Some(ui) = ui_weak.upgrade() {
+                show_window(&ui);
+            }
+        }
+        PICKER_ACTIVE.store(false, Ordering::SeqCst);
+        if restore.raise {
+            if let Some(ui) = ui_weak.upgrade() {
+                crate::bring_to_front(&ui);
+            }
+        }
+        slint::Timer::single_shot(std::time::Duration::from_millis(500), crate::ui_state::return_free_memory);
+    });
+    if result.is_err() {
+        PICKER_ACTIVE.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Cancels the current pick (Esc pressed in the main window).
 pub fn cancel_picker() {
     PICKER_CANCELLED.store(true, Ordering::SeqCst); // X11 live picker

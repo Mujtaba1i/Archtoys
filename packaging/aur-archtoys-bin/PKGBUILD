@@ -12,6 +12,9 @@ url="https://github.com/Mujtaba1i/Archtoys"
 license=('MIT')
 depends=('gcc-libs' 'glibc' 'fontconfig' 'libx11' 'libxcb' 'libxcursor' 'libxi'
          'libxkbcommon' 'libxkbcommon-x11' 'libglvnd' 'wayland' 'hicolor-icon-theme')
+optdepends=('tesseract: Text Extractor (Archtoys can also install it when you turn it on)'
+            'tesseract-data-eng: English for Text Extractor'
+            'tesseract-data-osd: lets Text Extractor find the writing system by itself')
 provides=("archtoys=${pkgver}")
 conflicts=('archtoys')
 options=('!debug')

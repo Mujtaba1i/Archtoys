@@ -1,4 +1,4 @@
-//! The global hotkey.
+//! The global hotkeys: one per toy (pick a color, extract text).
 //!
 //! Two ways to listen for it:
 //! * **Portal** (Wayland): the desktop's GlobalShortcuts portal. Works on
@@ -14,11 +14,22 @@ mod portal;
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 pub const DEFAULT_HOTKEY_TEXT: &str = "Ctrl+Super+C";
+pub const DEFAULT_TEXT_HOTKEY_TEXT: &str = "Ctrl+Super+T";
+
+/// One global shortcut: its id (for the desktop), what the desktop shows for
+/// it, the keys wanted, the keys used if those can't be, and what it does.
+#[derive(Clone)]
+pub struct Shortcut {
+    pub id: &'static str,
+    pub description: &'static str,
+    pub text: String,
+    pub default: &'static str,
+    pub trigger: Trigger,
+}
 
 /// Called (on a background thread) whenever the hotkey is pressed.
 pub type Trigger = Arc<dyn Fn() + Send + Sync>;
@@ -26,9 +37,9 @@ pub type Trigger = Arc<dyn Fn() + Send + Sync>;
 /// Who owns the shortcut right now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HotkeyStatus {
-    /// The desktop (e.g. KDE) owns it. Change it in the desktop's settings.
-    /// Contains the desktop's description of the current shortcut.
-    SystemManaged(String),
+    /// The desktop (e.g. KDE) owns them. Change them in the desktop's settings.
+    /// The desktop's description of each shortcut, in the order they were given.
+    SystemManaged(Vec<String>),
     /// Archtoys owns it (X11 hotkey). Change it in Archtoys.
     AppManaged,
 }
@@ -205,11 +216,17 @@ pub fn to_portal_trigger(text: &str) -> String {
         .join("+")
 }
 
+/// The X11 hotkeys in use: each one's key combination, its text and what it does.
+struct X11Key {
+    hotkey: HotKey,
+    text: String,
+    trigger: Trigger,
+}
+
 enum Backend {
     X11 {
         manager: GlobalHotKeyManager,
-        active: Mutex<(HotKey, String)>,
-        active_id: Arc<AtomicU32>,
+        keys: Arc<Mutex<Vec<X11Key>>>,
     },
     Portal(portal::PortalShortcut),
 }
@@ -219,17 +236,29 @@ pub struct HotkeyService {
     backend: Option<Backend>,
 }
 
+/// The shortcut's keys, or its default if they can't be read.
+fn parse_or_default(text: &str, default: &str) -> (HotKey, String) {
+    match parse_hotkey_text(text) {
+        Ok(parsed) => parsed,
+        Err(err) => {
+            eprintln!("hotkey: {err}; falling back to {default}");
+            parse_hotkey_text(default).expect("default hotkey text must parse")
+        }
+    }
+}
+
 impl HotkeyService {
-    /// Starts listening for `text`. Returns the service and the hotkey text
-    /// that is actually in use (it falls back to the default if `text` is bad).
-    pub fn start(text: &str, trigger: Trigger, on_status: StatusCallback) -> (Self, String) {
-        let (wanted_hotkey, wanted_text) = match parse_hotkey_text(text) {
-            Ok(parsed) => parsed,
-            Err(err) => {
-                eprintln!("hotkey: {err}; falling back to {DEFAULT_HOTKEY_TEXT}");
-                parse_hotkey_text(DEFAULT_HOTKEY_TEXT).expect("default hotkey text must parse")
-            }
-        };
+    /// Starts listening for the shortcuts. Returns the service and the text of
+    /// each shortcut actually in use (a bad one falls back to its default).
+    pub fn start(shortcuts: Vec<Shortcut>, on_status: StatusCallback) -> (Self, Vec<String>) {
+        let shortcuts: Vec<Shortcut> = shortcuts
+            .into_iter()
+            .map(|s| {
+                let (_, text) = parse_or_default(&s.text, s.default);
+                Shortcut { text, ..s }
+            })
+            .collect();
+        let texts: Vec<String> = shortcuts.iter().map(|s| s.text.clone()).collect();
 
         let forced_x11 = std::env::var("ARCHTOYS_HOTKEY_BACKEND")
             .map(|v| v.eq_ignore_ascii_case("x11"))
@@ -241,100 +270,109 @@ impl HotkeyService {
         if wayland && !forced_x11 {
             // The portal answers asynchronously (the desktop may show a
             // confirmation dialog); it switches to X11 by itself if needed.
-            let shortcut = portal::PortalShortcut::start(&wanted_text, trigger, on_status);
-            return (
-                Self {
-                    backend: Some(Backend::Portal(shortcut)),
-                },
-                wanted_text,
-            );
+            let shortcut = portal::PortalShortcut::start(shortcuts, on_status);
+            return (Self { backend: Some(Backend::Portal(shortcut)) }, texts);
         }
 
-        let _ = wanted_hotkey;
         on_status(HotkeyStatus::AppManaged);
-        Self::start_x11(&wanted_text, trigger)
+        Self::start_x11(shortcuts)
     }
 
-    pub(crate) fn start_x11(text: &str, trigger: Trigger) -> (Self, String) {
+    pub(crate) fn start_x11(shortcuts: Vec<Shortcut>) -> (Self, Vec<String>) {
+        let texts: Vec<String> = shortcuts.iter().map(|s| s.text.clone()).collect();
         // Without an X server (Wayland with no XWayland) the X11 library crashes.
         if std::env::var_os("DISPLAY").is_none() {
-            eprintln!("hotkey: no X11 display, so no hotkey (use archtoys --pick from a desktop shortcut)");
-            return (Self { backend: None }, text.to_string());
+            eprintln!("hotkey: no X11 display, so no hotkeys (use archtoys --pick or --extract from a desktop shortcut)");
+            return (Self { backend: None }, texts);
         }
         let manager = match GlobalHotKeyManager::new() {
             Ok(manager) => manager,
             Err(err) => {
                 eprintln!("hotkey: manager init failed: {err}");
-                return (Self { backend: None }, text.to_string());
+                return (Self { backend: None }, texts);
             }
         };
 
-        let (hotkey, hotkey_text) = match parse_hotkey_text(text) {
-            Ok(parsed) => parsed,
-            Err(_) => parse_hotkey_text(DEFAULT_HOTKEY_TEXT).expect("default hotkey text must parse"),
-        };
-
-        let (hotkey, hotkey_text) = match manager.register(hotkey) {
-            Ok(()) => (hotkey, hotkey_text),
-            Err(err) => {
-                eprintln!("hotkey: register failed for `{hotkey_text}`: {err}; falling back to {DEFAULT_HOTKEY_TEXT}");
-                let fallback = parse_hotkey_text(DEFAULT_HOTKEY_TEXT).expect("default hotkey text must parse");
-                if let Err(err) = manager.register(fallback.0) {
-                    eprintln!("hotkey: fallback register failed: {err}");
+        // All at once: the library's X11 thread looks for requests only every
+        // 50 ms, and each separate register waits for it (a second hotkey made
+        // the window appear ~50 ms later).
+        let wanted: Vec<(HotKey, String)> = shortcuts.iter().map(|s| parse_or_default(&s.text, s.default)).collect();
+        let all: Vec<HotKey> = wanted.iter().map(|(hotkey, _)| *hotkey).collect();
+        if manager.register_all(&all).is_ok() {
+            let keys: Vec<X11Key> = shortcuts
+                .into_iter()
+                .zip(wanted)
+                .map(|(shortcut, (hotkey, text))| X11Key { hotkey, text, trigger: shortcut.trigger })
+                .collect();
+            return Self::listen_x11(manager, keys);
+        }
+        // one is taken (another app has it): register them one by one, with fallbacks
+        let mut keys = Vec::new();
+        for shortcut in shortcuts {
+            let (hotkey, text) = parse_or_default(&shortcut.text, shortcut.default);
+            let (hotkey, text) = match manager.register(hotkey) {
+                Ok(()) => (hotkey, text),
+                Err(err) => {
+                    eprintln!("hotkey: register failed for `{text}`: {err}; falling back to {}", shortcut.default);
+                    let fallback = parse_hotkey_text(shortcut.default).expect("default hotkey text must parse");
+                    if let Err(err) = manager.register(fallback.0) {
+                        eprintln!("hotkey: fallback register failed: {err}");
+                    }
+                    fallback
                 }
-                fallback
-            }
-        };
+            };
+            keys.push(X11Key { hotkey, text, trigger: shortcut.trigger });
+        }
+        Self::listen_x11(manager, keys)
+    }
 
-        let active_id = Arc::new(AtomicU32::new(hotkey.id()));
-        let listen_id = active_id.clone();
+    fn listen_x11(manager: GlobalHotKeyManager, keys: Vec<X11Key>) -> (Self, Vec<String>) {
+        let texts = keys.iter().map(|k| k.text.clone()).collect();
+
+        let keys = Arc::new(Mutex::new(keys));
+        let listen = keys.clone();
         thread::spawn(move || {
             let receiver = GlobalHotKeyEvent::receiver();
             while let Ok(event) = receiver.recv() {
-                if event.state == HotKeyState::Pressed
-                    && event.id == listen_id.load(Ordering::SeqCst)
-                {
+                if event.state != HotKeyState::Pressed {
+                    continue;
+                }
+                let trigger = listen.lock().unwrap().iter().find(|k| k.hotkey.id() == event.id).map(|k| k.trigger.clone());
+                if let Some(trigger) = trigger {
                     trigger();
                 }
             }
         });
 
-        (
-            Self {
-                backend: Some(Backend::X11 {
-                    manager,
-                    active: Mutex::new((hotkey, hotkey_text.clone())),
-                    active_id,
-                }),
-            },
-            hotkey_text,
-        )
+        (Self { backend: Some(Backend::X11 { manager, keys }) }, texts)
     }
 
-    /// Switches to a new hotkey. Returns the text now in use.
-    pub fn change(&self, text: &str) -> Result<String, String> {
+    /// Switches shortcut `index` to new keys. Returns the text now in use.
+    pub fn change(&self, index: usize, text: &str) -> Result<String, String> {
         let (new_hotkey, new_text) = parse_hotkey_text(text)?;
         match &self.backend {
-            Some(Backend::X11 {
-                manager,
-                active,
-                active_id,
-            }) => {
-                let mut current = active.lock().unwrap();
-                if current.0.id() == new_hotkey.id() {
-                    current.1 = new_text.clone();
+            Some(Backend::X11 { manager, keys }) => {
+                let mut keys = keys.lock().unwrap();
+                if keys.iter().enumerate().any(|(i, k)| i != index && k.hotkey.id() == new_hotkey.id()) {
+                    return Err(format!("`{new_text}` is already the other toy's hotkey"));
+                }
+                let Some(current) = keys.get_mut(index) else {
+                    return Err("no such hotkey".into());
+                };
+                if current.hotkey.id() == new_hotkey.id() {
+                    current.text = new_text.clone();
                     return Ok(new_text);
                 }
-                let _ = manager.unregister(current.0);
+                let _ = manager.unregister(current.hotkey);
                 if let Err(err) = manager.register(new_hotkey) {
-                    let _ = manager.register(current.0);
+                    let _ = manager.register(current.hotkey);
                     return Err(format!("failed to register `{new_text}`: {err}"));
                 }
-                *current = (new_hotkey, new_text.clone());
-                active_id.store(new_hotkey.id(), Ordering::SeqCst);
+                current.hotkey = new_hotkey;
+                current.text = new_text.clone();
                 Ok(new_text)
             }
-            Some(Backend::Portal(shortcut)) => shortcut.change(&new_text),
+            Some(Backend::Portal(shortcut)) => shortcut.change(index, &new_text),
             None => {
                 eprintln!("hotkey: no hotkey backend available; saving only");
                 Ok(new_text)
@@ -345,7 +383,7 @@ impl HotkeyService {
 
 impl HotkeyService {
     /// Opens the desktop's shortcut settings (only meaningful when the
-    /// desktop manages the shortcut).
+    /// desktop manages the shortcuts).
     pub fn open_system_settings(&self) {
         match &self.backend {
             Some(Backend::Portal(shortcut)) => shortcut.open_settings(),
@@ -353,7 +391,7 @@ impl HotkeyService {
         }
     }
 
-    /// Asks the desktop for the current shortcut again.
+    /// Asks the desktop for the current shortcuts again.
     pub fn refresh(&self) {
         if let Some(Backend::Portal(shortcut)) = &self.backend {
             shortcut.refresh();
@@ -384,6 +422,11 @@ mod tests {
     #[test]
     fn default_hotkey_parses() {
         assert!(parse_hotkey_text(DEFAULT_HOTKEY_TEXT).is_ok());
+        assert!(parse_hotkey_text(DEFAULT_TEXT_HOTKEY_TEXT).is_ok());
+        assert_ne!(
+            parse_hotkey_text(DEFAULT_HOTKEY_TEXT).unwrap().0.id(),
+            parse_hotkey_text(DEFAULT_TEXT_HOTKEY_TEXT).unwrap().0.id()
+        );
         assert_eq!(normalize_hotkey_text(" ctrl + win + c "), "ctrl+Super+c");
     }
 }

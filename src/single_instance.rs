@@ -61,7 +61,8 @@ fn acquire_at(path: &Path) -> Lock {
     }
 }
 
-/// Asks the running copy to show itself (`"Show"`) or start a pick (`"Pick"`).
+/// Asks the running copy to show itself (`"Show"`), start a pick (`"Pick"`)
+/// or start a text capture (`"Extract"`).
 pub fn send(method: &str) -> Result<(), String> {
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     // Right after its own start, the first copy holds the lock but may not
@@ -101,6 +102,7 @@ mod tests {
 struct Remote {
     show: Trigger,
     pick: Trigger,
+    extract: Trigger,
 }
 
 #[zbus::interface(name = "io.github.Mujtaba1i.Archtoys")]
@@ -112,13 +114,17 @@ impl Remote {
     fn pick(&self) {
         (self.pick)();
     }
+
+    fn extract(&self) {
+        (self.extract)();
+    }
 }
 
 /// Starts answering later launches. Keep the connection alive.
-pub fn serve(show: Trigger, pick: Trigger) -> Option<Connection> {
+pub fn serve(show: Trigger, pick: Trigger, extract: Trigger) -> Option<Connection> {
     let result = zbus::blocking::connection::Builder::session()
         .and_then(|builder| builder.name(BUS_NAME))
-        .and_then(|builder| builder.serve_at(OBJECT_PATH, Remote { show, pick }))
+        .and_then(|builder| builder.serve_at(OBJECT_PATH, Remote { show, pick, extract }))
         .and_then(|builder| builder.build());
     match result {
         Ok(conn) => Some(conn),

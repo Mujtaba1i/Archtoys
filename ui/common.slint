@@ -1,0 +1,539 @@
+import { Palette } from "std-widgets.slint";
+
+// Shared by every screen: the data types Rust fills, the theme (Skin), the
+// CPU stand-ins for shadows and rounded gradients, and the small widgets.
+
+// The color in one format: the color card (the first format) and each
+// format box (the others).
+export struct FieldRow {
+    key: string,
+    label: string,
+    // without the wrapper: "255, 70, 162"
+    value: string,
+    // bumped by the app on every update; the field then shows `value` again
+    rev: int,
+}
+
+// One line in the "Customize formats" panel.
+export struct FormatOption {
+    key: string,
+    label: string,
+    enabled: bool,
+}
+
+// One color in the search results.
+export struct SearchCard {
+    name: string,
+    color: color,
+    // the color in the first format (shown on hover)
+    value: string,
+}
+
+// One tile of the shades strip.
+export struct ShadeCell {
+    color: color,
+    // dark or white, whichever reads on `color`
+    ink: color,
+    // its own name; "" when names are off
+    name: string,
+    // in the first format, without the wrapper
+    value: string,
+    // what shade-clicked gets back
+    factor: float,
+    // the same as the selected color (the middle one): marked, not clickable
+    current: bool,
+}
+
+export global Skin {
+    // 0 = light, 1 = dark, 2 = follow the desktop
+    in-out property <int> theme: 2;
+    out property <bool> dark-mode: theme == 1 || (theme == 2 && Palette.color-scheme == ColorScheme.dark);
+    // 0 = light, 1 = dark, in between while the theme changes. A global can't
+    // animate, so AppWindow animates it and copies it here.
+    in-out property <float> dark-t;
+
+    // the dark color, the light one, or a mix while the theme changes
+    public pure function pick(dark: color, light: color) -> color {
+        dark.mix(light, dark-t)
+    }
+
+    out property <color> bg-color: pick(#111216, #f6f7f9);
+    out property <color> surface: pick(#1d1f25, #ffffff);
+    out property <color> surface-hover: pick(#262931, #eceef2);
+    out property <color> border: pick(#2c2f37, #dde1e8);
+    out property <color> text-main: pick(#f2f3f6, #16181d);
+    out property <color> text-muted: pick(#a3a7b3, #5d6270);
+    out property <color> icon-tint: pick(#c9ccd4, #3a3e48);
+    out property <color> accent: pick(#1e8ccf, #1a7fc1);
+    // the track of a switch that is off, and of the segmented buttons
+    out property <color> track: pick(#2c2f37, #e3e6ec);
+    // how strong the aurora glow is
+    out property <float> aurora-strength: 0.28 + 0.02 * dark-t;
+    // Blurred shadows and rounded clipping need OpenGL. Drawn on the CPU (the
+    // `cpu` build), Rust sets this off: `RingGlow` stands in for the shadows,
+    // and rounded parts get their own corners instead of being clipped.
+    in property <bool> real-shadows: true;
+}
+
+// The CPU stand-in for drop-shadow-blur, drawn the way OpenGL (femtovg) draws
+// it: a Gaussian blur of the shape, sigma = blur / 2 in physical pixels, that
+// samples only R = ceil(1.5 * min(sigma, 8)) - 1 pixels each way, so the glow
+// fades over R physical pixels on each side of the edge and stops there.
+// Every pixel is painted once (stacked translucent layers drift darker from
+// 8-bit rounding): the straight edges are 1px strips, each with its pixel's
+// opacity; the corners are radial gradients (thin curved rings leave a dotted
+// seam on the CPU); the middle is one plain fill.
+export global GlowMath {
+    // normal distribution up to x >= 0 (erf by Abramowitz-Stegun 7.1.26)
+    public pure function cdf(x: float) -> float {
+        let z = x / Math.sqrt(2);
+        let t = 1 / (1 + 0.3275911 * z);
+        1 - 0.5 * t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-z * z)
+    }
+    // the glow's opacity d physical pixels outside the edge (inside: d < 0),
+    // 1 to 0 between -(reach + 0.5) and reach + 0.5
+    public pure function at(d: float, sigma: float, reach: int) -> float {
+        let top = GlowMath.cdf((reach + 0.5) / sigma);
+        let tail = Math.clamp((top - GlowMath.cdf(Math.abs(d) / sigma)) / (2 * top - 1), 0, 1);
+        d >= 0 ? tail : 1 - tail
+    }
+}
+
+// Put it inside the element, first, sized like it, with `cover` = the
+// element's background (and border): that is drawn again over the glow, so the
+// glow only shows outside. Beside an element that clips, leave `cover` out.
+// shortcut: assumes radius >= the glow's reach (true for every use here); a
+// sharper corner would paint a few pixels twice.
+export component RingGlow inherits Rectangle {
+    in property <color> glow;
+    in property <length> blur;
+    in property <length> radius;
+    in property <length> bottom-radius: self.radius;
+    in property <length> offset-y: 0px;
+    in property <brush> cover: transparent;
+    in property <color> cover-border: transparent;
+    in property <length> cover-border-width: 0px;
+    visible: !Skin.real-shadows;
+    background: transparent;
+    property <float> sigma: Math.max(0.01, root.blur / 1phx / 2);
+    property <int> reach: Math.max(0, Math.ceil(1.5 * Math.min(root.sigma, 8)) - 1);
+    property <length> r: root.reach * 1phx;
+    // a corner's 8 gradient stops around its arc centre, from full (reach + 0.5
+    // inside the edge) to none (as far outside); in between, off by < 1/255
+    pure function d(i: int) -> float { -(root.reach + 0.5) + i * (2 * root.reach + 1) / 7 }
+    pure function stop(i: int) -> color { root.glow.transparentize(1 - GlowMath.at(root.d(i), root.sigma, root.reach)) }
+    pure function pos(i: int, rad: length) -> float { (rad + root.d(i) * 1phx) / ((rad + root.r) * Math.sqrt(2)) }
+
+    Rectangle {
+        y: root.offset-y;
+        width: root.width;
+        height: root.height;
+        // k < 4: corner k (a radial gradient, cut to the corner's square);
+        // then 1px strips: side k % 4 (top, bottom, left, right), strip j from
+        // the innermost (j = 0) to the outermost, o = its outer edge
+        for k in 4 + root.reach * 8 : Rectangle {
+            property <bool> corner: k < 4;
+            property <bool> right: Math.mod(k, 2) == 1;
+            property <bool> bottom: k >= 2;
+            property <int> side: Math.mod(k, 4);
+            property <int> j: Math.floor((k - 4) / 4);
+            property <length> o: (self.j - root.reach + 1) * 1phx;
+            property <length> rad: (self.corner ? self.bottom : self.side == 1) ? root.bottom-radius : root.radius;
+            property <length> sq: self.rad + root.r;
+            property <length> long: Math.max(0px, self.side < 2 ? root.width - 2 * self.rad : root.height - root.radius - root.bottom-radius);
+            x: self.corner ? (self.right ? root.width - self.rad : -root.r)
+                : self.side < 2 ? self.rad
+                : self.side == 2 ? -self.o : root.width + self.o - 1phx;
+            y: self.corner ? (self.bottom ? root.height - self.rad : -root.r)
+                : self.side == 0 ? -self.o
+                : self.side == 1 ? root.height + self.o - 1phx : root.radius;
+            width: self.corner ? self.sq : self.side < 2 ? self.long : 1phx;
+            height: self.corner ? self.sq : self.side < 2 ? 1phx : self.long;
+            clip: self.corner;
+            Rectangle {
+                x: parent.corner && parent.right ? -parent.sq : 0px;
+                y: parent.corner && parent.bottom ? -parent.sq : 0px;
+                width: parent.corner ? 2 * parent.sq : parent.width;
+                height: parent.corner ? 2 * parent.sq : parent.height;
+                background: parent.corner ? @radial-gradient(circle,
+                    root.stop(0) root.pos(0, parent.rad),
+                    root.stop(1) root.pos(1, parent.rad),
+                    root.stop(2) root.pos(2, parent.rad),
+                    root.stop(3) root.pos(3, parent.rad),
+                    root.stop(4) root.pos(4, parent.rad),
+                    root.stop(5) root.pos(5, parent.rad),
+                    root.stop(6) root.pos(6, parent.rad),
+                    root.stop(7) root.pos(7, parent.rad))
+                    : root.glow.transparentize(1 - GlowMath.at(parent.j - root.reach + 0.5, root.sigma, root.reach));
+            }
+        }
+        // the full middle, around the corners' squares
+        Rectangle {
+            x: root.radius;
+            y: root.r;
+            width: Math.max(0px, root.width - 2 * root.radius);
+            height: Math.max(0px, root.height - 2 * root.r);
+            background: root.glow;
+        }
+        Rectangle {
+            x: root.r;
+            y: root.radius;
+            width: Math.max(0px, root.radius - root.r);
+            height: Math.max(0px, root.height - root.radius - root.bottom-radius);
+            background: root.glow;
+        }
+        Rectangle {
+            x: root.width - root.radius;
+            y: root.radius;
+            width: Math.max(0px, root.radius - root.r);
+            height: Math.max(0px, root.height - root.radius - root.bottom-radius);
+            background: root.glow;
+        }
+    }
+    Rectangle {
+        background: root.cover;
+        border-top-left-radius: root.radius;
+        border-top-right-radius: root.radius;
+        border-bottom-left-radius: root.bottom-radius;
+        border-bottom-right-radius: root.bottom-radius;
+        border-width: root.cover-border-width;
+        border-color: root.cover-border;
+    }
+}
+
+// A rounded rectangle filled with an opaque gradient, for the CPU build (it
+// draws gradients square, ignoring the corners). The gradient is drawn whole
+// behind every piece, each piece cut out by a rectangle clip, so every pixel
+// has its exact color: three bands for the middle, and the corners pixel row
+// by pixel row (the fully covered pixels as one strip, each edge pixel on its
+// own with its share of coverage as opacity, like anti-aliasing).
+export component RoundGradient inherits Rectangle {
+    in property <brush> fill;
+    in property <length> radius;
+    property <float> rp: root.radius / 1phx;
+    property <int> n: Math.ceil(root.rp);
+    for b in 3 : Rectangle {
+        x: b == 0 ? root.radius : b == 1 ? 0px : root.width - root.radius;
+        y: b == 0 ? 0px : root.radius;
+        width: b == 0 ? Math.max(0px, root.width - 2 * root.radius) : root.radius;
+        height: b == 0 ? root.height : Math.max(0px, root.height - 2 * root.radius);
+        clip: true;
+        Rectangle { x: -parent.x; y: -parent.y; width: root.width; height: root.height; background: root.fill; }
+    }
+    // corner c (0 top left, 1 top right, 2 bottom left, 3 bottom right), in
+    // pixels u across and v down from its outer corner; line i is row v = i
+    // (kinds 0-3: its full strip, its edge pixels) or column u = i (kinds 4-6:
+    // its edge pixels). Rows take the edge pixels with u < v, columns the rest.
+    for k in root.n * 28 : Rectangle {
+        property <int> c: Math.floor(k / (root.n * 7));
+        property <int> kind: Math.mod(Math.floor(k / root.n), 7);
+        property <int> i: Math.mod(k, root.n);
+        property <float> dl: root.rp - (self.i + 0.5);
+        // the line's pixels from `first` touch the shape, from `full` are inside
+        property <int> first: Math.max(0, Math.ceil(root.rp - Math.sqrt(Math.max(0, (root.rp + 0.5) * (root.rp + 0.5) - self.dl * self.dl)) - 0.5));
+        property <int> full: Math.max(0, Math.ceil(root.rp - Math.sqrt(Math.max(0, (root.rp - 0.5) * (root.rp - 0.5) - self.dl * self.dl)) - 0.5));
+        property <int> p: self.first + Math.mod(self.kind + 2, 3);
+        property <float> cover: Math.clamp(0.5 - (Math.sqrt((root.rp - self.p - 0.5) * (root.rp - self.p - 0.5) + self.dl * self.dl) - root.rp), 0, 1);
+        property <bool> on-row: self.kind <= 3;
+        property <int> u: self.on-row ? (self.kind == 0 ? self.full : self.p) : self.i;
+        property <int> v: self.on-row ? self.i : self.p;
+        property <int> len: self.kind == 0 ? root.n - self.full : 1;
+        visible: self.kind == 0 ? self.full < root.n
+            : self.p < self.full && self.cover > 0 && (self.on-row ? self.p < self.i : self.p <= self.i);
+        x: (self.c == 1 || self.c == 3) ? root.width - (self.u + self.len) * 1phx : self.u * 1phx;
+        y: self.c >= 2 ? root.height - (self.v + 1) * 1phx : self.v * 1phx;
+        width: self.len * 1phx;
+        height: 1phx;
+        opacity: self.kind == 0 ? 1 : self.cover;
+        clip: true;
+        Rectangle { x: -parent.x; y: -parent.y; width: root.width; height: root.height; background: root.fill; }
+    }
+}
+
+// A round icon button in the header.
+export component HeaderButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> active;
+    callback clicked;
+
+    width: 36px;
+    height: 36px;
+    border-radius: 18px;
+    background: touch.pressed ? Skin.border : touch.has-hover || root.active ? Skin.surface : Skin.surface.transparentize(1);
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    Image {
+        source: root.icon;
+        width: 20px;
+        height: 20px;
+        colorize: root.active ? Skin.accent : Skin.icon-tint;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// The copy icon on the color card and on each format box. After a click it
+// turns into a check mark for a moment.
+export component CopyIcon inherits Rectangle {
+    in property <color> tint: Skin.icon-tint;
+    callback clicked;
+    property <bool> copied;
+    property <float> copied-t: root.copied ? 1 : 0;
+    animate copied-t { duration: 150ms; easing: ease-out; }
+
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: touch.pressed ? root.tint.transparentize(0.75) : touch.has-hover ? root.tint.transparentize(0.88) : root.tint.transparentize(1);
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.copied ? "Copied" : "Copy";
+    accessible-action-default => { touch.clicked(); }
+
+    Image {
+        source: @image-url("copy.svg");
+        width: 17px;
+        height: 17px;
+        colorize: root.tint;
+        opacity: 1 - root.copied-t;
+    }
+    Image {
+        source: @image-url("check.svg");
+        width: 18px;
+        height: 18px;
+        colorize: root.tint;
+        opacity: root.copied-t;
+    }
+    Timer {
+        interval: 1.2s;
+        running: root.copied;
+        triggered => { root.copied = false; }
+    }
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+            root.copied = true;
+        }
+    }
+}
+
+// A text button: the hotkey, Clear, Customize, Report.
+export component PillButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger;
+    in property <bool> highlighted;
+    callback clicked;
+
+    height: 34px;
+    min-width: label.preferred-width + 28px;
+    border-radius: 10px;
+    background: root.danger
+        ? (touch.pressed ? #b02a2a : touch.has-hover ? #c43030 : #d93636)
+        : (touch.pressed ? Skin.border : touch.has-hover ? Skin.surface-hover : Skin.bg-color);
+    animate background { duration: 120ms; }
+    border-width: root.danger ? 0px : 1px;
+    border-color: root.highlighted ? Skin.accent : Skin.border;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    label := Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.danger ? #ffffff : Skin.text-main;
+        font-size: 13px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// A toy's main action, with its icon: Pick, Extract text, Turn on. `primary`
+// fills it with the accent color (an action that starts something new).
+export component ActionButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> text;
+    in property <string> label: root.text;
+    in property <bool> primary;
+    callback clicked;
+
+    width: Math.max(96px, row.preferred-width + 40px);
+    height: 40px;
+    border-radius: 20px;
+    background: root.primary
+        ? (touch.pressed ? Skin.accent.darker(0.2) : touch.has-hover ? Skin.accent.brighter(0.1) : Skin.accent)
+        : (touch.pressed ? Skin.border : touch.has-hover ? Skin.surface-hover : Skin.surface);
+    animate background { duration: 120ms; }
+    border-width: root.primary ? 0px : 1px;
+    border-color: Skin.border;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon;
+                width: 18px;
+                height: 18px;
+                colorize: root.primary ? #ffffff : Skin.text-main;
+            }
+        }
+        Text {
+            text: root.text;
+            color: root.primary ? #ffffff : Skin.text-main;
+            font-size: 15px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// On/off switch. The parent keeps the value: `toggled(on)` asks to change it.
+export component Switch inherits Rectangle {
+    in property <bool> checked;
+    in property <string> label;
+    callback toggled(bool);
+
+    width: 44px;
+    height: 26px;
+    border-radius: 13px;
+    background: root.checked ? Skin.accent : Skin.track;
+    animate background { duration: 120ms; }
+    accessible-role: checkbox;
+    accessible-checked: root.checked;
+    accessible-label: root.label;
+    accessible-action-default => { root.toggled(!root.checked); }
+
+    Rectangle {
+        x: root.checked ? root.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        background: #ffffff;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+    TouchArea { clicked => { root.toggled(!root.checked); } }
+}
+
+// A row of choices, one selected (Theme, Color card style).
+export component Segmented inherits Rectangle {
+    in property <[string]> options;
+    in property <int> selected;
+    callback picked(int);
+
+    height: 36px;
+    border-radius: 10px;
+    background: Skin.track;
+
+    HorizontalLayout {
+        padding: 3px;
+        spacing: 2px;
+        for option[i] in root.options : Rectangle {
+            min-width: option-text.preferred-width + 24px;
+            border-radius: 8px;
+            background: i == root.selected ? Skin.accent : option-touch.has-hover ? Skin.surface-hover : Skin.surface-hover.transparentize(1);
+            animate background { duration: 150ms; easing: ease-out; }
+            accessible-role: button;
+            accessible-label: option;
+            accessible-action-default => { root.picked(i); }
+            option-text := Text {
+                width: parent.width;
+                height: parent.height;
+                text: option;
+                color: i == root.selected ? #ffffff : Skin.text-main;
+                font-size: 13px;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            option-touch := TouchArea { clicked => { root.picked(i); } }
+        }
+    }
+}
+
+// One card on the settings page: a title, a line about it, and its control.
+export component SettingCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+
+    border-radius: 16px;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: Skin.border;
+
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 14px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.title;
+                color: Skin.text-main;
+                font-size: 15px;
+                font-weight: 700;
+            }
+            if root.subtitle != "" : Text {
+                text: root.subtitle;
+                color: Skin.text-muted;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            @children
+        }
+    }
+}
+
+export component SectionLabel inherits Text {
+    color: Skin.text-muted;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+
+// Small square button with an icon (the up/down arrows).
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback clicked;
+
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: touch.pressed && root.enabled ? Skin.border : touch.has-hover && root.enabled ? Skin.surface-hover : Skin.surface-hover.transparentize(1);
+    animate background { duration: 120ms; }
+    opacity: root.enabled ? 1 : 0.3;
+    accessible-role: button;
+    accessible-label: root.label;
+    Image {
+        source: root.icon;
+        width: 16px;
+        height: 16px;
+        colorize: Skin.icon-tint;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+

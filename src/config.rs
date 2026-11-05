@@ -54,6 +54,23 @@ pub struct AppConfig {
     #[serde(default = "default_true")]
     pub editor_reset_on_new_color: bool,
     pub editor_saved: Option<crate::editor::SavedEdit>,
+    /// The page shown last (0 Home, 1 Color Picker, 2 Text Extractor). None in
+    /// configs from before v0.7.0: the first start of v0.7.0 opens Home.
+    pub last_page: Option<i32>,
+    /// The sidebar kept open: 0 no, 1 its icons (a click on the menu button),
+    /// 2 all of it (a double-click).
+    pub sidebar_mode: i32,
+    /// Text Extractor was turned on (Tesseract installed by Archtoys).
+    pub text_enabled: bool,
+    pub text_hotkey: String,
+    /// Show the toolbar on the selection (off: copy and close at once).
+    #[serde(default = "default_true")]
+    pub text_tools: bool,
+    /// Minimize the window for a capture and keep it minimized afterwards.
+    pub text_stay_minimized: bool,
+    /// Keep line breaks (off: join the lines of a paragraph).
+    #[serde(default = "default_true")]
+    pub text_keep_lines: bool,
 }
 
 fn default_true() -> bool {
@@ -81,6 +98,13 @@ impl Default for AppConfig {
             editor_keep: false,
             editor_reset_on_new_color: true,
             editor_saved: None,
+            last_page: None,
+            sidebar_mode: 0,
+            text_enabled: false,
+            text_hotkey: crate::hotkey::DEFAULT_TEXT_HOTKEY_TEXT.to_string(),
+            text_tools: true,
+            text_stay_minimized: false,
+            text_keep_lines: true,
         }
     }
 }
@@ -153,7 +177,7 @@ fn save_config(cfg: &AppConfig) {
 
 /// Writes a temporary file next to `path`, then renames it over `path`, so a
 /// crash or power cut mid-save leaves either the old file or the new one.
-fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     let mut file = fs::File::create(&tmp)?;
     file.write_all(data)?;
@@ -189,6 +213,13 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         editor_keep: ui.get_setting_editor_keep(),
         editor_reset_on_new_color: ui.get_setting_editor_reset(),
         editor_saved: crate::editor::saved(ui),
+        last_page: Some(ui.get_page()),
+        sidebar_mode: ui.get_sidebar_mode(),
+        text_enabled: crate::ocr::enabled(),
+        text_hotkey: ui.get_setting_text_hotkey().to_string(),
+        text_tools: ui.get_setting_text_tools(),
+        text_stay_minimized: ui.get_setting_text_stay_minimized(),
+        text_keep_lines: ui.get_setting_text_keep_lines(),
     }
 }
 
@@ -217,10 +248,21 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
         crate::editor::restore(saved);
     }
 
+    ui.set_page(cfg.last_page.unwrap_or(0).clamp(0, 2));
+    ui.set_sidebar_mode(cfg.sidebar_mode.clamp(0, 2));
+    crate::ocr::set_enabled(cfg.text_enabled);
+    if !cfg.text_hotkey.trim().is_empty() {
+        ui.set_setting_text_hotkey(cfg.text_hotkey.clone().into());
+    }
+    ui.set_setting_text_tools(cfg.text_tools);
+    ui.set_setting_text_stay_minimized(cfg.text_stay_minimized);
+    ui.set_setting_text_keep_lines(cfg.text_keep_lines);
+
     if !cfg.history.is_empty() {
         let mut guard = history_store.lock().unwrap();
         guard.clear();
-        for rgb in &cfg.history {
+        // the last 500 (older versions kept every color)
+        for rgb in cfg.history.iter().take(crate::ui_state::MAX_COLOR_HISTORY) {
             guard.push((rgb[0], rgb[1], rgb[2]));
         }
     }
@@ -266,6 +308,15 @@ mod tests {
         assert!(show_name(&named));
         assert!(show_name(&serde_json::from_str::<AppConfig>("{}").unwrap()));
         assert!(serde_json::from_str::<AppConfig>("{}").unwrap().show_formats_button);
+    }
+
+    #[test]
+    fn configs_from_before_v0_7_0_open_home_with_text_extractor_off() {
+        let old: AppConfig = serde_json::from_str(r#"{"setting_autocopy":true}"#).unwrap();
+        assert_eq!(old.last_page, None); // the first start of v0.7.0 opens Home
+        assert!(old.sidebar_mode == 0 && !old.text_enabled && !old.text_stay_minimized);
+        assert!(old.text_tools && old.text_keep_lines);
+        assert_eq!(old.text_hotkey, "Ctrl+Super+T");
     }
 
     #[test]

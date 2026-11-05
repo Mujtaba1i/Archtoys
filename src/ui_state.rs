@@ -308,7 +308,8 @@ pub fn window_size(ui: &AppWindow) -> Option<(u32, u32)> {
 pub fn set_window_size(size: Option<[u32; 2]>) {
     let fit = |[w, h]: [u32; 2]| {
         (
-            w.clamp(crate::WINDOW_MIN_WIDTH as u32, crate::WINDOW_MAX_WIDTH as u32),
+            // (with the pinned sidebar the window is wider by its width)
+            w.clamp(crate::WINDOW_MIN_WIDTH as u32, (crate::WINDOW_MAX_WIDTH + crate::window::SIDEBAR_WIDTH) as u32),
             h.clamp(crate::WINDOW_MIN_HEIGHT as u32, crate::WINDOW_MAX_HEIGHT as u32),
         )
     };
@@ -477,11 +478,15 @@ pub fn sync_history_model(ui: &AppWindow, history_store: &HistoryStore) {
 }
 
 /// Adds a color to the front of the history, unless it is already the newest.
+/// The Color Picker keeps the last 500 colors (before v0.7.0 it kept all).
+pub(crate) const MAX_COLOR_HISTORY: usize = 500;
+
 pub fn push_history(history_store: &HistoryStore, rgb: Rgb) {
     let mut history = history_store.lock().unwrap();
     if history.first() != Some(&rgb) {
         history.insert(0, rgb);
     }
+    history.truncate(MAX_COLOR_HISTORY);
 }
 
 pub fn copy_text_async(text: String) {
@@ -520,6 +525,17 @@ mod tests {
             push_history(&store, rgb);
         }
         assert_eq!(*store.lock().unwrap(), vec![(1, 2, 3), (4, 5, 6), (1, 2, 3)]);
+    }
+
+    #[test]
+    fn history_keeps_the_last_500_colors() {
+        let store: HistoryStore = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+        for i in 0..600u32 {
+            push_history(&store, ((i % 256) as u8, (i / 256) as u8, 7));
+        }
+        let history = store.lock().unwrap();
+        assert_eq!(history.len(), MAX_COLOR_HISTORY);
+        assert_eq!(history[0], ((599 % 256) as u8, (599 / 256) as u8, 7)); // the newest first
     }
 
     #[test]

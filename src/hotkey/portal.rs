@@ -6,7 +6,7 @@
 //! update when it changes. If the portal is missing or the user declines,
 //! we switch to the X11 hotkey, which Archtoys manages itself.
 
-use super::{to_portal_trigger, HotkeyService, HotkeyStatus, StatusCallback, Trigger};
+use super::{to_portal_trigger, HotkeyService, HotkeyStatus, Shortcut, StatusCallback};
 use crate::portal::{self, Outcome};
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Sender};
@@ -16,7 +16,6 @@ use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
 const INTERFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
-const SHORTCUT_ID: &str = "pick-color";
 
 type ShortcutList = Vec<(String, HashMap<String, OwnedValue>)>;
 
@@ -32,20 +31,19 @@ pub struct PortalShortcut {
 }
 
 impl PortalShortcut {
-    pub fn start(text: &str, trigger: Trigger, on_status: StatusCallback) -> Self {
+    pub fn start(shortcuts: Vec<Shortcut>, on_status: StatusCallback) -> Self {
         let (tx, rx) = mpsc::channel::<Command>();
         let fallback: Arc<Mutex<Option<HotkeyService>>> = Arc::new(Mutex::new(None));
 
-        let text = text.to_string();
         let thread_fallback = fallback.clone();
         thread::spawn(move || {
-            if let Err(err) = run(&text, trigger.clone(), on_status.clone(), rx) {
-                // only the hotkey falls back; the window stays on Wayland
+            if let Err(err) = run(&shortcuts, on_status.clone(), rx) {
+                // only the hotkeys fall back; the window stays on Wayland
                 eprintln!(
-                    "hotkey: {err}; using the X11 hotkey instead (the window stays on Wayland; \
-                     the X11 hotkey only works while an X11 app has the keyboard)"
+                    "hotkey: {err}; using X11 hotkeys instead (the window stays on Wayland; \
+                     X11 hotkeys only work while an X11 app has the keyboard)"
                 );
-                let (service, _) = HotkeyService::start_x11(&text, trigger);
+                let (service, _) = HotkeyService::start_x11(shortcuts);
                 *thread_fallback.lock().unwrap() = Some(service);
                 on_status(HotkeyStatus::AppManaged);
             }
@@ -57,10 +55,10 @@ impl PortalShortcut {
         }
     }
 
-    /// Changing the hotkey from inside Archtoys only works with the X11 fallback.
-    pub fn change(&self, text: &str) -> Result<String, String> {
+    /// Changing a hotkey from inside Archtoys only works with the X11 fallback.
+    pub fn change(&self, index: usize, text: &str) -> Result<String, String> {
         if let Some(service) = self.fallback.lock().unwrap().as_ref() {
-            return service.change(text);
+            return service.change(index, text);
         }
         Err("this shortcut is managed by your desktop; change it in its settings".into())
     }
@@ -74,13 +72,18 @@ impl PortalShortcut {
     }
 }
 
-/// The description of our shortcut in a portal shortcut list, e.g. "Ctrl+Alt+F".
-fn describe(list: &ShortcutList) -> String {
-    list.iter()
-        .find(|(id, _)| id == SHORTCUT_ID)
-        .and_then(|(_, props)| props.get("trigger_description"))
-        .and_then(|value| <String>::try_from(value.try_clone().ok()?).ok())
-        .unwrap_or_default()
+/// The description of each of our shortcuts in a portal shortcut list, e.g.
+/// "Ctrl+Alt+F" ("" for one the desktop doesn't list).
+fn describe(list: &ShortcutList, ids: &[&str]) -> Vec<String> {
+    ids.iter()
+        .map(|wanted| {
+            list.iter()
+                .find(|(id, _)| id == wanted)
+                .and_then(|(_, props)| props.get("trigger_description"))
+                .and_then(|value| <String>::try_from(value.try_clone().ok()?).ok())
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 fn list_from_results(results: &portal::Results) -> ShortcutList {
@@ -91,9 +94,9 @@ fn list_from_results(results: &portal::Results) -> ShortcutList {
         .unwrap_or_default()
 }
 
-/// Creates a portal session and binds the shortcut.
-/// Returns the session path and the desktop's description of the shortcut.
-fn bind(conn: &Connection, text: &str) -> Result<(String, String), String> {
+/// Creates a portal session and binds every shortcut in it (one dialog).
+/// Returns the session path and the desktop's description of each shortcut.
+fn bind(conn: &Connection, shortcuts: &[Shortcut]) -> Result<(String, Vec<String>), String> {
     // CreateSession
     let token = portal::new_token("archtoys_hk");
     let session_token = portal::new_token("archtoys_session");
@@ -109,28 +112,35 @@ fn bind(conn: &Connection, text: &str) -> Result<(String, String), String> {
 
     // BindShortcuts. `preferred_trigger` is only a suggestion: the first time,
     // the desktop asks the user; after that it keeps its own setting.
-    let trigger = to_portal_trigger(text);
-    let mut props: HashMap<&str, Value<'_>> = HashMap::new();
-    props.insert("description", Value::from("Pick a color (Archtoys)"));
-    props.insert("preferred_trigger", Value::from(trigger.clone()));
-    let shortcuts = vec![(SHORTCUT_ID, props)];
+    let ids: Vec<&str> = shortcuts.iter().map(|s| s.id).collect();
+    let list: Vec<(&str, HashMap<&str, Value<'_>>)> = shortcuts
+        .iter()
+        .map(|s| {
+            let mut props: HashMap<&str, Value<'_>> = HashMap::new();
+            props.insert("description", Value::from(s.description));
+            props.insert("preferred_trigger", Value::from(to_portal_trigger(&s.text)));
+            (s.id, props)
+        })
+        .collect();
     let token = portal::new_token("archtoys_bind");
     let options = portal::options(&token);
-    let description = match portal::call(conn, INTERFACE, "BindShortcuts", &(session_path, shortcuts, "", options), &token)? {
-        Outcome::Success(results) => describe(&list_from_results(&results)),
-        Outcome::Cancelled => return Err("GlobalShortcuts: you declined the shortcut".into()),
+    let descriptions = match portal::call(conn, INTERFACE, "BindShortcuts", &(session_path, list, "", options), &token)? {
+        Outcome::Success(results) => describe(&list_from_results(&results), &ids),
+        Outcome::Cancelled => return Err("GlobalShortcuts: you declined the shortcuts".into()),
     };
-    eprintln!("hotkey: desktop shortcut is \"{description}\" (suggested {trigger})");
-    Ok((session, description))
+    for (s, d) in shortcuts.iter().zip(&descriptions) {
+        eprintln!("hotkey: desktop shortcut for {} is \"{d}\" (suggested {})", s.id, to_portal_trigger(&s.text));
+    }
+    Ok((session, descriptions))
 }
 
-fn list_shortcuts(conn: &Connection, session: &str) -> Result<String, String> {
+fn list_shortcuts(conn: &Connection, session: &str, ids: &[&str]) -> Result<Vec<String>, String> {
     let session_path =
         OwnedObjectPath::try_from(session.to_string()).map_err(|err| format!("bad session path: {err}"))?;
     let token = portal::new_token("archtoys_list");
     let options = portal::options(&token);
     match portal::call(conn, INTERFACE, "ListShortcuts", &(session_path, options), &token)? {
-        Outcome::Success(results) => Ok(describe(&list_from_results(&results))),
+        Outcome::Success(results) => Ok(describe(&list_from_results(&results), ids)),
         Outcome::Cancelled => Err("ListShortcuts was cancelled".into()),
     }
 }
@@ -155,12 +165,8 @@ pub(super) fn open_desktop_shortcut_settings() {
     eprintln!("hotkey: couldn't open the desktop's shortcut settings");
 }
 
-fn run(
-    text: &str,
-    trigger: Trigger,
-    on_status: StatusCallback,
-    commands: mpsc::Receiver<Command>,
-) -> Result<(), String> {
+fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiver<Command>) -> Result<(), String> {
+    let ids: Vec<&'static str> = shortcuts.iter().map(|s| s.id).collect();
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     portal::register_host_app(&conn, "archtoys");
 
@@ -179,18 +185,19 @@ fn run(
         .receive_signal("ShortcutsChanged")
         .map_err(|err| format!("GlobalShortcuts subscribe: {err}"))?;
 
-    let (session, description) = bind(&conn, text)?;
-    on_status(HotkeyStatus::SystemManaged(description));
+    let (session, descriptions) = bind(&conn, shortcuts)?;
+    on_status(HotkeyStatus::SystemManaged(descriptions));
 
     // The user changed the shortcut in the desktop's settings.
     {
         let session = session.clone();
         let on_status = on_status.clone();
+        let ids = ids.clone();
         thread::spawn(move || {
             for message in changed {
                 if let Ok((path, list)) = message.body().deserialize::<(OwnedObjectPath, ShortcutList)>() {
                     if path.as_str() == session {
-                        on_status(HotkeyStatus::SystemManaged(describe(&list)));
+                        on_status(HotkeyStatus::SystemManaged(describe(&list, &ids)));
                     }
                 }
             }
@@ -202,11 +209,12 @@ fn run(
         let conn = conn.clone();
         let session = session.clone();
         let on_status = on_status.clone();
+        let ids = ids.clone();
         thread::spawn(move || {
             while let Ok(command) = commands.recv() {
                 match command {
-                    Command::Refresh => match list_shortcuts(&conn, &session) {
-                        Ok(description) => on_status(HotkeyStatus::SystemManaged(description)),
+                    Command::Refresh => match list_shortcuts(&conn, &session, &ids) {
+                        Ok(descriptions) => on_status(HotkeyStatus::SystemManaged(descriptions)),
                         Err(err) => eprintln!("hotkey: refresh failed: {err}"),
                     },
                     Command::OpenSettings => {
@@ -234,8 +242,11 @@ fn run(
         else {
             continue;
         };
-        if shortcut_id == SHORTCUT_ID && path.as_str() == session {
-            trigger();
+        if path.as_str() != session {
+            continue;
+        }
+        if let Some(shortcut) = shortcuts.iter().find(|s| s.id == shortcut_id) {
+            (shortcut.trigger)();
         }
     }
     Ok(())
