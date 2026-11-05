@@ -9,6 +9,8 @@
 Pick any pixel, see it magnified and named, find colors by name, and copy them in the format you need.<br>
 Wayland and X11 · at home on KDE Plasma · works offline
 
+**New in v0.7.0: Text Extractor.** Drag over any text on screen and copy it, plus a sidebar and a Home page to move between the toys.
+
 [![Latest release](https://img.shields.io/github/v/release/Mujtaba1i/Archtoys?label=release)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
 [![AUR](https://img.shields.io/aur/version/archtoys?label=AUR)](https://aur.archlinux.org/packages/archtoys)
 [![AUR-bin](https://img.shields.io/aur/version/archtoys-bin?label=AUR-bin)](https://aur.archlinux.org/packages/archtoys-bin)
@@ -23,17 +25,22 @@ Wayland and X11 · at home on KDE Plasma · works offline
 
 ## Highlights
 
-|                                                                                                              |                                                                                                                          |
-| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| **Pixel magnifier**<br>The pixels around your cursor, 10× larger, with the one you'll get outlined. | **Live preview, on Wayland too**<br>The color follows your mouse. On Wayland, Archtoys picks from one frozen screenshot. |
-| **The color card**<br>Your first format, big, on the color itself. Click the value to type a new one. | **Color search**<br>Press `Ctrl+F` and type a name, a word like _sky_, or a code like `#FF46A2`. |
-| **Your formats, your order**<br>HEX, RGB, HSL, HSV, CMYK, HSLA, OKLCH, OKLab and HWB. Type plain numbers like `255, 70, 162`; copying gives `rgb(255,70,162)`. | **Color names**<br>The CSS name when there is one ("Hot Pink"), otherwise the closest of ~32,000 ("≈ Barbie Pink"). |
-| **Shades and history**<br>Five shades under the card, each with its value and name, and every color you pick is kept. | **Auto copy**<br>Copies the value on the card the moment you click, without opening the window. |
-| **Global hotkey**<br>`Ctrl+Super+C` from anywhere. On Wayland it uses your desktop's own shortcuts. | **Light, dark or your desktop's theme**<br>A faint glow in the corner follows your color, and so does the dot on the tray icon. |
-| **Color editor** · new<br>The pen on the middle shade opens it: drag saturation, brightness and hue, or type in your formats. Nothing changes until you press Use. | **Compare two colors** · new<br>Put a picked or typed color next to yours and see their contrast ratio (21 : 1 is black on white). |
-| **Pixel-precise picking** · new<br>The arrow keys move the pick one pixel, `Enter` picks. The value next to the cursor is in your first format. | **Every monitor** · new<br>Pick on any of your monitors, right up to their edges, also with different scaling per monitor. |
+| **Text Extractor** · new<br>Drag over any text on screen and it's copied, even from images, videos and apps that don't let you select text. `Ctrl+Super+T` from anywhere. | **Sidebar and Home** · new<br>Move between toys from the sidebar: click ☰ to keep it open, or rest the mouse on it.                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Pixel magnifier**<br>The pixels around your cursor, 10× larger, with the one you'll get outlined.                                                                       | **Live preview, on Wayland too**<br>The color follows your mouse. On Wayland, Archtoys picks from one frozen screenshot.                                                                                                                               |
+| **The color card**<br>Your first format, big, on the color itself. Click the value to type a new one.                                                                     | **Color search**<br>Press `Ctrl+F` and type a name, a word like _sky_, or a code like `#FF46A2`.                                                                                                                                                       |
+| **Your formats, your order**<br>HEX, RGB, HSL, HSV, CMYK, HSLA, OKLCH, OKLab and HWB. Type plain numbers like `255, 70, 162`; copying gives `rgb(255,70,162)`.            | **Color names**<br>The CSS name when there is one ("Hot Pink"), otherwise the closest of ~32,000 ("≈ Barbie Pink").                                                                                                                                    |
+| **Shades and history**<br>Five shades under the card, each with its value and name, and every color you pick is kept.                                                     | **Auto copy**<br>Copies the value on the card the moment you click, without opening the window.                                                                                                                                                        |
+| **Global hotkey**<br>`Ctrl+Super+C` from anywhere. On Wayland it uses your desktop's own shortcuts.                                                                       | **Light, dark or your desktop's theme**<br>A faint glow in the corner follows your color, and so does the dot on the tray icon.                                                                                                                        |
+| **Color editor** · new<br>The pen on the middle shade opens it: drag saturation, brightness and hue, or type in your formats. Nothing changes until you press Use.        | **Compare two colors** · new<br>Put a picked or typed color next to yours and see their contrast ratio (21 : 1 is black on white).                                                                                                                     |
+| **Pixel-precise picking** · new<br>The arrow keys move the pick one pixel, `Enter` picks. The value next to the cursor is in your first format.                           | **Every monitor** · new<br>Pick on any of your monitors, right up to their edges, also with different scaling per monitor.                                                                                                                             |
+| **Finds the language itself** · new<br>You only pick the area of text. A language's data downloads the first time it's seen.                                              | **Copy at once, or see first** · new<br>A toolbar on the selection (Copy, Copy as one line, Open), or copy and close the moment you let go.                                                                                                            |
+| **Text history** · new<br>Your last 500 texts, each with its language, how sure Archtoys is and the text size. Delete one or all.                                         | **Turn on with one click** · new<br>Text Extractor is off until you want it. Archtoys installs the free [Tesseract](https://github.com/tesseract-ocr/tesseract) engine for you with your password, on Arch, Fedora, Debian, Ubuntu and their families. |
 
 `Esc` or right-click cancels a pick and brings the previous color back. Archtoys lives in the tray and can start on login.
+
+> [!NOTE]
+> Text Extractor reads **English** best. Other languages, such as Arabic or Chinese, may not be read accurately yet, especially a single word, very large or decorative letters, or text mixed with English. Check the text before you use it, and please [report](https://github.com/Mujtaba1i/Archtoys/issues) what it gets wrong.
 
 <div align="center">
 
@@ -69,22 +76,27 @@ Wayland and X11 · at home on KDE Plasma · works offline
 - **Fedora, without COPR:** download the `.rpm` for your Fedora version from [Releases](https://github.com/Mujtaba1i/Archtoys/releases/latest) and run `sudo dnf install ./fedora-*-archtoys-*.rpm`.
 - **.deb:** apt installs the dependencies for you. It works on Ubuntu 22.04 and newer, and Debian 12 and newer. There are no automatic updates yet, so download the new file for each version.
 - **AppImage:** runs on any distribution from Ubuntu 22.04 onwards, or anything equally recent.
+- **Text Extractor:** nothing extra to install: open it and press **Turn on**. It installs or updates Tesseract from your distribution's own packages, and asks for your password even when Tesseract is already there, so the version is one Archtoys works with. On read-only systems (Fedora Silverblue, SteamOS), install `tesseract` the way your system installs software, then press **Check again**.
 </details>
 
 ## Usage
 
-| To                                        | Do                                                                                     |
-| ----------------------------------------- | -------------------------------------------------------------------------------------- |
-| Pick a color                              | Click **Pick** or press `Ctrl+Super+C`, then left-click (or move with the arrow keys and press `Enter`). `Esc` or right-click cancels. |
-| Find a color by name                      | Press `Ctrl+F` or click 🔍 (see [Color search](#color-search))                         |
-| Copy a value                              | Click the copy icon next to it. You get the full form, like `rgb(255,70,162)`.         |
-| Enter a color by hand                     | Click the big value on the card, or a box, type, and press `Enter`. Plain numbers work. |
-| Choose and reorder formats                | The sliders button, next to ⚙ (you can hide it; then it's in the ⚙ settings)           |
-| Use a shade or an old color               | Click it in the shades or the history row                                              |
-| Edit a color, or compare two              | Click the pen on the middle shade. **Compare** splits the card; **Pick** (or your hotkey) picks the second color; **Use** applies. `Esc` closes and keeps your edit. |
-| Change the hotkey, theme, startup…        | The ⚙ settings                                                                         |
-| Pick from a terminal or your own shortcut | `archtoys --pick` (starts Archtoys if it isn't running)                                |
-| Report a problem                          | **Report a problem** in the ⚙ settings                                                 |
+| To                                           | Do                                                                                                                                                                   |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pick a color                                 | Click **Pick** or press `Ctrl+Super+C`, then left-click (or move with the arrow keys and press `Enter`). `Esc` or right-click cancels.                               |
+| Find a color by name                         | Press `Ctrl+F` or click 🔍 (see [Color search](#color-search))                                                                                                       |
+| Copy a value                                 | Click the copy icon next to it. You get the full form, like `rgb(255,70,162)`.                                                                                       |
+| Enter a color by hand                        | Click the big value on the card, or a box, type, and press `Enter`. Plain numbers work.                                                                              |
+| Choose and reorder formats                   | The sliders button, next to ⚙ (you can hide it; then it's in the ⚙ settings)                                                                                         |
+| Use a shade or an old color                  | Click it in the shades or the history row                                                                                                                            |
+| Edit a color, or compare two                 | Click the pen on the middle shade. **Compare** splits the card; **Pick** (or your hotkey) picks the second color; **Use** applies. `Esc` closes and keeps your edit. |
+| Change the hotkey, theme, startup…           | The ⚙ settings                                                                                                                                                       |
+| Pick from a terminal or your own shortcut    | `archtoys --pick` (starts Archtoys if it isn't running)                                                                                                              |
+| Copy text from the screen                    | Open Text Extractor and click **Extract text**, or press `Ctrl+Super+T`, then drag over the text. `Shift` moves the box, the arrow keys nudge it, `Enter` copies, `Esc` cancels.     |
+| See an older text                            | Click it in Text Extractor's history: its language, how sure it is, the text size and the words                                                                      |
+| Extract from a terminal or your own shortcut | `archtoys --extract` (starts Archtoys if it isn't running)                                                                                                           |
+| Switch toys, open Settings or About          | The sidebar: click ☰ to keep it open, or rest the mouse on ☰                                                                                                       |
+| Report a problem                             | **Report a problem** in the ⚙ settings                                                                                                                               |
 
 ### Color search
 
@@ -111,6 +123,7 @@ Hovering a result shows it on the color card and shows its value in your first f
 |                                        | KDE Plasma (Wayland) |               GNOME (Wayland)               | X11 (any desktop) |
 | -------------------------------------- | :------------------: | :-----------------------------------------: | :---------------: |
 | Picker with live preview and magnifier |   ✅ freeze frame    |               ✅ freeze frame               |      ✅ live      |
+| Text Extractor                         |          ✅          |                     ✅                      |        ✅         |
 | Several monitors                       |          ✅          |                     ✅³                     |        ✅         |
 | Global hotkey                          |          ✅          | ✅ GNOME 48+ · ⚠️ older: `archtoys --pick`² |        ✅         |
 | Tray icon                              |          ✅          |     ✅ with the AppIndicator extension¹     |        ✅         |
@@ -119,14 +132,25 @@ Hovering a result shows it on the color card and shows its value in your first f
 ² GNOME before 48 (including Ubuntu 22.04 and 24.04) can't register a global hotkey. Add your own in **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts**, with the command `archtoys --pick`.<br>
 ³ If the desktop's screenshot doesn't line up with your monitors, Archtoys uses the desktop's own picker instead (same color, no magnifier). Please report it if that happens.
 
+Text Extractor's hotkey is `Ctrl+Super+T`; on GNOME before 48, add a custom shortcut with the command `archtoys --extract`.
+
 <details>
 <summary>How picking works on Wayland</summary>
 
 Wayland doesn't let apps watch the screen, which is good for your privacy. So when you start picking, Archtoys asks your desktop for **one screenshot** and shows it fullscreen while you choose. That's why moving content like videos pauses during a pick. The screenshot is deleted from disk as soon as it has been loaded, and nothing is ever saved.
 
+Text Extractor works the same way: one screenshot, deleted once loaded. It keeps only the text it read (in its history), and nothing leaves your computer.
+
 </details>
 
 ## Troubleshooting
+
+<details>
+<summary><b>Text Extractor can't be turned on</b></summary>
+
+**Turn on** needs your password (your desktop asks for it in its own window) and your distribution's package manager. If you closed the password window, press **Turn on** again. On a distribution Archtoys doesn't know, or a read-only one, install the package `tesseract` (often `tesseract-ocr`) yourself and press **Check again**. Archtoys needs Tesseract 4.1 or newer.
+
+</details>
 
 <details>
 <summary><b>My desktop asks for permission the first time</b></summary>
@@ -183,6 +207,7 @@ sudo apt install cargo pkg-config libfontconfig1-dev libx11-dev libxkbcommon-dev
 ```
 
 If your distribution's Rust is too old, install the latest with [rustup](https://rustup.rs).
+For Text Extractor, install `tesseract` too (or turn it on in the app).
 
 **2. Clone, test and run.**
 
@@ -207,16 +232,20 @@ The window is drawn on the CPU (Slint's software renderer: it looks the same as 
 
 The color names and the search index are prebuilt into `data/names-index.*`. After changing `data/colornames.csv` (or how names are normalized), run `cargo test --locked write_name_index -- --ignored`; a test fails until you do.
 
+The licence list in **About Archtoys** (`data/third-party-licenses.html`) is regenerated by every release with `cargo about generate about.hbs -o data/third-party-licenses.html`.
+
 **Project layout**
 
 ```
 src/
 ├── main.rs             startup and wiring
+├── window.rs           Archtoys' own window frame: move, resize, maximize
 ├── color.rs            color formats, parsing, shades (unit-tested)
 ├── formats.rs          which formats are shown, their order, Auto Copy
 ├── names.rs            color names (CSS names + the names list)
 ├── name_index.rs       the names and search index, prebuilt from data/colornames.csv
 ├── search.rs           color search: families, typos, codes (unit-tested)
+├── ocr/                Text Extractor: Tesseract, installing it, languages, history
 ├── config.rs           settings (saved safely) and autostart
 ├── single_instance.rs  one copy at a time, archtoys --pick
 ├── diagnostics.rs      Report a problem
@@ -227,6 +256,9 @@ src/
 ├── hotkey/             global hotkey (portal and X11)
 └── picker/             X11 live picker, Wayland freeze frame, fallbacks
 ui/app.slint            the whole user interface
+ui/shell.slint          the menu bar, sidebar, Home
+ui/text.slint           Text Extractor's page
+ui/common.slint         theme and shared widgets
 ```
 
 </details>
@@ -239,8 +271,9 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, with the color
 - [x] A new look: the color card, shades with names, themes, and a new logo
 - [x] A color editor, and comparing two colors (contrast ratio)
 - [x] Picking on every monitor, pixel by pixel with the arrow keys
-- [ ] **Text Extractor**: select any area of the screen and copy the text in it (OCR)
-- [ ] A sidebar with multiple tools, in the style of PowerToys
+- [x] **Text Extractor**: select any area of the screen and copy the text in it (OCR)
+- [x] A sidebar with multiple tools, in the style of PowerToys
+- [ ] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.1)
 - [ ] Ideas for later: **Awake** (keep your PC from sleeping) and **Screen Ruler** (measure things on screen)
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.
@@ -252,5 +285,7 @@ Bug reports, ideas and pull requests are all welcome. Please run `cargo test --l
 ## Acknowledgements and license
 
 Inspired by the Color Picker in [Microsoft PowerToys](https://github.com/microsoft/PowerToys). Archtoys is an independent project and is not affiliated with or endorsed by Microsoft. Color names come from [meodai/color-names](https://github.com/meodai/color-names) by David Aerne, used under the MIT License (see [`data/colornames-LICENSE.txt`](data/colornames-LICENSE.txt)).
+
+Text Extractor uses [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) and its [language data](https://github.com/tesseract-ocr/tessdata_fast) (Apache-2.0), installed and downloaded on your computer, not built into Archtoys, and [whatlang](https://github.com/greyblake/whatlang-rs) (MIT) to tell languages apart. The interface is made with [Slint](https://slint.dev), under its royalty-free licence. Every other library and its licence is listed in **Settings → About Archtoys → Open-source licences**.
 
 [MIT](LICENSE) © 2026 Mujtaba1i
