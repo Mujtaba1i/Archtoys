@@ -1,0 +1,1 @@
+if command -v script >/dev/null 2>&1; then script -qfec 'pacman -S --noconfirm tesseract tesseract-data-eng tesseract-data-osd' /dev/null; else pacman -S --noconfirm tesseract tesseract-data-eng tesseract-data-osd; fi

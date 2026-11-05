@@ -104,6 +104,12 @@ jobs:
 
       # No `cargo test` here: CI already ran the tests on this code, and the
       # release waits for CI to pass first (the wait-for-ci job).
+      # The licence list shown in Settings > About, made for exactly this build.
+      - name: Licence list
+        run: |
+          cargo install --locked cargo-about --version 0.9.3 --features cli
+          cargo about generate about.hbs -o data/third-party-licenses.html
+
       - name: Build release binary
         run: cargo build --release --locked
 
@@ -243,6 +249,12 @@ jobs:
 
       - name: Install the packaging tool
         run: cargo install cargo-deb --locked --version 3.8.0
+
+      # The licence list shown in Settings > About, made for exactly this build.
+      - name: Licence list
+        run: |
+          cargo install --locked cargo-about --version 0.9.3 --features cli
+          cargo about generate about.hbs -o data/third-party-licenses.html
 
       - name: Build the app
         run: cargo build --release --locked

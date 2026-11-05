@@ -51,6 +51,22 @@ jobs:
             libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 fonts-dejavu-core
           bash .github/scripts/x11-pick-test.sh target/debug/archtoys
 
+      # Text Extractor: known text drawn at screen sizes, light and dark, in
+      # English, German and Russian, read by the real Tesseract through the
+      # app (`archtoys --extract-file`). The run summary shows how much came
+      # back right, the language named, how sure and how fast. English at
+      # 14 px and up, and Arabic, must come back at least 90% right.
+      - name: Text Extractor accuracy
+        run: |
+          sudo apt-get install -y tesseract-ocr imagemagick fonts-dejavu-core fonts-liberation2 fonts-noto-core pango1.0-tools
+          python3 .github/scripts/ocr_accuracy.py target/debug/archtoys
+
+      # Every library must have a licence an MIT app can use and ship.
+      - name: Licences
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check licenses
+
       # Color search must answer each keystroke in under 2 ms. This is a
       # report, not a gate: shared runners vary in speed, so a slow run shows a
       # warning and the timings in the run's summary instead of failing CI
@@ -92,3 +108,22 @@ jobs:
         run: |
           for f in .github/scripts/*.sh; do bash -n "$f"; done
           python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
+
+  # Text Extractor's "Turn on" on each family it supports: the app's exact
+  # install script (kept equal by a unit test) as root in a clean container,
+  # with nothing installed and with an older Tesseract already there.
+  tesseract-install:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "archlinux:latest", distro: arch }
+          - { image: "fedora:latest", distro: fedora }
+          - { image: "ubuntu:22.04", distro: debian }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Turn on with nothing installed
+        run: bash .github/scripts/tesseract-install-test.sh "${{ matrix.image }}" "${{ matrix.distro }}"
+      - name: Turn on with an older Tesseract already there
+        run: bash .github/scripts/tesseract-install-test.sh "${{ matrix.image }}" "${{ matrix.distro }}" preinstalled
