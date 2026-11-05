@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.6.2
+Version:        0.7.0
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -145,6 +145,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Thu Nov 05 2026 Mujtaba1i <mujtaba1i@github> - 0.7.0-1
+- Text Extractor, the second toy: drag over any text on screen to copy it, on every monitor, Wayland and X11; it finds the language by itself and downloads a language's data the first time it's needed, shows a toolbar on the selection (Copy, Copy as one line, Open) or copies and closes at once, and keeps a history of the last 500 texts with their language, how sure it is and the text size. It's off until you press Turn on, which installs Tesseract with your password on Arch, Fedora, Debian, Ubuntu and their families. Hotkey Ctrl+Super+T, or archtoys --extract. Enter copies at any moment, and only what you copy or open goes to the history. Your own languages (system language, keyboard layouts, input methods) are read first, so Arabic, Korean and mixed text read right; Chinese, Japanese and Thai keep their text unspaced. Archtoys now has a sidebar (only its icons, or all of it) and a Home page with your recent color and text to move between toys, settings for the app and each toy, and an About page with credits and every open-source licence. Color history keeps the last 500 colors
+- CI: checks Text Extractor's accuracy, tests Turn on on Arch, Fedora and Debian, checks every dependency's licence; releases include the licence list
+- README: Text Extractor, the sidebar and Home, and the roadmap
+- CI: Arabic below 90%% gives warning not a failure
+
 * Wed Nov 04 2026 Mujtaba1i <mujtaba1i@github> - 0.6.2-1
 - The release benchmark installs the app's libraries and shows why a build didn't start
 - Color editor with compare: the pen on the middle shade opens it to change saturation, brightness and hue or type in your first two formats, and Compare puts a picked or typed color next to yours with their contrast ratio. Clicking anywhere on a format box now puts the cursor in it
