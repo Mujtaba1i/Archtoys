@@ -57,6 +57,8 @@ Wayland and X11 · at home on KDE Plasma · works offline
 
 ![The Customize formats panel: turn formats on or off and change their order](docs/screenshots/formats.png)
 
+![Home: the two toys with their hotkeys, and your recent color and text](docs/screenshots/home.png)
+
 </details>
 
 </div>
@@ -77,6 +79,7 @@ Wayland and X11 · at home on KDE Plasma · works offline
 - **.deb:** apt installs the dependencies for you. It works on Ubuntu 22.04 and newer, and Debian 12 and newer. There are no automatic updates yet, so download the new file for each version.
 - **AppImage:** runs on any distribution from Ubuntu 22.04 onwards, or anything equally recent.
 - **Text Extractor:** nothing extra to install: open it and press **Turn on**. It installs or updates Tesseract from your distribution's own packages, and asks for your password even when Tesseract is already there, so the version is one Archtoys works with. On read-only systems (Fedora Silverblue, SteamOS), install `tesseract` the way your system installs software, then press **Check again**.
+- **Text Extractor's languages:** English comes with Tesseract. The first time it meets text that isn't clearly English, it downloads its other languages once (about 32 MB), so it can tell which one the text is in.
 </details>
 
 ## Usage
@@ -117,6 +120,38 @@ Press `Ctrl+F` and type. Results appear as you type, as a grid of color cards, w
 | `pnik`                                   | A typo is fixed only when nothing matches, and the search says so: _Showing results for pink_                          |
 
 Hovering a result shows it on the color card and shows its value in your first format. Click it (or use the arrow keys and `Enter`) to use it. `Esc`, `Ctrl+F` or a click on the color card goes back to your previous color.
+
+### Text Extractor
+
+Copy the text in any part of the screen: a picture, a video, a PDF, an app that won't let you select its text. Press `Ctrl+Super+T` (or **Extract text**), drag over the text, and copy it.
+
+<div align="center">
+
+![Text Extractor capturing a paragraph: the selected area is outlined, each word it read is boxed, and the toolbar under it offers Copy, Copy as one line and Open](docs/screenshots/text-capture.png)
+
+|                                                     Text Extractor                                                      |                                                Opened from the history                                                 |
+| :----------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------: |
+| ![Text Extractor's page: the Extract text button, the latest text, and the history with each text's language and time](docs/screenshots/text-extractor.png) | ![One history entry opened: the full text, and its language, how sure Archtoys was, the text size and the words](docs/screenshots/text-detail.png) |
+
+</div>
+
+| To                                  | Do                                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Move the box while you drag         | Hold `Shift`                                                                                         |
+| Nudge it one pixel                  | The arrow keys (it reads the text again)                                                            |
+| Copy                                | `Enter`, or **Copy** on the toolbar; **Copy as one line** joins the lines                           |
+| Copy without the toolbar            | **Settings → After selecting text → Copy and close**                                                 |
+| Keep Archtoys out of the way        | **Settings → Stay minimized**                                                                        |
+| See or reuse an older text          | Click it in the history: its language, how sure Archtoys was, the text size and the words            |
+
+<details>
+<summary>Which languages it reads</summary>
+
+English, plus every language Tesseract has (except Hebrew). Archtoys finds the language by itself: it reads with English and your own languages first (your system language, keyboard layouts and input methods), and when that isn't sure, with one language of every writing system side by side, and keeps the reading it is surest of. Those languages download once, the first time they're needed (about 32 MB).
+
+Tested on 24 languages, from a word to a paragraph, 14 to 64 px, light and dark, bold, colored and compressed: 98% of the text comes back right. English, Spanish, French, German, Portuguese, Italian, Dutch, Turkish, Polish, Indonesian, Russian, Ukrainian, Greek, Arabic, Urdu, Hindi, Bengali, Tamil, Thai, Chinese (simplified and traditional), Japanese and Korean read 93-100% right; Vietnamese and Persian about 94%. Short phrases mixed with English, decorative fonts and very small or blurry text read worse.
+
+</details>
 
 ## Desktop support
 
@@ -273,7 +308,8 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, with the color
 - [x] Picking on every monitor, pixel by pixel with the arrow keys
 - [x] **Text Extractor**: select any area of the screen and copy the text in it (OCR)
 - [x] A sidebar with multiple tools, in the style of PowerToys
-- [ ] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.1)
+- [ ] A lighter, faster app and a much better Text Extractor in other languages (v0.7.1)
+- [ ] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.2)
 - [ ] Ideas for later: **Awake** (keep your PC from sleeping) and **Screen Ruler** (measure things on screen)
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.
