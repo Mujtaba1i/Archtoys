@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.7.0
+Version:        0.7.1
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -145,6 +145,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Fri Nov 06 2026 Mujtaba1i <mujtaba1i@github> - 0.7.1-1
+- Text Extractor reads other languages far better: 98%% of the text right across 24 languages (80%% before), from a word to a paragraph, in images and headings too; Arabic, Korean, Thai, Hindi, Bengali, Urdu and Chinese went from under 65%% to over 93%%. The first time it meets text that isn't clearly English it downloads its languages once (about 32 MB). Archtoys is also 12%% smaller and starts with less memory and CPU
+- Benchmark: both builds start equally cold (the first build measured paid a fresh machine's one-off costs, which showed as a slow first start)
+- README: a Text Extractor section with pictures, which languages it reads, Home; roadmap: v0.7.1 improvements, the font finder in v0.7.2
+- README: updated old images to the new interface redesign
+
 * Thu Nov 05 2026 Mujtaba1i <mujtaba1i@github> - 0.7.0-1
 - Text Extractor, the second toy: drag over any text on screen to copy it, on every monitor, Wayland and X11; it finds the language by itself and downloads a language's data the first time it's needed, shows a toolbar on the selection (Copy, Copy as one line, Open) or copies and closes at once, and keeps a history of the last 500 texts with their language, how sure it is and the text size. It's off until you press Turn on, which installs Tesseract with your password on Arch, Fedora, Debian, Ubuntu and their families. Hotkey Ctrl+Super+T, or archtoys --extract. Enter copies at any moment, and only what you copy or open goes to the history. Your own languages (system language, keyboard layouts, input methods) are read first, so Arabic, Korean and mixed text read right; Chinese, Japanese and Thai keep their text unspaced. Archtoys now has a sidebar (only its icons, or all of it) and a Home page with your recent color and text to move between toys, settings for the app and each toy, and an About page with credits and every open-source licence. Color history keeps the last 500 colors
 - CI: checks Text Extractor's accuracy, tests Turn on on Arch, Fedora and Debian, checks every dependency's licence; releases include the licence list
