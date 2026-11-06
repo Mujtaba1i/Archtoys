@@ -34,8 +34,13 @@ whatlang = "0.18"
 
 [profile.release]
 # No symbol tables in the binary: 28% smaller (27.6 MB -> 19.8 MB) at no build
-# cost. Full LTO would save 3 MB more but doubles the build time.
+# cost.
 strip = true
+# One code unit: the optimizer sees all of it, 12% smaller (v0.7.0: 27.2 MB ->
+# 24.1 MB) for about 5% more build time. Thin LTO made it bigger, full LTO
+# saves less and doubles the build time; panic = "abort" would save 2 MB more,
+# but a panic in a background thread would then close the whole app.
+codegen-units = 1
 
 
 # How the .deb is built (cargo-deb). Used by the optional "Build + test the .deb"

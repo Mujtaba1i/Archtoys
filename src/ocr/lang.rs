@@ -124,6 +124,19 @@ pub(crate) fn download(dir: &Path, code: &str) -> Result<(), String> {
     fetch(&format!("{TESSDATA_URL}/{code}.traineddata"), &file_for(dir, code))
 }
 
+/// Downloads several languages at once (the licence first, once), each in
+/// its own thread. Returns the ones that couldn't be downloaded.
+pub(crate) fn download_all(dir: &Path, codes: &[&'static str]) -> Vec<&'static str> {
+    let licence = dir.join("LICENSE-tessdata_fast.txt");
+    if !licence.exists() {
+        let _ = fetch("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE", &licence);
+    }
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = codes.iter().map(|&code| (code, scope.spawn(move || download(dir, code)))).collect();
+        jobs.into_iter().filter_map(|(code, job)| (!matches!(job.join(), Ok(Ok(())))).then_some(code)).collect()
+    })
+}
+
 /// The languages Archtoys downloaded (not the system's linked ones), with
 /// their total size in bytes.
 pub(crate) fn downloaded() -> (Vec<String>, u64) {
@@ -349,62 +362,6 @@ fn from_input(name: &str) -> Option<&'static str> {
     })
 }
 
-/// Is the language written in the Latin alphabet? (Its data then reads
-/// English letters too, and the other way round.)
-fn latin(code: &str) -> bool {
-    !matches!(
-        code,
-        "ara" | "rus" | "ukr" | "bul" | "bel" | "srp" | "mkd" | "kaz" | "kir" | "mon" | "tat" | "tgk" | "chi_sim"
-            | "chi_tra" | "jpn" | "kor" | "hin" | "mar" | "nep" | "san" | "ell" | "tha" | "fas" | "urd"
-            | "pus" | "snd" | "uig" | "ben" | "asm" | "tam" | "tel" | "kan" | "mal" | "guj" | "pan" | "ori" | "sin"
-            | "hye" | "kat" | "amh" | "tir" | "khm" | "lao" | "mya" | "bod" | "dzo" | "div" | "syr" | "chr" | "iku"
-    )
-}
-
-/// The languages to read a script with, best first: the desktop's language
-/// and English for the Latin alphabet, the main language of the others.
-pub(crate) fn for_script(script: Option<&str>, system: Option<&'static str>) -> Vec<&'static str> {
-    let main = match script.unwrap_or("Latin") {
-        "Latin" | "Fraktur" => {
-            let mut langs = Vec::new();
-            if let Some(code) = system.filter(|c| latin(c)) {
-                langs.push(code);
-            }
-            if !langs.contains(&"eng") {
-                langs.push("eng");
-            }
-            return langs;
-        }
-        "Cyrillic" => "rus",
-        "Arabic" => "ara",
-        // its script detection can't tell simplified from traditional: both read
-        "Han" | "HanS" | "HanT" => return vec!["chi_sim", "chi_tra"],
-        "Japanese" | "Hiragana" | "Katakana" => "jpn",
-        "Hangul" | "Korean" => "kor",
-        "Devanagari" => "hin",
-        "Greek" => "ell",
-        "Thai" => "tha",
-        "Bengali" => "ben",
-        "Tamil" => "tam",
-        "Telugu" => "tel",
-        "Kannada" => "kan",
-        "Malayalam" => "mal",
-        "Gujarati" => "guj",
-        "Gurmukhi" => "pan",
-        "Oriya" => "ori",
-        "Armenian" => "hye",
-        "Georgian" => "kat",
-        "Ethiopic" => "amh",
-        "Khmer" => "khm",
-        "Lao" => "lao",
-        "Myanmar" => "mya",
-        "Sinhala" => "sin",
-        "Tibetan" => "bod",
-        _ => "eng",
-    };
-    vec![main]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,16 +391,6 @@ mod tests {
             .map(|n| from_input(n))
             .collect();
         assert_eq!(langs, [Some("eng"), Some("kor"), Some("ell"), Some("jpn"), Some("ara"), Some("deu"), Some("chi_sim"), None]);
-    }
-
-    #[test]
-    fn scripts_choose_their_languages() {
-        assert_eq!(for_script(Some("Latin"), Some("deu")), vec!["deu", "eng"]);
-        assert_eq!(for_script(None, Some("ara")), vec!["eng"]); // Arabic isn't Latin: English only
-        assert_eq!(for_script(Some("Arabic"), Some("eng")), vec!["ara"]);
-        assert_eq!(for_script(Some("Cyrillic"), None), vec!["rus"]);
-        assert_eq!(for_script(Some("Klingon"), None), vec!["eng"]);
-        assert_eq!(for_script(Some("Han"), None), vec!["chi_sim", "chi_tra"]);
     }
 
     #[test]

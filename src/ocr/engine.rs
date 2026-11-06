@@ -205,36 +205,9 @@ pub(crate) fn run(png: &Path, langs: &str, tessdata: &Path, psm: u8) -> Result<S
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// "Script: Arabic" in Tesseract's script detection (`--psm 0`) output.
-fn parse_script(text: &str) -> Option<String> {
-    text.lines()
-        .find_map(|l| l.strip_prefix("Script:"))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-/// Which writing system the image is in (Latin, Arabic, Cyrillic, Han ...),
-/// from Tesseract's script detection. None when it can't tell (too little text).
-pub(crate) fn detect_script(png: &Path, tessdata: &Path) -> Option<String> {
-    let out = Command::new("tesseract")
-        .arg(png)
-        .arg("stdout")
-        .args(["-l", "osd", "--psm", "0", "--tessdata-dir"])
-        .arg(tessdata)
-        // it skips anything under 50 letters by default ("Too few characters"),
-        // so a line or a few words of Arabic were read as English; 5 is enough
-        // to tell the scripts apart (tested from one word up)
-        .args(["-c", "min_characters_to_try=5"])
-        .env("OMP_THREAD_LIMIT", "1")
-        .output()
-        .ok()?;
-    parse_script(&output_text(&out))
-}
-
-/// Screen text made easy to read: gray, dark text on a light background, and
-/// enlarged (Tesseract is trained on print, where letters are 20-30 px tall;
-/// screen text is often 10-16 px). Returns the image and how much it was enlarged.
-pub(crate) fn prepare(rgba: &[u8], width: u32, height: u32) -> (image::GrayImage, u32) {
+/// Screen text made easy to read: gray, dark text on a light background
+/// (a dark theme or a terminal is flipped).
+pub(crate) fn gray(rgba: &[u8], width: u32, height: u32) -> image::GrayImage {
     let mut gray = image::GrayImage::new(width, height);
     let mut sum: u64 = 0;
     for (i, px) in gray.pixels_mut().enumerate() {
@@ -243,22 +216,35 @@ pub(crate) fn prepare(rgba: &[u8], width: u32, height: u32) -> (image::GrayImage
         sum += y as u64;
         px.0 = [y];
     }
-    // light text on a dark background (a dark theme, a terminal): flip it
     if width * height > 0 && sum / (width as u64 * height as u64) < 128 {
         for px in gray.pixels_mut() {
             px.0[0] = 255 - px.0[0];
         }
     }
-    let scale = if height <= 60 {
-        4
-    } else if height <= 240 {
-        3
+    gray
+}
+
+/// The white margin around the image Tesseract reads (it misses text touching the edge).
+pub(crate) const PAD: u32 = 20;
+
+/// The image resized so its text lines are about `target` pixels tall
+/// (0.25x-4x), with a white margin of `PAD`: Tesseract reads lines of 20-40
+/// px best (it's trained on print), and its Arabic reads nothing in much
+/// bigger letters. Returns the image and the scale.
+pub(crate) fn normalize(gray: &image::GrayImage, target: f32) -> (image::GrayImage, f32) {
+    let (w, h) = gray.dimensions();
+    let line = line_height(gray).unwrap_or(20.0);
+    // keep the image a sensible size
+    let scale = (target / line).clamp(0.25, 4.0).min(8000.0 / w.max(h).max(1) as f32);
+    let (sw, sh) = (((w as f32 * scale).round() as u32).max(1), ((h as f32 * scale).round() as u32).max(1));
+    let resized = if (scale - 1.0).abs() < 0.01 {
+        gray.clone()
     } else {
-        2
+        image::imageops::resize(gray, sw, sh, image::imageops::FilterType::CatmullRom)
     };
-    // keep the enlarged image a sensible size
-    let scale = scale.min((8000 / width.max(height).max(1)).max(1));
-    (enlarge(&gray, scale), scale)
+    let mut out = image::GrayImage::from_pixel(resized.width() + 2 * PAD, resized.height() + 2 * PAD, image::Luma([255]));
+    image::imageops::overlay(&mut out, &resized, PAD as i64, PAD as i64);
+    (out, scale)
 }
 
 /// How tall the text lines in a prepared image are (in its pixels): the
@@ -313,23 +299,6 @@ fn otsu(img: &image::GrayImage) -> u8 {
     threshold
 }
 
-/// The screen image at another scale (`to` times its size), when the first
-/// reading found nothing: Tesseract's Arabic reads letters about 16-24 px tall
-/// and nothing much bigger, so large Arabic text is read smaller.
-pub(crate) fn rescale(prepared: &image::GrayImage, scale: u32, to: f32) -> image::GrayImage {
-    let (w, h) = prepared.dimensions();
-    let size = |n: u32| ((n / scale) as f32 * to).round().max(1.0) as u32;
-    image::imageops::resize(prepared, size(w), size(h), image::imageops::FilterType::CatmullRom)
-}
-
-fn enlarge(gray: &image::GrayImage, scale: u32) -> image::GrayImage {
-    if scale == 1 {
-        return gray.clone();
-    }
-    let (w, h) = gray.dimensions();
-    image::imageops::resize(gray, w * scale, h * scale, image::imageops::FilterType::CatmullRom)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,13 +318,6 @@ mod tests {
         let text = "List of available languages in \"/usr/share/tessdata/\" (3):\neng\nosd\n";
         assert_eq!(parse_list_dir(text), Some(PathBuf::from("/usr/share/tessdata/")));
         assert_eq!(parse_list_dir("nothing"), None);
-    }
-
-    #[test]
-    fn the_script_is_read_from_script_detection() {
-        let osd = "Page number: 0\nOrientation in degrees: 0\nRotate: 0\nScript: Arabic\nScript confidence: 2.33\n";
-        assert_eq!(parse_script(osd), Some("Arabic".to_string()));
-        assert_eq!(parse_script("Too few characters. Skipping this page"), None);
     }
 
     fn tsv(rows: &[(u32, u32, u32, &str)]) -> String {
@@ -408,12 +370,20 @@ mod tests {
     }
 
     #[test]
-    fn dark_screen_text_is_flipped_and_enlarged() {
+    fn dark_screen_text_is_flipped_and_sized_to_its_lines() {
         // 2x1 image: near-black pixels -> inverted to near-white
-        let rgba = [10, 10, 10, 255, 20, 20, 20, 255];
-        let (img, scale) = prepare(&rgba, 2, 1);
-        assert_eq!(scale, 4);
-        assert_eq!(img.dimensions(), (8, 4));
-        assert!(img.get_pixel(0, 0).0[0] > 200);
+        let g = gray(&[10, 10, 10, 255, 20, 20, 20, 255], 2, 1);
+        assert!(g.get_pixel(0, 0).0[0] > 200);
+        // one "line" of ink 10 rows tall: read with lines 32 px tall
+        let mut img = image::GrayImage::from_pixel(100, 30, image::Luma([255]));
+        for y in 10..20 {
+            for x in 10..90 {
+                img.put_pixel(x, y, image::Luma([0]));
+            }
+        }
+        let (big, scale) = normalize(&img, 32.0);
+        assert!((scale - 3.2).abs() < 0.01);
+        assert_eq!(big.dimensions(), (320 + 2 * PAD, 96 + 2 * PAD));
+        assert_eq!(big.get_pixel(0, 0).0[0], 255); // the margin
     }
 }

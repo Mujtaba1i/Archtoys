@@ -253,42 +253,52 @@ fn temp_png() -> std::path::PathBuf {
     dir.join(format!("archtoys-ocr-{}-{}.png", std::process::id(), COUNT.fetch_add(1, Ordering::SeqCst)))
 }
 
+/// The languages read side by side when English (and the user's own) isn't
+/// sure: one per writing system, the close relatives the first of their
+/// script misreads (Persian and Urdu next to Arabic, Ukrainian next to
+/// Russian, Traditional next to Simplified Chinese), and the two Latin
+/// languages English reads worst (Turkish, Vietnamese). Tesseract's own
+/// script detection guessed wrong on a few words of most scripts; the reading
+/// it is surest of is right far more often (v0.7.1: 98% of the text right in
+/// 24 languages, from 80%). About 32 MB, downloaded together once.
+const SWEEP: &[&str] = &[
+    "ara", "fas", "urd", "rus", "ukr", "ell", "hin", "ben", "tam", "tha", "chi_sim", "chi_tra", "jpn", "kor", "tur", "vie",
+];
+/// Read in Latin letters (whatlang then names the exact language).
+const LATIN: &[&str] = &["eng", "tur", "vie"];
+/// Mean word confidence (and no word under 60) at which the first reading,
+/// in English and the user's own languages, is kept without trying others.
+const SURE_FIRST: f32 = 85.0;
+/// Below this, the whole reading is tried again with the lines another size.
+const READ_WELL: u8 = 50;
+/// The text lines' height Tesseract reads at, then the one tried if that reads badly.
+const LINE_TARGETS: [f32; 2] = [32.0, 22.0];
+/// Letters only Persian or only Urdu has (in Arabic script).
+const PERSIAN: &[char] = &['پ', 'چ', 'ژ', 'گ'];
+const URDU: &[char] = &['ٹ', 'ڈ', 'ڑ', 'ں', 'ے'];
+
 /// Reads the text in an RGBA image (the selected part of the screen).
 /// Blocking: call it on a background thread. `status` says what it's doing
-/// ("Downloading German…") when that takes a moment.
+/// ("Downloading languages…") when that takes a moment.
 pub(crate) fn recognize(rgba: &[u8], width: u32, height: u32, keep_lines: bool, status: &dyn Fn(String)) -> Result<Reading, String> {
     let dir = lang::prepare_dir()?;
-    let (image, scale) = engine::prepare(rgba, width, height);
-    let read = |img: &image::GrayImage, scale: f32| {
+    let gray = engine::gray(rgba, width, height);
+    let read = |target: f32| {
+        let (image, scale) = engine::normalize(&gray, target);
         let png = temp_png();
-        img.save(&png).map_err(|err| format!("couldn't save the image for Tesseract: {err}"))?;
+        image.save(&png).map_err(|err| format!("couldn't save the image for Tesseract: {err}"))?;
         let result = read_png(&png, &dir, scale, keep_lines, status);
         let _ = std::fs::remove_file(&png);
         result
     };
-    let mut best = read(&image, scale as f32)?;
-    debug(|| format!("{scale}x: {}% sure, {:?}", best.sure, best.language));
-    // Nothing read, or unsure: read it again with its lines about 32, then 20
-    // pixels tall. Tesseract's Arabic reads nothing in letters much taller
-    // than that (a heading, a word in an image), and its script detection
-    // guesses wrong on them; the surest reading wins.
-    if best.sure < SURE_READING {
-        if let Some(line) = engine::line_height(&image) {
-            for target in [32.0, 20.0] {
-                let to = scale as f32 * target / line;
-                // already about that size, or absurdly small
-                if (to / scale as f32 - 1.0).abs() < 0.25 || line * to / (scale as f32) < 8.0 {
-                    continue;
-                }
-                if let Ok(again) = read(&engine::rescale(&image, scale, to), to) {
-                    debug(|| format!("lines {line:.0} px -> {target} px ({to:.2}x): {}% sure, {:?}", again.sure, again.language));
-                    if again.sure > best.sure {
-                        best = again;
-                    }
-                }
-                if best.sure >= SURE_READING {
-                    break;
-                }
+    let mut best = read(LINE_TARGETS[0])?;
+    debug(|| format!("lines {} px: {} ({}% sure)", LINE_TARGETS[0], best.language, best.sure));
+    if best.sure < READ_WELL {
+        // nothing read well: the line height may have been misjudged
+        if let Ok(again) = read(LINE_TARGETS[1]) {
+            debug(|| format!("lines {} px: {} ({}% sure)", LINE_TARGETS[1], again.language, again.sure));
+            if again.sure > best.sure {
+                best = again;
             }
         }
     }
@@ -303,46 +313,63 @@ fn debug(message: impl FnOnce() -> String) {
     }
 }
 
-/// The writing system of the words read badly (another script mixed into
-/// mostly English: its own detection over the whole image says "Latin").
-fn unsure_script(png: &std::path::Path, dir: &std::path::Path, words: &[engine::Word]) -> Option<String> {
-    let unsure: Vec<&engine::Word> = words.iter().filter(|w| (0.0..55.0).contains(&w.conf)).collect();
-    let x0 = unsure.iter().map(|w| w.x).min()?;
-    let y0 = unsure.iter().map(|w| w.y).min()?;
-    let x1 = unsure.iter().map(|w| w.x + w.w).max()?;
-    let y1 = unsure.iter().map(|w| w.y + w.h).max()?;
-    let img = image::open(png).ok()?.to_luma8();
-    let pad = 12;
-    let (x0, y0) = ((x0 - pad).max(0) as u32, (y0 - pad).max(0) as u32);
-    let (x1, y1) = (((x1 + pad) as u32).min(img.width()), ((y1 + pad) as u32).min(img.height()));
-    if x1 <= x0 + 8 || y1 <= y0 + 8 {
-        return None;
-    }
-    let crop = image::imageops::crop_imm(&img, x0, y0, x1 - x0, y1 - y0).to_image();
-    let path = temp_png();
-    crop.save(&path).ok()?;
-    let script = engine::detect_script(&path, dir);
-    let _ = std::fs::remove_file(&path);
-    script
-}
-
-/// A reading this sure (mean word confidence) isn't tried again at another scale.
-const SURE_READING: u8 = 70;
-
-/// Reads with the layout found by Tesseract, and as one block when that finds
-/// nothing (it can miss a single line or word).
-fn run_words(png: &std::path::Path, langs: &str, dir: &std::path::Path) -> Result<Vec<engine::Word>, String> {
-    let mut words = engine::parse_tsv(&engine::run(png, langs, dir, 3)?);
-    if mean_conf(&words) < SURE_READING as f32 {
-        // as one block: a single line its layout finder scrambled or missed
-        let block = engine::parse_tsv(&engine::run(png, langs, dir, 6)?);
-        if mean_conf(&block) > mean_conf(&words) {
-            words = block;
-        }
-    }
-    // no Hebrew, by choice: a word in Hebrew letters is dropped, whatever read it
+/// The words Tesseract read with `langs` ("ara+eng"), in its layout `psm`,
+/// without Hebrew (by choice: a word in Hebrew letters is dropped, whatever
+/// read it).
+fn tesseract_words(png: &std::path::Path, langs: &str, dir: &std::path::Path, psm: u8) -> Result<Vec<engine::Word>, String> {
+    let mut words = engine::parse_tsv(&engine::run(png, langs, dir, psm)?);
     words.retain(|w| !w.text.chars().any(lang::hebrew));
     Ok(words)
+}
+
+/// With the layout Tesseract finds, and as one block when that reads badly
+/// (it can scramble or miss a single line or word); the surer one.
+fn run_words(png: &std::path::Path, langs: &str, dir: &std::path::Path) -> Result<Vec<engine::Word>, String> {
+    let found = tesseract_words(png, langs, dir, 3)?;
+    if mean_conf(&found) >= 70.0 {
+        return Ok(found);
+    }
+    let block = tesseract_words(png, langs, dir, 6)?;
+    Ok(if mean_conf(&block) > mean_conf(&found) { block } else { found })
+}
+
+/// How much of what was read is in Latin letters (0-1).
+fn latin_share(words: &[engine::Word]) -> f32 {
+    let letters: Vec<char> = words.iter().flat_map(|w| w.text.chars()).filter(|c| c.is_alphabetic()).collect();
+    if letters.is_empty() {
+        return 0.0;
+    }
+    letters.iter().filter(|&&c| c < '\u{0250}').count() as f32 / letters.len() as f32
+}
+
+/// Of the readings side by side, the right one: the surest, except that a
+/// close call goes to Simplified Chinese (the more common), and to Persian
+/// or Urdu when their reading has letters only they use.
+fn pick<'a>(tries: &'a [(&'static str, Vec<engine::Word>)]) -> Option<&'a (&'static str, Vec<engine::Word>)> {
+    let best = tries.iter().max_by(|a, b| mean_conf(&a.1).total_cmp(&mean_conf(&b.1)))?;
+    let find = |code: &str| tries.iter().find(|t| t.0 == code);
+    let top = mean_conf(&best.1);
+    if best.0 == "chi_tra" {
+        if let Some(sim) = find("chi_sim").filter(|t| mean_conf(&t.1) >= top - 3.0) {
+            return Some(sim);
+        }
+    }
+    if matches!(best.0, "ara" | "fas" | "urd") {
+        for (code, letters) in [("urd", URDU), ("fas", PERSIAN)] {
+            let own = |t: &&(&'static str, Vec<engine::Word>)| t.1.iter().any(|w| w.text.contains(letters));
+            if let Some(t) = find(code).filter(own).filter(|t| mean_conf(&t.1) >= top - 10.0) {
+                return Some(t);
+            }
+        }
+    }
+    // read in Latin letters (Chinese and Japanese read Latin text too, without
+    // its accents): the surest Latin reading
+    if !LATIN.contains(&best.0) && latin_share(&best.1) > 0.95 {
+        if let Some(latin) = tries.iter().filter(|t| LATIN.contains(&t.0)).max_by(|a, b| mean_conf(&a.1).total_cmp(&mean_conf(&b.1))) {
+            return Some(latin);
+        }
+    }
+    Some(best)
 }
 
 fn read_png(png: &std::path::Path, dir: &std::path::Path, scale: f32, keep_lines: bool, status: &dyn Fn(String)) -> Result<Reading, String> {
@@ -354,83 +381,96 @@ fn read_png(png: &std::path::Path, dir: &std::path::Path, scale: f32, keep_lines
         result
     };
 
-    let fetch = |codes: &[&'static str]| -> Vec<&'static str> {
-        // the ones there, or downloaded now (offline: the rest are left out)
-        codes.iter().copied().filter(|c| have(c) || get(c).is_ok()).collect()
-    };
-
     // 1. English and the user's own languages (the desktop's, the keyboard
     // layouts', the input methods'): most text is in one of them
     let mut first = vec!["eng"];
     first.extend(lang::user_languages().iter().copied());
-    let mut langs = fetch(&first);
-    if langs.is_empty() {
+    let first: Vec<&'static str> = first.into_iter().filter(|c| have(c) || get(c).is_ok()).collect();
+    if first.is_empty() {
         return Err("no language data: Tesseract's English is missing".into());
     }
-    let mut words = run_words(png, &langs.join("+"), dir)?;
+    let mut langs = first.clone();
+    let mut words = run_words(png, &first.join("+"), dir)?;
+    let mut code = first[0];
+    let sure = mean_conf(&words) >= SURE_FIRST && words.iter().all(|w| w.conf < 0.0 || w.conf >= 60.0);
+    debug(|| format!("first {first:?}: {:.0}% sure{}", mean_conf(&words), if sure { ", kept" } else { "" }));
 
-    // 2. unsure (or a word it couldn't read, maybe another script mixed in):
-    // the writing system Tesseract sees there (Arabic, Cyrillic, Han ...),
-    // with English for the English words mixed in. Its guess is unreliable on
-    // a few words, so it must be clearly surer than a reading in the user's
-    // own language.
-    const GUESS_MARGIN: f32 = 10.0;
-    let unsure_word = words.iter().any(|w| (0.0..55.0).contains(&w.conf));
-    if mean_conf(&words) < SURE_READING as f32 || unsure_word {
-        let mut script = if have("osd") { engine::detect_script(png, dir) } else { None };
-        if have("osd") && unsure_word && matches!(script.as_deref(), None | Some("Latin")) {
-            // mostly English: look at the words it couldn't read on their own
-            script = unsure_script(png, dir, &words).or(script);
+    // 2. not sure: every script's language side by side (in parallel), and
+    // the right one of them
+    if !sure {
+        let missing: Vec<&'static str> = SWEEP.iter().copied().filter(|c| !have(c)).collect();
+        if !missing.is_empty() {
+            status(format!("Downloading {} languages (once, about 32 MB)…", missing.len()));
+            let failed = lang::download_all(dir, &missing);
+            if !failed.is_empty() {
+                eprintln!("text extractor: couldn't download {failed:?}");
+            }
+            status("Reading…".to_string());
         }
-        debug(|| format!("first {langs:?}: {:.0}% sure; script seen: {script:?}", mean_conf(&words)));
-        // the user's own language was read first: a guess must be clearly surer
-        let margin = if langs.len() > 1 { GUESS_MARGIN } else { 0.0 };
-        let guess: Vec<&'static str> = lang::for_script(script.as_deref(), None)
-            .into_iter()
-            .filter(|c| !langs.contains(c))
-            .collect();
-        if !guess.is_empty() {
-            let mut second = fetch(&guess);
-            if !second.is_empty() {
-                second.push("eng");
-                if let Ok(other) = run_words(png, &second.join("+"), dir) {
-                    debug(|| format!("then {second:?}: {:.0}% sure", mean_conf(&other)));
-                    if mean_conf(&other) > mean_conf(&words) + margin {
-                        words = other;
-                        langs = second;
+        let tries: Vec<(&'static str, Vec<engine::Word>)> = std::thread::scope(|scope| {
+            let jobs: Vec<_> = SWEEP
+                .iter()
+                .copied()
+                .filter(|c| have(c) && !first.contains(c))
+                .map(|c| (c, scope.spawn(move || tesseract_words(png, c, dir, 6))))
+                .collect();
+            let mut tries: Vec<_> = jobs.into_iter().filter_map(|(c, job)| Some((c, job.join().ok()?.ok()?))).collect();
+            tries.push((first[0], words.clone()));
+            tries
+        });
+        debug(|| {
+            let mut all: Vec<(f32, &str)> = tries.iter().map(|(c, w)| (mean_conf(w), *c)).collect();
+            all.sort_by(|a, b| b.0.total_cmp(&a.0));
+            let all: Vec<String> = all.iter().map(|(conf, c)| format!("{c} {conf:.0}")).collect();
+            format!("side by side: {}", all.join(", "))
+        });
+        if let Some((best, best_words)) = pick(&tries).cloned() {
+            if best != first[0] {
+                code = best;
+                langs = vec![best];
+                words = best_words;
+                if !LATIN.contains(&best) {
+                    // read again with English too, for English words mixed in
+                    langs.push("eng");
+                    if let Ok(mixed) = run_words(png, &langs.join("+"), dir) {
+                        if mean_conf(&mixed) >= mean_conf(&words) {
+                            words = mixed;
+                        }
                     }
                 }
             }
         }
+        debug(|| format!("picked {code} ({:.0}% sure)", mean_conf(&words)));
     }
-    let mut language = langs[0];
 
-    // 3. which language exactly; read again with its own data if that's not what was used.
-    // whatlang's own "reliable" flag stays off even for clear sentences; its
-    // confidence is the useful part: sentences score 0.75-0.85, short snippets
-    // ("ERROR: connection refused" scores French at 0.08) stay well under 0.5.
-    const SURE_ENOUGH: f64 = 0.5;
-    let text = engine::text_from_words(&words, true);
-    if let Some(info) = whatlang::detect(&text) {
-        let sure = info.confidence() >= SURE_ENOUGH;
-        if let Some(code) = lang::from_whatlang(info.lang()) {
-            if sure && !langs.contains(&code) && (have(code) || get(code).is_ok()) {
-                let mut again = vec![code];
-                if code != "eng" && langs.contains(&"eng") {
-                    again.push("eng"); // keep English for the odd English word in a Latin text
-                }
-                if let Ok(better) = run_words(png, &again.join("+"), dir) {
-                    if mean_conf(&better) >= mean_conf(&words) {
-                        words = better;
+    // 3. Latin letters: which language exactly (whatlang), read again with its
+    // own data if that's not what was used. whatlang's own "reliable" flag
+    // stays off even for clear sentences; its confidence is the useful part:
+    // sentences score 0.75-0.85, short snippets ("ERROR: connection refused"
+    // scores French at 0.08) stay well under 0.5.
+    let mut language = code;
+    if LATIN.contains(&code) || first.contains(&code) {
+        const SURE_ENOUGH: f64 = 0.5;
+        let text = engine::text_from_words(&words, true);
+        if let Some(info) = whatlang::detect(&text).filter(|i| i.confidence() >= SURE_ENOUGH) {
+            if let Some(named) = lang::from_whatlang(info.lang()) {
+                if !langs.contains(&named) && (have(named) || get(named).is_ok()) {
+                    let mut again = vec![named];
+                    if named != "eng" {
+                        again.push("eng"); // the odd English word in a Latin text
+                    }
+                    if let Ok(better) = run_words(png, &again.join("+"), dir) {
+                        if mean_conf(&better) >= mean_conf(&words) {
+                            words = better;
+                        }
                     }
                 }
-            }
-            if sure {
-                language = code;
+                language = named;
             }
         }
     }
 
+    let pad = engine::PAD as f32;
     let mut heights: Vec<i32> = words.iter().map(|w| w.h).collect();
     heights.sort_unstable();
     let size = heights.get(heights.len() / 2).copied().unwrap_or(0) as f32 / scale;
@@ -440,7 +480,10 @@ fn read_png(png: &std::path::Path, dir: &std::path::Path, scale: f32, keep_lines
         language: lang::display_name(language),
         sure: mean_conf(&words).round().clamp(0.0, 100.0) as u8,
         size,
-        boxes: words.iter().map(|w| (w.x as f32 / scale, w.y as f32 / scale, w.w as f32 / scale, w.h as f32 / scale)).collect(),
+        boxes: words
+            .iter()
+            .map(|w| ((w.x as f32 - pad) / scale, (w.y as f32 - pad) / scale, w.w as f32 / scale, w.h as f32 / scale))
+            .collect(),
     })
 }
 
