@@ -3,7 +3,11 @@
 # start, CPU when idle, memory and threads. Each run opens the app for about
 # 10 seconds and closes it. The first run starts "cold" (nothing in the disk
 # cache yet), so its start is shown on its own, next to the average of the
-# others. Given two binaries, it compares them and warns when the new one is
+# others. Both builds start equally cold: one-off costs of a fresh machine
+# (building the font cache) are paid before measuring, and where sudo works
+# without a password (CI) the disk cache is dropped before each build. Before
+# v0.7.1 the build measured first paid for both (about 200-350 ms of its
+# "cold" start on a fresh runner, whichever build it was). Given two binaries, it compares them and warns when the new one is
 # clearly worse, and when it uses more than 100 MB. It never fails: it reports.
 #
 #   bash .github/scripts/bench.sh               # ./target/release/archtoys vs /usr/bin/archtoys
@@ -73,6 +77,25 @@ run_once() {
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; sleep 0.5
 }
 
+# A fresh machine's first app start builds the font cache (and loads every
+# shared library from disk): paid here, untimed, not by the first build.
+warm_system() {
+  fc-list >/dev/null 2>&1
+  local bin lib
+  for bin in "$NEW" "$OLD"; do
+    [ -x "$bin" ] || continue
+    for lib in $(ldd "$bin" 2>/dev/null | awk '/=> \// {print $3}'); do cat "$lib" >/dev/null 2>&1; done
+  done
+}
+# Each build's first run cold: drop the disk cache (needs sudo without a
+# password, as on CI runners). Elsewhere the libraries stay warm for both.
+drop_disk_cache() {
+  sync
+  if sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null; then
+    echo "   (disk cache dropped: this build starts cold)" >&2
+  fi
+}
+
 median() { sort -n | awk '{ v[NR] = $1 } END { print NR ? v[int((NR + 1) / 2)] : -1 }'; }
 # the average, leaving out what couldn't be measured (-1 if nothing could)
 average() { awk '$1 >= 0 { s += $1; n++ } END { print n ? int(s / n + 0.5) : -1 }'; }
@@ -82,6 +105,7 @@ average() { awk '$1 >= 0 { s += $1; n++ } END { print n ? int(s / n + 0.5) : -1 
 # KEY.<metric> the average of the others
 measure() {
   local key=$1 bin=$2 mode=$3 r col names=(window startup idle rss pss threads own)
+  drop_disk_cache
   : > "$OUT/$key.runs"
   for r in $(seq 1 "$RUNS"); do
     echo "   $key, run $r of $RUNS ($mode, about 10 s)" >&2
@@ -99,6 +123,7 @@ measure() {
 }
 get() { cat "$OUT/$1.$2"; }
 
+warm_system
 measure new "$NEW" x11
 HAVE_OLD=0
 if [ -x "$OLD" ] && [ "$(readlink -f "$OLD")" != "$(readlink -f "$NEW")" ]; then
