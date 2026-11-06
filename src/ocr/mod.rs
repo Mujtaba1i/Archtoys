@@ -273,9 +273,11 @@ const SURE_FIRST: f32 = 85.0;
 const READ_WELL: u8 = 50;
 /// The text lines' height Tesseract reads at, then the one tried if that reads badly.
 const LINE_TARGETS: [f32; 2] = [32.0, 22.0];
-/// Letters only Persian or only Urdu has (in Arabic script).
+/// Letters only Persian or only Urdu has (in Arabic script). Not ے or ں:
+/// Urdu's data writes them for Arabic's final ي and ن too, which named short
+/// Arabic text "Urdu".
 const PERSIAN: &[char] = &['پ', 'چ', 'ژ', 'گ'];
-const URDU: &[char] = &['ٹ', 'ڈ', 'ڑ', 'ں', 'ے'];
+const URDU: &[char] = &['ٹ', 'ڈ', 'ڑ'];
 
 /// Reads the text in an RGBA image (the selected part of the screen).
 /// Blocking: call it on a background thread. `status` says what it's doing

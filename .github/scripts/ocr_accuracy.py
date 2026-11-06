@@ -16,7 +16,7 @@ gate (the other languages are downloaded on the first run,
 which also tests that). Arabic is drawn with pango-view: ImageMagick's
 label: doesn't join or order right-to-left letters.
 
-    python3 .github/scripts/ocr_accuracy.py target/debug/archtoys
+    python3 .github/scripts/ocr_accuracy.py target/release/archtoys
 """
 import os
 import subprocess
@@ -79,7 +79,9 @@ def draw(path, text, font, size, background, foreground):
 
 def read(binary, path):
     started = time.perf_counter()
-    out = subprocess.run([binary, "--extract-file", path], capture_output=True, text=True)
+    # ARCHTOYS_OCR_DEBUG: what it tried (each language's score), shown for the problems
+    env = dict(os.environ, ARCHTOYS_OCR_DEBUG="1")
+    out = subprocess.run([binary, "--extract-file", path], capture_output=True, text=True, env=env)
     ms = (time.perf_counter() - started) * 1000
     fields, text = {}, ""
     if "---\n" in out.stdout:
@@ -92,8 +94,8 @@ def read(binary, path):
 
 
 def main():
-    binary = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "target/debug/archtoys")
-    rows, failures, warnings = [], [], []
+    binary = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "target/release/archtoys")
+    rows = []
     with tempfile.TemporaryDirectory() as tmp:
         for name, language, text, font in CASES:
             for size in SIZES:
@@ -101,42 +103,73 @@ def main():
                     path = os.path.join(tmp, f"{name}-{size}-{theme}.png".replace(" ", "_"))
                     draw(path, text, font, size, bg, fg)
                     fields, got, ms, err = read(binary, path)
-                    acc = accuracy(text, got)
-                    rows.append((name, size, theme, acc, language, fields.get("language", "—"), fields.get("sure", "—"), ms))
-                    if size >= 14 and acc < GATE:
-                        line = f"{name} {size}px {theme}: {acc:.0%} right, read: {got!r} {err}"
-                        if name.startswith(GATED):
-                            failures.append(line)
-                        elif name.startswith(WARNED):
-                            warnings.append(line)
+                    rows.append(dict(name=name, size=size, theme=theme, acc=accuracy(text, got), expected=language,
+                                     named=fields.get("language", "—"), sure=fields.get("sure", "—"), ms=ms,
+                                     got=got, debug=err, download="Downloading" in err))
 
+    def gated(r):
+        return r["size"] >= 14 and r["name"].startswith(GATED)
+
+    def warned(r):
+        return r["size"] >= 14 and r["name"].startswith(WARNED)
+
+    failures = [r for r in rows if gated(r) and r["acc"] < GATE]
+    warnings = [r for r in rows if warned(r) and r["acc"] < GATE]
+    problems = [r for r in rows if r["acc"] < GATE or r["named"] != r["expected"]]
+
+    # one line per text: the whole picture at a glance
     lines = [
-        "### Text Extractor accuracy",
+        "### Text Extractor accuracy" + (" ❌" if failures else " ⚠️" if problems else " ✅"),
         "",
-        "| Text | Size | Theme | Right | Language (expected → named) | Sure | Time |",
-        "|---|---|---|---|---|---|---|",
+        "| Text | Lowest (14 px +) | Average | Language right | Median time | Rule |",
+        "|---|---|---|---|---|---|",
     ]
-    for name, size, theme, acc, expected, named, sure, ms in rows:
-        mark = "✅" if expected == named else "⚠️"
-        lines.append(f"| {name} | {size} px | {theme} | {acc:.0%} | {mark} {expected} → {named} | {sure}% | {ms:.0f} ms |")
-    gated = [r[3] for r in rows if r[0].startswith(GATED) and r[1] >= 14]
-    warned = [r[3] for r in rows if r[0].startswith(WARNED) and r[1] >= 14]
-    lines += ["", f"English at 14 px and up: lowest {min(gated):.0%} (gate {GATE:.0%})."]
-    if warned:
-        lines.append(f"Arabic at 14 px and up: lowest {min(warned):.0%} (below {GATE:.0%} only warns).")
-    named_right = sum(1 for r in rows if r[4] == r[5])
-    lines.append(f"Language named right: {named_right} of {len(rows)}.")
+    for name, *_ in CASES:
+        mine = [r for r in rows if r["name"] == name]
+        big = [r["acc"] for r in mine if r["size"] >= 14]
+        named = sum(r["named"] == r["expected"] for r in mine)
+        times = sorted(r["ms"] for r in mine if not r["download"])
+        median = f"{times[len(times) // 2]:.0f} ms" if times else "—"
+        status = ("gate" if name.startswith(GATED) else "warns" if name.startswith(WARNED) else "report")
+        mark = "✅" if all(r["acc"] >= GATE and r["named"] == r["expected"] for r in mine) else ("❌" if status == "gate" and min(big) < GATE else "⚠️")
+        lines.append(f"| {name} | {min(big):.0%} | {sum(r['acc'] for r in mine) / len(mine):.0%} | {named} of {len(mine)} | {median} | {mark} {status} |")
+    lines += ["", f"Gate: English at 14 px and up, {GATE:.0%}. Arabic below it warns. Sizes {SIZES[0]}-{SIZES[-1]} px, light and dark."]
+    downloads = [r for r in rows if r["download"]]
+    if downloads:
+        lines.append(f"The first non-English text also downloaded the languages ({downloads[0]['ms'] / 1000:.1f} s, once): left out of the median times.")
+
+    # only what went wrong, with what it read and why
+    if problems:
+        lines += ["", f"#### {len(problems)} below {GATE:.0%} or named wrong", "",
+                  "| Text | Size | Theme | Right | Named | Sure | Read |", "|---|---|---|---|---|---|---|"]
+        for r in problems:
+            read_as = r["got"].replace("\n", " ").replace("|", "\\|")[:60]
+            lines.append(f"| {r['name']} | {r['size']} px | {r['theme']} | {r['acc']:.0%} | {r['named']} | {r['sure']}% | `{read_as}` |")
+        lines += ["", "<details><summary>What it tried for these (each language's score)</summary>", "", "```"]
+        for r in problems:
+            lines.append(f"== {r['name']} {r['size']} px {r['theme']}")
+            lines += [l for l in r["debug"].splitlines() if l.startswith("ocr:")]
+        lines += ["```", "", "</details>"]
+
+    lines += ["", "<details><summary>Every case</summary>", "",
+              "| Text | Size | Theme | Right | Language (expected → named) | Sure | Time |", "|---|---|---|---|---|---|---|"]
+    for r in rows:
+        mark = "✅" if r["expected"] == r["named"] else "⚠️"
+        dl = " (+ download)" if r["download"] else ""
+        lines.append(f"| {r['name']} | {r['size']} px | {r['theme']} | {r['acc']:.0%} | {mark} {r['expected']} → {r['named']} | {r['sure']}% | {r['ms']:.0f} ms{dl} |")
+    lines += ["", "</details>"]
+
     report = "\n".join(lines)
     print(report)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as f:
             f.write(report + "\n")
-    for line in warnings:
+    for r in warnings:
         # a yellow annotation on the run, not a failure
-        print(f"::warning title=Text Extractor accuracy::{line}")
+        print(f"::warning title=Text Extractor accuracy::{r['name']} {r['size']}px {r['theme']}: {r['acc']:.0%} right, named {r['named']}")
     if failures:
-        print("\nBelow the gate:\n" + "\n".join(failures), file=sys.stderr)
+        print("\nBelow the gate:\n" + "\n".join(f"{r['name']} {r['size']}px {r['theme']}: {r['acc']:.0%}, read {r['got']!r}" for r in failures), file=sys.stderr)
         sys.exit(1)
 
 

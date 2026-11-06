@@ -54,12 +54,16 @@ jobs:
       # Text Extractor: known text drawn at screen sizes, light and dark, in
       # English, German and Russian, read by the real Tesseract through the
       # app (`archtoys --extract-file`). The run summary shows how much came
-      # back right, the language named, how sure and how fast. English at
-      # 14 px and up, and Arabic, must come back at least 90% right.
+      # back right, the language named, how sure and how fast: one line per
+      # text, then only the cases that went wrong (with each language's score).
+      # English at 14 px and up must come back 90% right; Arabic below that warns.
+      # A release build, so the times are the app's: a debug build reads images
+      # several times slower (the search speed step below reuses its libraries).
       - name: Text Extractor accuracy
         run: |
           sudo apt-get install -y tesseract-ocr imagemagick fonts-dejavu-core fonts-liberation2 fonts-noto-core pango1.0-tools
-          python3 .github/scripts/ocr_accuracy.py target/debug/archtoys
+          cargo build --release --locked
+          python3 .github/scripts/ocr_accuracy.py target/release/archtoys
 
       # Every library must have a licence an MIT app can use and ship.
       - name: Licences
@@ -107,7 +111,9 @@ jobs:
       - name: Test the release scripts
         run: |
           for f in .github/scripts/*.sh; do bash -n "$f"; done
-          python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
+          # without the run summary: the scripts under test write their fake
+          # releases there (they showed up as "COPR: build #5 for 0.3.1")
+          env -u GITHUB_STEP_SUMMARY python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
 
   # Text Extractor's "Turn on" on each family it supports: the app's exact
   # install script (kept equal by a unit test) as root in a clean container,
