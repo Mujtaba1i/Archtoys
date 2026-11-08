@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.7.1
+Version:        0.7.2
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -145,6 +145,17 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Sun Nov 08 2026 Mujtaba1i <mujtaba1i@github> - 0.7.2-1
+- CI: a shorter text extractor report
+- The color picker works again on two or more monitors on KDE Plasma (Wayland): the screens no longer stay black (issue #12). Report a problem also adds Archtoys' last messages, and fills in the desktop's version, the screens and their scale, Archtoys' own scale, CPU or OpenGL, and Text Extractor's state. archtoys --version (or -v) prints the version. The window keeps its size and its place: with Archtoys scaled on its own (SLINT_SCALE_FACTOR) it no longer gets a third smaller each time it is opened again, and on KDE Plasma (Wayland) it opens where you left it, also after a restart. Drag the bar at the top to move the window, for desktops that show no title bar (issue #11)
+- Tests: on KDE Plasma 5 and 6 (Wayland) the window must open where it was closed and the color picker must get ready on 1 and 2 monitors (a new CI job); package checks: the window must keep its size through closes and reopens with SLINT_SCALE_FACTOR=1.5, and zombie processes no longer count as running copies
+- CI e2e test (NOT IMPLEMENTED YET WILL BE IMPLEMENTED WHEN THE DEVELOPER WANT TO!)
+- README: v0.7.1 and v0.7.2 done, the font finder moves to v0.7.3; Text Extractor uses the internet only to download languages; moving the window by its top bar
+- Fixed window for the window to open where is closed on slow computer (KDE Plasma, Wayland)
+- the window opens where is closes
+- the color picker no longer freezes with two or more moniters
+- Tests: the window-place test reads the settings it writes
+
 * Fri Nov 06 2026 Mujtaba1i <mujtaba1i@github> - 0.7.1-1
 - Text Extractor reads other languages far better: 98%% of the text right across 24 languages (80%% before), from a word to a paragraph, in images and headings too; Arabic, Korean, Thai, Hindi, Bengali, Urdu and Chinese went from under 65%% to over 93%%. The first time it meets text that isn't clearly English it downloads its languages once (about 32 MB). Archtoys is also 12%% smaller and starts with less memory and CPU
 - Benchmark: both builds start equally cold (the first build measured paid a fresh machine's one-off costs, which showed as a slow first start)
