@@ -80,6 +80,7 @@ Wayland and X11 · at home on KDE Plasma · works offline
 - **AppImage:** runs on any distribution from Ubuntu 22.04 onwards, or anything equally recent.
 - **Text Extractor:** nothing extra to install: open it and press **Turn on**. It installs or updates Tesseract from your distribution's own packages, and asks for your password even when Tesseract is already there, so the version is one Archtoys works with. On read-only systems (Fedora Silverblue, SteamOS), install `tesseract` the way your system installs software, then press **Check again**.
 - **Text Extractor's languages:** English comes with Tesseract. The first time it meets text that isn't clearly English, it downloads its other languages once (about 32 MB), so it can tell which one the text is in.
+- **Text Extractor uses the internet only for that:** the language data comes from Tesseract's own [language data](https://github.com/tesseract-ocr/tessdata_fast) on GitHub, downloaded when a language is first needed. Your screen and your text never leave your computer. Offline, it reads with the languages it already has.
 </details>
 
 ## Usage
@@ -99,6 +100,7 @@ Wayland and X11 · at home on KDE Plasma · works offline
 | See an older text                            | Click it in Text Extractor's history: its language, how sure it is, the text size and the words                                                                      |
 | Extract from a terminal or your own shortcut | `archtoys --extract` (starts Archtoys if it isn't running)                                                                                                           |
 | Switch toys, open Settings or About          | The sidebar: click ☰ to keep it open, or rest the mouse on ☰                                                                                                       |
+| Move the window                           | Drag the bar at the top (handy when your desktop shows no title bar)               |
 | Report a problem                             | **Report a problem** in the ⚙ settings                                                                                                                               |
 
 ### Color search
@@ -148,6 +150,8 @@ Copy the text in any part of the screen: a picture, a video, a PDF, an app that 
 <summary>Which languages it reads</summary>
 
 English, plus every language Tesseract has (except Hebrew). Archtoys finds the language by itself: it reads with English and your own languages first (your system language, keyboard layouts and input methods), and when that isn't sure, with one language of every writing system side by side, and keeps the reading it is surest of. Those languages download once, the first time they're needed (about 32 MB).
+
+Downloading a language needs an internet connection (it comes from Tesseract's own language data on GitHub); reading the text never does, and nothing you capture is sent anywhere.
 
 Tested on 24 languages, from a word to a paragraph, 14 to 64 px, light and dark, bold, colored and compressed: 98% of the text comes back right. English, Spanish, French, German, Portuguese, Italian, Dutch, Turkish, Polish, Indonesian, Russian, Ukrainian, Greek, Arabic, Urdu, Hindi, Bengali, Tamil, Thai, Chinese (simplified and traditional), Japanese and Korean read 93-100% right; Vietnamese and Persian about 94%. Short phrases mixed with English, decorative fonts and very small or blurry text read worse.
 
@@ -308,8 +312,10 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, with the color
 - [x] Picking on every monitor, pixel by pixel with the arrow keys
 - [x] **Text Extractor**: select any area of the screen and copy the text in it (OCR)
 - [x] A sidebar with multiple tools, in the style of PowerToys
-- [ ] A lighter, faster app and a much better Text Extractor in other languages (v0.7.1)
-- [ ] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.2)
+- [x] A lighter, faster app and a much better Text Extractor in other languages (v0.7.1)
+- [x] The window opens where you left it and keeps its size, and its top bar moves it (v0.7.2)
+- [x] The color picker works again on two or more monitors on KDE Plasma (Wayland) (v0.7.2)
+- [ ] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.3)
 - [ ] Ideas for later: **Awake** (keep your PC from sleeping) and **Screen Ruler** (measure things on screen)
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.
