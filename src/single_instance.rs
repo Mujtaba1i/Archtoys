@@ -118,6 +118,13 @@ impl Remote {
     fn extract(&self) {
         (self.extract)();
     }
+
+    /// The KWin script (kwin.rs): where the main window was, "x,y,w,h".
+    fn save_geometry(&self, geometry: &str) {
+        if let Some(g) = crate::kwin::parse_geometry(geometry) {
+            crate::kwin::set_geometry(Some(g));
+        }
+    }
 }
 
 /// Starts answering later launches. Keep the connection alive.

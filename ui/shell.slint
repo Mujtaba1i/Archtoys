@@ -30,13 +30,35 @@ component BarButton inherits Rectangle {
 }
 
 // The bar at the top: the menu (click: keep the sidebar open; rest on it:
-// open it over the toy), the logo and the page's name.
+// open it over the toy), the logo and the page's name. Drag it to move the
+// window (for desktops without a title bar on it, issue #11).
 export component TitleBar inherits Rectangle {
     in property <string> title;
     in property <bool> menu-active;
     out property <bool> menu-hovered: menu.hovered;
     callback menu-clicked();
+    callback start-move();
     height: 40px;
+
+    // a press that moves a few pixels is a drag (a click stays a click)
+    TouchArea {
+        property <length> press-x;
+        property <length> press-y;
+        property <bool> moving;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                self.press-x = self.mouse-x;
+                self.press-y = self.mouse-y;
+                self.moving = false;
+            }
+        }
+        moved => {
+            if !self.moving && (Math.abs(self.mouse-x - self.press-x) > 3px || Math.abs(self.mouse-y - self.press-y) > 3px) {
+                self.moving = true;
+                root.start-move();
+            }
+        }
+    }
 
     HorizontalLayout {
         padding-left: 5px;

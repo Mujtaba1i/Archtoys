@@ -670,15 +670,32 @@ impl Session {
         }
     }
 
+    /// Asks again to full-screen each window on its own monitor, for the ones
+    /// that are on another.
+    fn ask_monitors_again(&self) {
+        for (window, monitor) in self.windows.borrow().iter() {
+            let Some(monitor) = monitor else { continue };
+            let current = window.window().with_winit_window(|win| win.current_monitor()).flatten();
+            if current.as_ref() != Some(monitor) {
+                // already full screen (on the wrong one): asking again is ignored, so leave it first
+                let monitor = monitor.clone();
+                window.window().with_winit_window(move |win| {
+                    win.set_fullscreen(None);
+                    win.set_fullscreen(Some(Fullscreen::Borderless(Some(monitor))));
+                });
+            }
+        }
+    }
+
     /// Each monitor's place, once every window has its fullscreen size on
-    /// its own monitor. None while they are still getting there.
-    fn measure(&self) -> Option<(Vec<Rect>, Vec<f32>, Vec<f32>)> {
+    /// its own monitor; while they are still getting there, why not.
+    fn measure(&self) -> Result<(Vec<Rect>, Vec<f32>, Vec<f32>), String> {
         let windows = self.windows.borrow();
         let (mut rects, mut units, mut scales) = (vec![], vec![], vec![]);
-        for (window, monitor) in windows.iter() {
+        for (i, (window, monitor)) in windows.iter().enumerate() {
             let (w, h, scale) = logical_size(window);
             if w <= 100.0 || h <= 100.0 {
-                return None;
+                return Err(format!("window {} is {w:.0}x{h:.0}, not fullscreen yet", i + 1));
             }
             let Some(monitor) = monitor else {
                 // just one monitor: the window is the whole layout
@@ -687,9 +704,14 @@ impl Session {
                 scales.push(scale);
                 continue;
             };
-            let on_it = window.window().with_winit_window(|win| win.current_monitor().as_ref() == Some(monitor));
-            if on_it != Some(true) {
-                return None;
+            let current = window.window().with_winit_window(|win| win.current_monitor()).flatten();
+            if current.as_ref() != Some(monitor) {
+                return Err(format!(
+                    "window {} should be on {:?} but is on {:?}",
+                    i + 1,
+                    monitor.name(),
+                    current.as_ref().and_then(|m| m.name())
+                ));
             }
             let pos = monitor.position();
             if is_wayland(window) {
@@ -703,7 +725,7 @@ impl Session {
             }
             scales.push(scale);
         }
-        Some((rects, units, scales))
+        Ok((rects, units, scales))
     }
 
     /// Checks every 15 ms (up to 3 s) until every window is in place (the
@@ -715,12 +737,22 @@ impl Session {
                 return;
             }
             let measured = self.measure();
-            let settled = matches!((&measured, &previous), (Some((now, _, _)), Some(before)) if now == before);
-            let (Some((rects, units, scales)), true) = (measured.clone(), settled) else {
+            let settled = matches!((&measured, &previous), (Ok((now, _, _)), Some(before)) if now == before);
+            let (Ok((rects, units, scales)), true) = (measured.clone(), settled) else {
+                // KWin 6 can full-screen a window on the monitor it first put it on and
+                // ignore which one it was asked for (two monitors stayed black: issue
+                // #12): ask again for the windows on the wrong one
+                if attempt == 3 || attempt % 10 == 9 {
+                    self.ask_monitors_again();
+                }
                 if attempt < 200 {
-                    self.lay_out(attempt + 1, measured.map(|m| m.0));
+                    self.lay_out(attempt + 1, measured.ok().map(|m| m.0));
                 } else {
-                    eprintln!("freeze picker: the windows didn't cover the monitors; using the other picker");
+                    let why = match &measured {
+                        Err(why) => why.clone(),
+                        Ok((rects, _, _)) => format!("they kept moving ({rects:?})"),
+                    };
+                    eprintln!("freeze picker: the windows didn't cover the monitors in 3 s: {why}; using the other picker");
                     self.give_up();
                 }
                 return;
@@ -741,6 +773,13 @@ impl Session {
                 window.set_ready(true);
             }
             *self.layout.borrow_mut() = Some(Layout::new(fit, &rects, &units, &scales));
+            eprintln!(
+                "freeze picker: ready after {} ms on {} monitor(s) {rects:?}, screenshot {}x{}",
+                (attempt + 1) * 15,
+                rects.len(),
+                self.shot.width,
+                self.shot.height
+            );
             // show the magnifier at once, where the mouse is (no need to move it)
             let under_mouse = self.windows.borrow().iter().enumerate().find_map(|(i, (w, _))| {
                 w.get_hovered().then(|| (i, w.get_hover_x(), w.get_hover_y()))

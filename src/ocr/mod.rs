@@ -58,6 +58,17 @@ fn save_config() {
     });
 }
 
+/// For a bug report: "off", or "on, Tesseract 5.5.1".
+pub(crate) fn report_line() -> String {
+    if !enabled() {
+        return "off".into();
+    }
+    match engine::installed_version() {
+        Some(v) => format!("on, Tesseract {}", version_text(v)),
+        None => "on, Tesseract missing".into(),
+    }
+}
+
 fn version_text((a, b, c): (u32, u32, u32)) -> String {
     format!("{a}.{b}.{c}")
 }

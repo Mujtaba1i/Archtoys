@@ -6,7 +6,7 @@ use crate::config::{persist_config, HistoryStore};
 use crate::formats::FormatList;
 use crate::{AppWindow, FieldRow, FormatOption, SearchCard, ShadeCell};
 use arboard::{Clipboard, SetExtLinux};
-use slint::{Color, ComponentHandle, LogicalSize, Model, ModelRc, PhysicalPosition, VecModel};
+use slint::{Color, ComponentHandle, Model, ModelRc, PhysicalPosition, PhysicalSize, VecModel};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::thread;
@@ -293,9 +293,24 @@ pub fn hide_window(ui: &AppWindow) {
 fn remember_size(ui: &AppWindow) {
     let window = ui.window();
     if window.is_visible() {
-        let size = window.size().to_logical(window.scale_factor());
-        WINDOW_SIZE.with(|s| s.set(Some((size.width.round() as u32, size.height.round() as u32))));
+        let (w, h) = to_logical(window.size(), window.scale_factor());
+        WINDOW_SIZE.with(|s| s.set(Some((w.round() as u32, h.round() as u32))));
     }
+}
+
+/// A size in logical pixels (what Archtoys saves and lays out in) as the
+/// window's physical pixels, with Slint's scale factor. Sizes go to the window
+/// this way, never as `LogicalSize`: Slint hands those to winit, which
+/// converts them with its own scale factor and ignores SLINT_SCALE_FACTOR, so
+/// with SLINT_SCALE_FACTOR=1.5 on a 100% desktop every close and reopen made
+/// the window a third smaller (issue #11).
+pub(crate) fn to_physical((w, h): (f32, f32), scale: f32) -> PhysicalSize {
+    PhysicalSize::new((w * scale).round() as u32, (h * scale).round() as u32)
+}
+
+/// The window's physical size in logical pixels (Slint's scale factor).
+pub(crate) fn to_logical(size: PhysicalSize, scale: f32) -> (f32, f32) {
+    (size.width as f32 / scale, size.height as f32 / scale)
 }
 
 /// The window size to save in config.json (the last one seen on screen).
@@ -336,17 +351,17 @@ pub fn show_window(ui: &AppWindow) {
 /// last time the app ran), no bigger than the screen.
 pub fn restore_size(ui: &AppWindow) {
     let Some((w, h)) = WINDOW_SIZE.with(Cell::get) else { return };
-    let size = LogicalSize::new(w as f32, h as f32);
-    ui.window().set_size(size);
+    let size = (w as f32, h as f32);
+    ui.window().set_size(to_physical(size, ui.window().scale_factor()));
     // shortcut: Slint resets a re-created window to its default size while it
     // creates it, so the size is set again once the window is up. Drop this when
     // Slint keeps the size of a re-shown window on Wayland.
     let weak = ui.as_weak();
     slint::Timer::single_shot(Duration::from_millis(150), move || {
         let Some(ui) = weak.upgrade() else { return };
-        let size = fit_screen(&ui, size);
         let window = ui.window();
-        if window.size().to_logical(window.scale_factor()) != size {
+        let size = to_physical(fit_screen(&ui, size), window.scale_factor());
+        if window.size() != size {
             window.set_size(size);
         }
     });
@@ -354,15 +369,16 @@ pub fn restore_size(ui: &AppWindow) {
 
 /// `size`, shrunk to the screen the window is on (a size saved on a bigger
 /// screen). The whole screen: the desktop keeps the window clear of panels.
-fn fit_screen(ui: &AppWindow, size: LogicalSize) -> LogicalSize {
+fn fit_screen(ui: &AppWindow, (w, h): (f32, f32)) -> (f32, f32) {
     use slint::winit_030::WinitWindowAccessor;
+    let scale = ui.window().scale_factor();
     let screen = ui
         .window()
-        .with_winit_window(|w| w.current_monitor().map(|m| m.size().to_logical::<f32>(m.scale_factor())))
+        .with_winit_window(|win| win.current_monitor().map(|m| to_logical(PhysicalSize::new(m.size().width, m.size().height), scale)))
         .flatten();
     match screen {
-        Some(s) => LogicalSize::new(size.width.min(s.width), size.height.min(s.height)),
-        None => size,
+        Some((sw, sh)) => (w.min(sw), h.min(sh)),
+        None => (w, h),
     }
 }
 
@@ -516,6 +532,19 @@ pub fn apply_selected_color(ui: &AppWindow, history_store: &HistoryStore, rgb: R
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_window_keeps_its_size_through_closes_at_any_scale() {
+        // issue #11: closing and reopening shrank it by the scale factor each time
+        for scale in [1.0, 1.25, 1.5, 2.0, 2.5] {
+            let mut size = (1000.0_f32, 760.0_f32);
+            for _ in 0..10 {
+                let (w, h) = to_logical(to_physical(size, scale), scale);
+                size = (w.round(), h.round());
+            }
+            assert_eq!(size, (1000.0, 760.0), "at scale {scale}");
+        }
+    }
+
     use super::*;
 
     #[test]

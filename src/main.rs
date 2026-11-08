@@ -165,6 +165,10 @@ fn main() -> Result<(), slint::PlatformError> {
         };
         std::process::exit(code);
     }
+    if args.iter().any(|a| a == "--version" || a == "-v") {
+        println!("archtoys {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--print-install-script") {
         std::process::exit(ocr::print_install_script());
     }
@@ -194,6 +198,9 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         lock => lock,
     };
+    // the running app (not a CLI tool or a second launch): keep its last
+    // messages for Report a problem
+    diagnostics::keep_recent_messages();
     // `archtoys --pick` / `--extract` with no copy running starts in the tray
     // and picks (or captures text), like the hotkey.
     let start_hidden = autostart || pick_now || extract_now;
@@ -388,6 +395,12 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     // --- The frame (v0.7.0): the sidebar, pages ---
+    let w_ui = ui_handle.clone();
+    ui.on_window_move(move || {
+        if let Some(ui) = w_ui.upgrade() {
+            window::start_move(&ui);
+        }
+    });
     let (w_ui, w_history) = (ui_handle.clone(), history_store.clone());
     ui.on_sidebar_mode_changed(move |old, new| {
         if let Some(ui) = w_ui.upgrade() {
@@ -463,7 +476,23 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let report_ui = ui_handle.clone();
     ui.on_report_problem(move || {
-        if let Err(err) = diagnostics::open_issue_page() {
+        // the screens and scales, for the report (no screen names)
+        let screens = report_ui
+            .upgrade()
+            .map(|ui| {
+                use slint::winit_030::WinitWindowAccessor;
+                let list = ui.window().with_winit_window(|w| {
+                    w.available_monitors()
+                        .map(|m| format!("{}x{} at {:.0}%", m.size().width, m.size().height, m.scale_factor() * 100.0))
+                        .collect::<Vec<_>>()
+                });
+                diagnostics::Screens {
+                    screens: list.map(|l| format!("{}: {}", l.len(), l.join(", "))).unwrap_or_else(|| "unknown".into()),
+                    scale: ui.window().scale_factor(),
+                }
+            })
+            .unwrap_or(diagnostics::Screens { screens: "unknown".into(), scale: 1.0 });
+        if let Err(err) = diagnostics::open_issue_page(&screens) {
             eprintln!("report: couldn't open the browser: {err}");
             if let Some(ui) = report_ui.upgrade() {
                 show_message(&ui, "No browser found. Report at github.com/Mujtaba1i/Archtoys/issues");
@@ -716,6 +745,12 @@ fn main() -> Result<(), slint::PlatformError> {
         slint::CloseRequestResponse::HideWindow
     });
 
+    // KDE Wayland: KWin puts the window back where it was (kwin.rs)
+    if kwin::available() {
+        if let Err(err) = kwin::remember_main_window() {
+            eprintln!("window: KWin can't put the window back where it was ({err})");
+        }
+    }
     if !start_hidden {
         ui.show()?;
         ui_state::restore_size(&ui);

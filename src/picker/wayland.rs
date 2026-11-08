@@ -56,6 +56,13 @@ pub(super) fn start(
 
 /// Non-interactive screenshot through the portal. Returns the PNG's path.
 pub(super) fn take_screenshot() -> Result<Option<PathBuf>, String> {
+    // tests: a headless desktop can't take screenshots, so a test hands one in
+    // (a copy: the picker deletes the file once it has loaded it)
+    if let Some(test) = std::env::var_os("ARCHTOYS_TEST_SCREENSHOT") {
+        let copy = std::env::temp_dir().join(format!("archtoys-test-shot-{}.png", std::process::id()));
+        std::fs::copy(&test, &copy).map_err(|err| format!("test screenshot: {err}"))?;
+        return Ok(Some(copy));
+    }
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     portal::register_host_app(&conn, "archtoys");
 

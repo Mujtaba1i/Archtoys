@@ -992,6 +992,8 @@ export component AppWindow inherits Window {
     property <int> settings-scope: 1;
     property <bool> about-open: false;
     callback sidebar-mode-changed(int, int);
+    // the bar at the top is being dragged
+    callback window-move();
     callback page-changed(int);
     callback open-licenses();
     callback open-link(string);
@@ -2841,6 +2843,7 @@ export component AppWindow inherits Window {
                 : root.page == 0 ? "Archtoys" : root.page == 1 ? "Color Picker" : "Text Extractor";
             menu-active: root.sidebar-mode > 0;
             menu-clicked => { root.menu-clicked(); }
+            start-move => { root.window-move(); }
         }
 
         // the sidebar: pinned beside the toy, or opened over it

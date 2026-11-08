@@ -54,6 +54,8 @@ pub struct AppConfig {
     #[serde(default = "default_true")]
     pub editor_reset_on_new_color: bool,
     pub editor_saved: Option<crate::editor::SavedEdit>,
+    /// Where the main window was (KDE Wayland, from KWin): x, y, width, height.
+    pub window_geometry: Option<[i32; 4]>,
     /// The page shown last (0 Home, 1 Color Picker, 2 Text Extractor). None in
     /// configs from before v0.7.0: the first start of v0.7.0 opens Home.
     pub last_page: Option<i32>,
@@ -98,6 +100,7 @@ impl Default for AppConfig {
             editor_keep: false,
             editor_reset_on_new_color: true,
             editor_saved: None,
+            window_geometry: None,
             last_page: None,
             sidebar_mode: 0,
             text_enabled: false,
@@ -213,6 +216,7 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         editor_keep: ui.get_setting_editor_keep(),
         editor_reset_on_new_color: ui.get_setting_editor_reset(),
         editor_saved: crate::editor::saved(ui),
+        window_geometry: crate::kwin::geometry(),
         last_page: Some(ui.get_page()),
         sidebar_mode: ui.get_sidebar_mode(),
         text_enabled: crate::ocr::enabled(),
@@ -248,6 +252,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
         crate::editor::restore(saved);
     }
 
+    crate::kwin::set_geometry(cfg.window_geometry);
     ui.set_page(cfg.last_page.unwrap_or(0).clamp(0, 2));
     ui.set_sidebar_mode(cfg.sidebar_mode.clamp(0, 2));
     crate::ocr::set_enabled(cfg.text_enabled);
