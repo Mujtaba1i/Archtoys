@@ -1,0 +1,22 @@
+### The following should be add when the developer want to do an END to END test
+
+
+  e2e:
+    name: End-to-end (X11)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install the build and test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev \
+            libxcb-shm0-dev libxkbcommon-dev libxkbcommon-x11-0 \
+            xvfb xdotool xclip python3-xlib python3-pil openbox dbus \
+            tesseract-ocr fonts-dejavu-core
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - run: cargo build --release --locked
+      - name: Use the app like a person
+        run: dbus-run-session -- python3 .github/scripts/e2e_test.py target/release/archtoys
