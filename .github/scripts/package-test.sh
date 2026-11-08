@@ -118,7 +118,7 @@ start() {
   fi
   HOME="$(mktemp -d)"
   export HOME DISPLAY=:99
-  Xvfb :99 -screen 0 800x600x24 >/tmp/xvfb.log 2>&1 &
+  Xvfb :99 -screen 0 1280x1024x24 >/tmp/xvfb.log 2>&1 &
   local xvfb=$!
   local x
   for x in $(seq 1 40); do
@@ -154,6 +154,8 @@ start() {
   local copies=0 dir name
   for dir in /proc/[0-9]*; do
     name="$(cat "$dir/comm" 2>/dev/null || true)"
+    # a zombie (state Z, ended but not yet reaped) isn't a running copy
+    [ "$(awk '{print $3}' "$dir/stat" 2>/dev/null)" = Z ] && continue
     case "$name" in
         archtoys|archtoys-bin) copies=$((copies + 1));;
     esac
@@ -161,6 +163,52 @@ start() {
   [ "$copies" = 1 ] || fail "after a second launch $copies copies of archtoys are running; it must be exactly 1"
   echo "A second launch left exactly one copy running: OK"
   cat /tmp/smoke.log
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null || true  # killed: not a failure
+
+  # The window keeps its size through closes when Archtoys is scaled on its
+  # own (SLINT_SCALE_FACTOR=1.5 on a 100% desktop): resized to 1000 x 760, then
+  # closed (the desktop's close request) and opened again (a second launch,
+  # over D-Bus) 3 times, it must stay 1000 x 760. Before v0.7.2 it lost a third
+  # each time (issue #11). A first start can't show it: Slint scales a size set
+  # before the window exists right; the window shown again is what shrank.
+  case "$ID" in
+    ubuntu|debian) pkgs dbus python3-xlib ;;
+    fedora) pkgs dbus-daemon python3-xlib ;;
+    arch) pkgs dbus python-xlib ;;
+  esac
+  # the desktop's close button: WM_DELETE_WINDOW (xdotool's windowclose destroys the window instead)
+  cat > /tmp/close.py <<'PY'
+import sys
+from Xlib import display, X, protocol
+d = display.Display()
+w = d.create_resource_object("window", int(sys.argv[1]))
+proto, delete = d.intern_atom("WM_PROTOCOLS"), d.intern_atom("WM_DELETE_WINDOW")
+w.send_event(protocol.event.ClientMessage(window=w, client_type=proto, data=(32, [delete, X.CurrentTime, 0, 0, 0])), event_mask=X.NoEventMask)
+d.flush()
+PY
+  HOME="$(mktemp -d)"
+  export APP="${app[*]}" SLINT_SCALE_FACTOR=1.5
+  local size w h
+  size="$(dbus-run-session -- bash -c '
+    win() { xdotool search --onlyvisible --name "^Archtoys\$" 2>/dev/null | head -n 1; }
+    $APP > /tmp/scaled.log 2>&1 &
+    app=$!
+    for _ in $(seq 1 20); do [ -n "$(win)" ] && break; sleep 0.5; done
+    sleep 2
+    xdotool windowsize "$(win)" 1000 760; sleep 1
+    for _ in 1 2 3; do
+      python3 /tmp/close.py "$(win)"; sleep 1.5
+      timeout 30 $APP >/dev/null 2>&1; sleep 2
+    done
+    xdotool getwindowgeometry "$(win)" 2>/dev/null | awk "/Geometry/ {print \$2}"
+    kill $app 2>/dev/null' || true)"
+  unset SLINT_SCALE_FACTOR
+  w="${size%x*}"; h="${size#*x}"
+  if [ -z "$size" ] || [ "$w" -lt 998 ] || [ "$w" -gt 1002 ] || [ "$h" -lt 758 ] || [ "$h" -gt 762 ]; then
+    cat /tmp/scaled.log
+    fail_log /tmp/scaled.log "with SLINT_SCALE_FACTOR=1.5 the window resized to 1000x760 was ${size:-gone} after 3 closes and reopens; it must stay 1000x760 (issue #11). Its output:"
+  fi
+  echo "The window keeps its size through closes at SLINT_SCALE_FACTOR=1.5 ($size): OK"
 }
 
 case "$cmd" in

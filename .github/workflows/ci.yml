@@ -115,6 +115,55 @@ jobs:
           # releases there (they showed up as "COPR: build #5 for 0.3.1")
           env -u GITHUB_STEP_SUMMARY python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
 
+  # KDE Plasma on Wayland, on a headless KWin: Plasma 5 on the runner (Ubuntu
+  # 24.04 has 5.27), Plasma 6 in a Fedora container (they differ: KWin 6 holds
+  # a script's move back while a size change waits for the app). Each step
+  # writes what it checked and whether it passed to the run summary.
+  # - the main window opens where it was closed (issue #11): Archtoys' KWin
+  #   script; moved, closed, opened again, started fresh with a saved place
+  # - the color picker gets ready on 1 and 2 monitors (issue #12: two
+  #   monitors stayed black)
+  kde-wayland:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev libxkbcommon-dev \
+            libxkbcommon-x11-0 kwin-wayland qdbus-qt5 dbus
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+
+      - name: Build
+        run: cargo build --locked
+
+      - name: "KDE Plasma 5 (Wayland): the window opens where it was closed"
+        run: bash .github/scripts/kwin-place-test.sh target/debug/archtoys
+
+      - name: "KDE Plasma 5 (Wayland): the color picker gets ready on 1 and 2 monitors"
+        run: bash .github/scripts/kwin-pick-test.sh target/debug/archtoys
+
+      # privileged: KWin's binary has a file capability a plain container can't run
+      - name: "KDE Plasma 6 (Wayland, Fedora): the window opens where it was closed"
+        run: |
+          docker run --rm --privileged -v "$PWD:/w" -w /w \
+            -v "$GITHUB_STEP_SUMMARY:/summary.md" -e GITHUB_STEP_SUMMARY=/summary.md fedora:latest bash -c '
+            dnf install -y -q kwin qt6-qttools dbus-daemon fontconfig libX11 libxkbcommon libxkbcommon-x11 >/dev/null
+            bash .github/scripts/kwin-place-test.sh target/debug/archtoys'
+
+      - name: "KDE Plasma 6 (Wayland, Fedora): the color picker gets ready on 1 and 2 monitors"
+        run: |
+          docker run --rm --privileged -v "$PWD:/w" -w /w \
+            -v "$GITHUB_STEP_SUMMARY:/summary.md" -e GITHUB_STEP_SUMMARY=/summary.md fedora:latest bash -c '
+            dnf install -y -q kwin dbus-daemon python3 fontconfig libX11 libxkbcommon libxkbcommon-x11 >/dev/null
+            bash .github/scripts/kwin-pick-test.sh target/debug/archtoys'
+
   # Text Extractor's "Turn on" on each family it supports: the app's exact
   # install script (kept equal by a unit test) as root in a clean container,
   # with nothing installed and with an older Tesseract already there.
