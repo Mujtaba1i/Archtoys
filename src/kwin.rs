@@ -99,18 +99,45 @@ fn saved_js(saved: Option<[i32; 4]>) -> String {
     saved.map(|[x, y, w, h]| format!("[{x}, {y}, {w}, {h}]")).unwrap_or_else(|| "null".into())
 }
 
-fn remember_script(saved: Option<[i32; 4]>) -> String {
-    let saved = saved_js(saved);
-    format!(
-        r#"let saved = {saved};
-const isMain = w => w.caption === "Archtoys" && w.resourceClass === "archtoys";
-function onScreen(s) {{
+/// What both window-place scripts share (`saved` is set before it).
+const PLACE_JS: &str = r#"const isMain = w => w.caption === "Archtoys" && w.resourceClass === "archtoys";
+function onScreen(s) {
     if (!workspace.screens) return true;
     const cx = s[0] + s[2] / 2, cy = s[1] + s[3] / 2;
     return workspace.screens.some(o => cx >= o.geometry.x && cx < o.geometry.x + o.geometry.width
         && cy >= o.geometry.y && cy < o.geometry.y + o.geometry.height);
-}}
-function remember(w) {{
+}
+function place(w) {
+    w.frameGeometry = {x: saved[0], y: saved[1], width: w.frameGeometry.width, height: w.frameGeometry.height};
+}
+"#;
+
+/// Started up, the window can still end up where KWin would have put it: on a
+/// slow computer KWin undid the script's move (seen on GitHub's runner, KWin
+/// 5.27; why isn't clear). Run shortly after the window is up: puts it at the
+/// saved place if it's elsewhere (no jump when it's right; never mid-move).
+pub fn check_place() -> Result<(), String> {
+    let Some(saved) = geometry() else { return Ok(()) };
+    let js = format!(
+        r#"let saved = {saved};
+{PLACE_JS}(workspace.windowList ? workspace.windowList() : workspace.clientList()).forEach(w => {{
+    const g = w.frameGeometry;
+    if (isMain(w) && onScreen(saved) && !w.move && !w.resize && (g.x !== saved[0] || g.y !== saved[1])) {{
+        print("archtoys: the window ended up at " + g.x + "," + g.y + ", putting it back at " + saved[0] + "," + saved[1]);
+        place(w);
+    }}
+}});
+"#,
+        saved = saved_js(Some(saved))
+    );
+    run("archtoys-place-window", "place", &js)
+}
+
+fn remember_script(saved: Option<[i32; 4]>) -> String {
+    let saved = saved_js(saved);
+    format!(
+        r#"let saved = {saved};
+{PLACE_JS}function remember(w) {{
     const g = w.frameGeometry;
     saved = [g.x, g.y, g.width, g.height];
     callDBus("io.github.Mujtaba1i.Archtoys", "/io/github/Mujtaba1i/Archtoys", "io.github.Mujtaba1i.Archtoys",
@@ -119,18 +146,8 @@ function remember(w) {{
 function hook(w) {{
     if (!isMain(w)) return;
     if (saved && onScreen(saved)) {{
-        const kwinX = w.frameGeometry.x, kwinY = w.frameGeometry.y;
-        const place = () => {{ w.frameGeometry = {{x: saved[0], y: saved[1], width: w.frameGeometry.width, height: w.frameGeometry.height}}; }};
-        place();
-        // a move made while KWin still waits for the app's first frame can be
-        // undone when it arrives (seen on a slow machine): if the window goes
-        // back to KWin's own spot, put it back (a few times, never once the user moved it)
-        let fixes = 3;
-        if (w.frameGeometryChanged) w.frameGeometryChanged.connect(() => {{
-            if (fixes > 0 && w.frameGeometry.x === kwinX && w.frameGeometry.y === kwinY) {{ fixes--; place(); }}
-        }});
-        const started = w.interactiveMoveResizeStarted || w.clientStartUserMovedResized;
-        if (started) started.connect(() => {{ fixes = 0; }});
+        print("archtoys: the window opened at " + w.frameGeometry.x + "," + w.frameGeometry.y + ", putting it at " + saved[0] + "," + saved[1]);
+        place(w);
     }}
     const closed = w.closed || w.windowClosed;
     if (closed) closed.connect(() => remember(w));
@@ -182,9 +199,7 @@ mod tests {
         assert!(js.contains("let saved = [120, 80, 1000, 760];"));
         assert!(js.contains("w.frameGeometry = {x: saved[0], y: saved[1], width: w.frameGeometry.width"));
         assert!(js.contains("\"SaveGeometry\", saved.join(\",\")"));
-        // put back again if KWin undoes the move (slow machines), never after the user moved it
-        assert!(js.contains("w.frameGeometry.x === kwinX && w.frameGeometry.y === kwinY"));
-        assert!(js.contains("w.interactiveMoveResizeStarted || w.clientStartUserMovedResized"));
+        assert!(js.contains("function place(w)") && js.contains("place(w);"));
         assert!(remember_script(None).contains("let saved = null;"));
         // what the script sends back, and nonsense it must not keep
         assert_eq!(parse_geometry("120,80.4,1000,759.6"), Some([120, 80, 1000, 760]));
