@@ -118,7 +118,20 @@ function remember(w) {{
 }}
 function hook(w) {{
     if (!isMain(w)) return;
-    if (saved && onScreen(saved)) w.frameGeometry = {{x: saved[0], y: saved[1], width: w.frameGeometry.width, height: w.frameGeometry.height}};
+    if (saved && onScreen(saved)) {{
+        const kwinX = w.frameGeometry.x, kwinY = w.frameGeometry.y;
+        const place = () => {{ w.frameGeometry = {{x: saved[0], y: saved[1], width: w.frameGeometry.width, height: w.frameGeometry.height}}; }};
+        place();
+        // a move made while KWin still waits for the app's first frame can be
+        // undone when it arrives (seen on a slow machine): if the window goes
+        // back to KWin's own spot, put it back (a few times, never once the user moved it)
+        let fixes = 3;
+        if (w.frameGeometryChanged) w.frameGeometryChanged.connect(() => {{
+            if (fixes > 0 && w.frameGeometry.x === kwinX && w.frameGeometry.y === kwinY) {{ fixes--; place(); }}
+        }});
+        const started = w.interactiveMoveResizeStarted || w.clientStartUserMovedResized;
+        if (started) started.connect(() => {{ fixes = 0; }});
+    }}
     const closed = w.closed || w.windowClosed;
     if (closed) closed.connect(() => remember(w));
     const moved = w.interactiveMoveResizeFinished || w.clientFinishUserMovedResized;
@@ -169,6 +182,9 @@ mod tests {
         assert!(js.contains("let saved = [120, 80, 1000, 760];"));
         assert!(js.contains("w.frameGeometry = {x: saved[0], y: saved[1], width: w.frameGeometry.width"));
         assert!(js.contains("\"SaveGeometry\", saved.join(\",\")"));
+        // put back again if KWin undoes the move (slow machines), never after the user moved it
+        assert!(js.contains("w.frameGeometry.x === kwinX && w.frameGeometry.y === kwinY"));
+        assert!(js.contains("w.interactiveMoveResizeStarted || w.clientStartUserMovedResized"));
         assert!(remember_script(None).contains("let saved = null;"));
         // what the script sends back, and nonsense it must not keep
         assert_eq!(parse_geometry("120,80.4,1000,759.6"), Some([120, 80, 1000, 760]));
