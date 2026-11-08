@@ -12,6 +12,9 @@ set -euo pipefail
 BIN="$(readlink -f "${1:?the archtoys binary}")"
 QDBUS="$(command -v qdbus-qt6 || command -v qdbus6 || command -v qdbus || true)"
 [ -n "$QDBUS" ] || { echo "kwin-place-test: install qdbus"; exit 2; }
+# the app must read the config.json each test writes under its own HOME:
+# GitHub's runner sets XDG_CONFIG_HOME, which Archtoys would read instead
+unset XDG_CONFIG_HOME
 export BIN QDBUS XDG_RUNTIME_DIR="$(mktemp -d)"
 chmod 700 "$XDG_RUNTIME_DIR"
 
