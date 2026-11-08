@@ -164,6 +164,14 @@ start() {
   echo "A second launch left exactly one copy running: OK"
   cat /tmp/smoke.log
   kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null || true  # killed: not a failure
+  # For the AppImage, $pid is only its launcher: stop the app itself too, or it
+  # keeps the one-copy lock and the next start just exits (/proc: no pkill here)
+  for dir in /proc/[0-9]*; do
+    case "$(cat "$dir/comm" 2>/dev/null || true)" in
+      archtoys|archtoys-bin) kill "${dir#/proc/}" 2>/dev/null || true ;;
+    esac
+  done
+  sleep 1
 
   # The window keeps its size through closes when Archtoys is scaled on its
   # own (SLINT_SCALE_FACTOR=1.5 on a 100% desktop): resized to 1000 x 760, then
