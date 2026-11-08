@@ -205,6 +205,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // and picks (or captures text), like the hotkey.
     let start_hidden = autostart || pick_now || extract_now;
 
+    // each picker window opens full screen on its own monitor (freeze.rs)
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .with_winit_window_attributes_hook(picker::window_attributes)
+        .select()?;
     let ui = AppWindow::new()?;
 
     // The Wayland app_id / X11 WM_CLASS. It must match archtoys.desktop, or
@@ -754,16 +759,6 @@ fn main() -> Result<(), slint::PlatformError> {
     if !start_hidden {
         ui.show()?;
         ui_state::restore_size(&ui);
-        // KWin can still undo the move on a slow computer: check it once the window is up
-        if kwin::available() {
-            for secs in [1, 3] {
-                slint::Timer::single_shot(Duration::from_secs(secs), || {
-                    if let Err(err) = kwin::check_place() {
-                        eprintln!("window: KWin can't put the window back where it was ({err})");
-                    }
-                });
-            }
-        }
     }
 
     // reopened on Text Extractor (its history and engine) or Home (the latest

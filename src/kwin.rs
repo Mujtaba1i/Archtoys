@@ -99,45 +99,18 @@ fn saved_js(saved: Option<[i32; 4]>) -> String {
     saved.map(|[x, y, w, h]| format!("[{x}, {y}, {w}, {h}]")).unwrap_or_else(|| "null".into())
 }
 
-/// What both window-place scripts share (`saved` is set before it).
-const PLACE_JS: &str = r#"const isMain = w => w.caption === "Archtoys" && w.resourceClass === "archtoys";
-function onScreen(s) {
-    if (!workspace.screens) return true;
-    const cx = s[0] + s[2] / 2, cy = s[1] + s[3] / 2;
-    return workspace.screens.some(o => cx >= o.geometry.x && cx < o.geometry.x + o.geometry.width
-        && cy >= o.geometry.y && cy < o.geometry.y + o.geometry.height);
-}
-function place(w) {
-    w.frameGeometry = {x: saved[0], y: saved[1], width: w.frameGeometry.width, height: w.frameGeometry.height};
-}
-"#;
-
-/// Started up, the window can still end up where KWin would have put it: on a
-/// slow computer KWin undid the script's move (seen on GitHub's runner, KWin
-/// 5.27; why isn't clear). Run shortly after the window is up: puts it at the
-/// saved place if it's elsewhere (no jump when it's right; never mid-move).
-pub fn check_place() -> Result<(), String> {
-    let Some(saved) = geometry() else { return Ok(()) };
-    let js = format!(
-        r#"let saved = {saved};
-{PLACE_JS}(workspace.windowList ? workspace.windowList() : workspace.clientList()).forEach(w => {{
-    const g = w.frameGeometry;
-    if (isMain(w) && onScreen(saved) && !w.move && !w.resize && (g.x !== saved[0] || g.y !== saved[1])) {{
-        print("archtoys: the window ended up at " + g.x + "," + g.y + ", putting it back at " + saved[0] + "," + saved[1]);
-        place(w);
-    }}
-}});
-"#,
-        saved = saved_js(Some(saved))
-    );
-    run("archtoys-place-window", "place", &js)
-}
-
 fn remember_script(saved: Option<[i32; 4]>) -> String {
     let saved = saved_js(saved);
     format!(
         r#"let saved = {saved};
-{PLACE_JS}function remember(w) {{
+const isMain = w => w.caption === "Archtoys" && w.resourceClass === "archtoys";
+function onScreen(s) {{
+    if (!workspace.screens) return true;
+    const cx = s[0] + s[2] / 2, cy = s[1] + s[3] / 2;
+    return workspace.screens.some(o => cx >= o.geometry.x && cx < o.geometry.x + o.geometry.width
+        && cy >= o.geometry.y && cy < o.geometry.y + o.geometry.height);
+}}
+function remember(w) {{
     const g = w.frameGeometry;
     saved = [g.x, g.y, g.width, g.height];
     callDBus("io.github.Mujtaba1i.Archtoys", "/io/github/Mujtaba1i/Archtoys", "io.github.Mujtaba1i.Archtoys",
@@ -145,10 +118,7 @@ fn remember_script(saved: Option<[i32; 4]>) -> String {
 }}
 function hook(w) {{
     if (!isMain(w)) return;
-    if (saved && onScreen(saved)) {{
-        print("archtoys: the window opened at " + w.frameGeometry.x + "," + w.frameGeometry.y + ", putting it at " + saved[0] + "," + saved[1]);
-        place(w);
-    }}
+    if (saved && onScreen(saved)) w.frameGeometry = {{x: saved[0], y: saved[1], width: w.frameGeometry.width, height: w.frameGeometry.height}};
     const closed = w.closed || w.windowClosed;
     if (closed) closed.connect(() => remember(w));
     const moved = w.interactiveMoveResizeFinished || w.clientFinishUserMovedResized;
@@ -199,7 +169,6 @@ mod tests {
         assert!(js.contains("let saved = [120, 80, 1000, 760];"));
         assert!(js.contains("w.frameGeometry = {x: saved[0], y: saved[1], width: w.frameGeometry.width"));
         assert!(js.contains("\"SaveGeometry\", saved.join(\",\")"));
-        assert!(js.contains("function place(w)") && js.contains("place(w);"));
         assert!(remember_script(None).contains("let saved = null;"));
         // what the script sends back, and nonsense it must not keep
         assert_eq!(parse_geometry("120,80.4,1000,759.6"), Some([120, 80, 1000, 760]));

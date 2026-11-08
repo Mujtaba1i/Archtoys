@@ -18,7 +18,7 @@ use crate::color::Rgb;
 use crate::config::HistoryStore;
 use crate::{AppWindow, FreezePickerWindow, TextBox};
 use slint::winit_030::winit::monitor::MonitorHandle;
-use slint::winit_030::winit::window::Fullscreen;
+use slint::winit_030::winit::window::{Fullscreen, WindowAttributes};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{Color, ComponentHandle, ModelRc, SharedPixelBuffer, VecModel};
 use std::cell::{Cell, RefCell};
@@ -277,6 +277,23 @@ fn one_per_place<T, K: PartialEq>(items: Vec<T>, key: impl Fn(&T) -> K) -> Vec<T
             new
         })
         .collect()
+}
+
+thread_local! {
+    /// The monitor the next picker window opens full screen on (`window_attributes`).
+    static NEXT_MONITOR: RefCell<Option<MonitorHandle>> = const { RefCell::new(None) };
+}
+
+/// Slint's hook for every new window (main.rs): a picker window made for a
+/// monitor asks for it when it's created, so KWin opens it there instead of
+/// on the monitor in use, on top of another picker window. (KWin doesn't give
+/// back the frames of a covered window, and its third redraw then waited
+/// forever: the app froze. Asking again later is ignored while full screen.)
+pub(crate) fn window_attributes(attrs: WindowAttributes) -> WindowAttributes {
+    match NEXT_MONITOR.with(|m| m.borrow_mut().take()) {
+        Some(monitor) => attrs.with_fullscreen(Some(Fullscreen::Borderless(Some(monitor)))),
+        None => attrs,
+    }
 }
 
 /// Makes the window fullscreen on `monitor`, once winit has created it.
@@ -556,7 +573,10 @@ impl Session {
 
     /// Creates, wires and shows window number `i`.
     fn add_window(self: &Rc<Self>, monitor: Option<MonitorHandle>) -> Result<(), String> {
-        let window = FreezePickerWindow::new().map_err(|err| format!("window failed: {err:?}"))?;
+        NEXT_MONITOR.with(|m| *m.borrow_mut() = monitor.clone());
+        let window = FreezePickerWindow::new();
+        NEXT_MONITOR.with(|m| m.borrow_mut().take());
+        let window = window.map_err(|err| format!("window failed: {err:?}"))?;
         window.global::<crate::Skin>().set_real_shadows(!crate::cpu_drawn());
         window.set_screenshot_image(self.image.clone());
         window.set_text_mode(matches!(self.purpose, Purpose::Text(_)));
@@ -635,39 +655,52 @@ impl Session {
             slint::CloseRequestResponse::HideWindow
         });
         window.show().map_err(|err| format!("show failed: {err:?}"))?;
-        if let Some(monitor) = &monitor {
-            put_on(&window, monitor.clone());
-        }
         self.windows.borrow_mut().push((window, monitor));
         Ok(())
     }
 
-    /// With several monitors: moves the first window to the first monitor and
-    /// opens one more window on each of the others.
-    fn cover_all_monitors(self: &Rc<Self>) {
-        let monitors: Vec<MonitorHandle> = {
+    /// With several monitors: the first window keeps the monitor KWin opened it
+    /// on, and one more window opens on each of the others (none on top of
+    /// another, see `window_attributes`); then the windows are laid out.
+    /// Waits up to ~300 ms to learn that monitor (once the window is shown).
+    fn cover_all_monitors(self: &Rc<Self>, tries: u32) {
+        let (monitors, current) = {
             let windows = self.windows.borrow();
             let Some((first, _)) = windows.first() else { return };
             first
                 .window()
-                .with_winit_window(|w| w.available_monitors().collect())
+                .with_winit_window(|w| (w.available_monitors().collect::<Vec<_>>(), w.current_monitor()))
                 .unwrap_or_default()
         };
         let monitors = one_per_place(monitors, |m| (m.position(), m.size()));
         if monitors.len() < 2 {
+            self.clone().lay_out(0, None);
             return;
         }
+        let Some(here) = current.clone().filter(|c| monitors.contains(c)).or_else(|| (tries >= 20).then(|| monitors[0].clone()))
+        else {
+            let s = self.clone();
+            slint::Timer::single_shot(Duration::from_millis(15), move || {
+                if !s.done.get() {
+                    s.cover_all_monitors(tries + 1);
+                }
+            });
+            return;
+        };
         if let Some((first, slot)) = self.windows.borrow_mut().first_mut() {
-            put_on(first, monitors[0].clone());
-            *slot = Some(monitors[0].clone());
+            if current.as_ref() != Some(&here) {
+                put_on(first, here.clone());
+            }
+            *slot = Some(here.clone());
         }
-        for monitor in monitors.into_iter().skip(1) {
+        for monitor in monitors.into_iter().filter(|m| *m != here) {
             if let Err(err) = self.add_window(Some(monitor)) {
                 eprintln!("freeze picker: {err}");
                 self.give_up();
                 return;
             }
         }
+        self.clone().lay_out(0, None);
     }
 
     /// Asks again to full-screen each window on its own monitor, for the ones
@@ -849,10 +882,7 @@ fn show_for(ui_weak: slint::Weak<AppWindow>, purpose: Purpose, shot: Screenshot,
             let _ = window.window().winit_window().await;
         }
         if !s.done.get() {
-            s.cover_all_monitors();
-        }
-        if !s.done.get() {
-            s.lay_out(0, None);
+            s.cover_all_monitors(0);
         }
     });
     if let Err(err) = started {

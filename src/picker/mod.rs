@@ -9,6 +9,7 @@
 //! click) puts back the color that was shown before picking started.
 
 mod freeze;
+pub(crate) use freeze::window_attributes;
 mod wayland;
 mod x11;
 
