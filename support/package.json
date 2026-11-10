@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Lets node run the Worker test (node support/kofi-worker.test.mjs); Cloudflare ignores this file."
+}

@@ -43,6 +43,7 @@ exec /usr/lib/archtoys/archtoys-bin "$@"
 WRAP
 
   install -Dm644 packaging/archtoys.desktop "${pkgdir}/usr/share/applications/archtoys.desktop"
+  install -Dm644 packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml "${pkgdir}/usr/share/metainfo/io.github.Mujtaba1i.Archtoys.metainfo.xml"
 
   install -Dm644 packaging/archtoys.png "${pkgdir}/usr/share/pixmaps/archtoys.png"
   ln -sf archtoys.png "${pkgdir}/usr/share/pixmaps/archtoys-bin.png"

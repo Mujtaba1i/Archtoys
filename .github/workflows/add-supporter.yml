@@ -1,0 +1,58 @@
+# Thanks a supporter in SUPPORTERS.md.
+#
+# Started by the Cloudflare Worker (support/kofi-worker.js) for each public
+# one-time tip on Ko-fi, or by hand: Actions > Add a supporter > Run workflow.
+# The run summary says in plain words what happened (added, already listed,
+# Ko-fi's test, no name). Its commits never appear in the release notes.
+name: Add a supporter
+
+on:
+  repository_dispatch:
+    types: [kofi-supporter]
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "The supporter's name, as they want it shown"
+        required: true
+      message:
+        description: "Their message (optional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write   # commits SUPPORTERS.md
+
+# one at a time, so two tips arriving together don't overwrite each other
+concurrency:
+  group: add-supporter
+  cancel-in-progress: false
+
+jobs:
+  add:
+    name: Add a supporter to SUPPORTERS.md
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # what Ko-fi or the form sent is only ever passed as environment
+      # variables, never pasted into a command
+      - name: Add them
+        id: add
+        env:
+          NAME: ${{ github.event.client_payload.name || inputs.name }}
+          MESSAGE: ${{ github.event.client_payload.message || inputs.message }}
+          ID: ${{ github.event.client_payload.id }}
+          TEST: ${{ github.event.client_payload.test }}
+        run: python3 .github/scripts/add_supporter.py
+
+      - name: Save SUPPORTERS.md
+        if: steps.add.outputs.changed == 'true'
+        env:
+          SUPPORTER: ${{ steps.add.outputs.name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add SUPPORTERS.md
+          git commit -m "Add supporter: $SUPPORTER"
+          git pull --rebase --quiet origin "${GITHUB_REF_NAME:-main}"
+          git push --quiet origin "HEAD:${GITHUB_REF_NAME:-main}"

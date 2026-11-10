@@ -64,6 +64,8 @@ suggests = "tesseract-ocr"
 assets = [
     ["target/release/archtoys", "usr/bin/archtoys", "755"],
     ["packaging/archtoys.desktop", "usr/share/applications/archtoys.desktop", "644"],
+    # what KDE Discover and GNOME Software show (v0.7.3)
+    ["packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml", "usr/share/metainfo/io.github.Mujtaba1i.Archtoys.metainfo.xml", "644"],
     ["packaging/archtoys-16.png", "usr/share/icons/hicolor/16x16/apps/archtoys.png", "644"],
     ["packaging/archtoys-22.png", "usr/share/icons/hicolor/22x22/apps/archtoys.png", "644"],
     ["packaging/archtoys-24.png", "usr/share/icons/hicolor/24x24/apps/archtoys.png", "644"],

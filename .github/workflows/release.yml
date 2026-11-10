@@ -133,6 +133,7 @@ jobs:
           install -Dm644 LICENSE                      staging/LICENSE
           install -Dm644 data/colornames-LICENSE.txt  staging/colornames-LICENSE.txt
           install -Dm644 packaging/archtoys.desktop   staging/archtoys.desktop
+          install -Dm644 packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml staging/io.github.Mujtaba1i.Archtoys.metainfo.xml
           cp packaging/archtoys.png packaging/archtoys-*.png staging/
           (cd staging && tar -czf ../archtoys-linux-x86_64.tar.gz *)
           tar -tzf archtoys-linux-x86_64.tar.gz
@@ -332,6 +333,14 @@ jobs:
 
       - run: ls -la artifacts
 
+      # SHA256SUMS, so users and packagers can check their downloads
+      # (sha256sum -c SHA256SUMS); the .deb is added when it's attached
+      - name: Checksums
+        run: |
+          cd artifacts
+          ls | grep -vx SHA256SUMS | xargs sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ github.ref_name }}
@@ -358,6 +367,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" deb/*.deb --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Add the .deb to SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" -p SHA256SUMS -D sums --repo "$GITHUB_REPOSITORY"
+          (cd deb && sha256sum ./*.deb | sed 's# \./# #') >> sums/SHA256SUMS
+          cat sums/SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" sums/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
 
   # Starts COPR's build once the release commit and tag exist. It first looks
   # at COPR's queue: a build of this release that is already queued or running

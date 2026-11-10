@@ -25,6 +25,7 @@ files="$(dpkg-deb -c "$DEB")"
 for path in \
   ./usr/bin/archtoys \
   ./usr/share/applications/archtoys.desktop \
+  ./usr/share/metainfo/io.github.Mujtaba1i.Archtoys.metainfo.xml \
   ./usr/share/icons/hicolor/16x16/apps/archtoys.png \
   ./usr/share/icons/hicolor/256x256/apps/archtoys.png \
   ./usr/share/icons/hicolor/1024x1024/apps/archtoys.png \

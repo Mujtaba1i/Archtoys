@@ -41,13 +41,12 @@ RANGE="${BASE:+$BASE..}$TAG_SHA"
 PREV="$(git describe --tags --exact-match --match 'v[0-9]*' "$BASE" 2>/dev/null || true)"
 echo "Version: $CURRENT -> $VERSION   (changes since: ${BASE:-the beginning})"
 
-# Commit subjects since the previous tag: no merges, no "Release vX" commits,
-# each distinct message once, in the order they were made.
-CHANGES="$(git log --reverse --no-merges --format='%s' "$RANGE" \
-  | sed -e 's/[[:space:]]*$//' \
-  | grep -v -E '^Release v[0-9]' \
-  | grep -v -E '^[[:space:]]*$' \
-  | awk '!seen[$0]++' || true)"
+# Commit subjects since the previous tag, in the order they were made, each
+# once: no merges, no "Release vX", no "Add supporter" commits; Dependabot's
+# updates go to a folded panel at the end (release_notes.py, tested).
+LOG="$(git log --reverse --no-merges --format='%an%x09%s' "$RANGE")"
+CHANGES="$(printf '%s\n' "$LOG" | python3 "$(dirname "$0")/release_notes.py" changes)"
+TECHNICAL="$(printf '%s\n' "$LOG" | python3 "$(dirname "$0")/release_notes.py" technical)"
 [ -n "$CHANGES" ] || CHANGES="Maintenance release"
 echo "Changelog:"; printf '%s\n' "$CHANGES" | sed 's/^/  - /'
 
@@ -118,6 +117,14 @@ fi
   echo "## Changes${PREV:+ since $PREV}"
   echo
   printf '%s\n' "$CHANGES" | sed 's/^/- /'
+  if [ -n "$TECHNICAL" ]; then
+    echo
+    echo "<details><summary>Technical updates (by Dependabot)</summary>"
+    echo
+    printf '%s\n' "$TECHNICAL" | sed 's/^/- /'
+    echo
+    echo "</details>"
+  fi
   if [ -n "$PREV" ]; then
     echo
     echo "**Full list of changes:** https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${TAG}"

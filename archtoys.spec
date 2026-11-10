@@ -98,6 +98,10 @@ install -Dm 0755 target/release/archtoys %{buildroot}%{_bindir}/archtoys
 install -Dm 0644 packaging/archtoys.desktop \
     %{buildroot}%{_datadir}/applications/archtoys.desktop
 
+# what KDE Discover and GNOME Software show
+install -Dm 0644 packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml \
+    %{buildroot}%{_metainfodir}/io.github.Mujtaba1i.Archtoys.metainfo.xml
+
 # Icons — hicolor theme, all available sizes
 install -Dm 0644 packaging/archtoys-16.png  \
     %{buildroot}%{_datadir}/icons/hicolor/16x16/apps/archtoys.png
@@ -134,6 +138,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %doc README.md
 %{_bindir}/archtoys
 %{_datadir}/applications/archtoys.desktop
+%{_metainfodir}/io.github.Mujtaba1i.Archtoys.metainfo.xml
 %{_datadir}/icons/hicolor/16x16/apps/archtoys.png
 %{_datadir}/icons/hicolor/22x22/apps/archtoys.png
 %{_datadir}/icons/hicolor/24x24/apps/archtoys.png

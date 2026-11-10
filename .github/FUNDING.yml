@@ -1,0 +1,3 @@
+# GitHub's "Sponsor" button. It points at the same forwarding page as the
+# app and the README (docs/support/index.html holds the Ko-fi link).
+custom: ["https://mujtaba1i.github.io/Archtoys/support/"]

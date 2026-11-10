@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  "Buy me a coffee" for Archtoys: every button (the app's Settings, the README,
+  GitHub's Sponsor button) points here, and this page forwards to Ko-fi.
+  To change where support goes, edit the link below (the only place it is
+  written). To pause support, empty the href: href=""; the page then says so.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support Archtoys</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f7f8fa; color: #1f2328;
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 30rem; padding: 2rem 1.5rem; text-align: center; }
+  a { color: #1d6fb8; }
+  @media (prefers-color-scheme: dark) { body { background: #111418; color: #e6e9ee; } a { color: #6cb4ff; } }
+</style>
+</head>
+<body>
+<main>
+  <p id="going">Taking you to Archtoys’ Ko-fi page…<br>
+    <a id="kofi" href="https://ko-fi.com/mujtaba1i">Continue to Ko-fi</a></p>
+  <p id="off" hidden>Support for Archtoys isn’t set up right now. Thanks for wanting to help!<br>
+    <a href="https://github.com/Mujtaba1i/Archtoys">Back to Archtoys</a></p>
+</main>
+<script>
+  // Forward at once when there is a Ko-fi link; otherwise say support is off.
+  var link = document.getElementById("kofi").getAttribute("href") || "";
+  if (/^https:\/\/ko-fi\.com\/[A-Za-z0-9_]+\/?$/.test(link)) {
+    location.replace(link);
+  } else {
+    document.getElementById("going").hidden = true;
+    document.getElementById("off").hidden = false;
+  }
+</script>
+</body>
+</html>
