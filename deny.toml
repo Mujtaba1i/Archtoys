@@ -23,3 +23,18 @@ confidence-threshold = 0.9
 
 # (Slint is "GPL-3.0 OR its royalty-free licence OR commercial": the
 # royalty-free one is allowed above, with its attribution in About and the README.)
+
+# `cargo deny check advisories` (CI, v0.7.3): a library with a known security
+# hole fails CI, with the fix in the run summary. "Unmaintained" is only an
+# error for libraries Archtoys uses itself (a deeper one can only move when the
+# library above it does), and a yanked version only warns.
+[advisories]
+unmaintained = "workspace"
+yanked = "warn"
+ignore = [
+    # quick-xml 0.39: only wayland-scanner uses it, at build time, to read the
+    # Wayland protocol files that come with it; nothing a user opens ever
+    # reaches it. Remove when winit's toolkit moves to quick-xml 0.41 or later.
+    { id = "RUSTSEC-2026-0194", reason = "build time only, reads Wayland's own protocol files" },
+    { id = "RUSTSEC-2026-0195", reason = "build time only, reads Wayland's own protocol files" },
+]
