@@ -56,6 +56,8 @@ pub struct AppConfig {
     pub editor_saved: Option<crate::editor::SavedEdit>,
     /// Where the main window was (KDE Wayland, from KWin): x, y, width, height.
     pub window_geometry: Option<[i32; 4]>,
+    /// The picker used last ("freeze frame (Wayland)"…), for Report a problem.
+    pub last_picker: Option<String>,
     /// The page shown last (0 Home, 1 Color Picker, 2 Text Extractor). None in
     /// configs from before v0.7.0: the first start of v0.7.0 opens Home.
     pub last_page: Option<i32>,
@@ -101,6 +103,7 @@ impl Default for AppConfig {
             editor_reset_on_new_color: true,
             editor_saved: None,
             window_geometry: None,
+            last_picker: None,
             last_page: None,
             sidebar_mode: 0,
             text_enabled: false,
@@ -123,9 +126,7 @@ fn config_base_dir() -> PathBuf {
 }
 
 fn config_path() -> PathBuf {
-    config_base_dir()
-        .join("archtoys-color-picker")
-        .join("config.json")
+    config_base_dir().join("archtoys-color-picker").join("config.json")
 }
 
 fn autostart_path() -> PathBuf {
@@ -217,6 +218,7 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         editor_reset_on_new_color: ui.get_setting_editor_reset(),
         editor_saved: crate::editor::saved(ui),
         window_geometry: crate::kwin::geometry(),
+        last_picker: crate::diagnostics::picker_to_save(),
         last_page: Some(ui.get_page()),
         sidebar_mode: ui.get_sidebar_mode(),
         text_enabled: crate::ocr::enabled(),
@@ -253,6 +255,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     }
 
     crate::kwin::set_geometry(cfg.window_geometry);
+    crate::diagnostics::set_last_picker(cfg.last_picker.clone());
     ui.set_page(cfg.last_page.unwrap_or(0).clamp(0, 2));
     ui.set_sidebar_mode(cfg.sidebar_mode.clamp(0, 2));
     crate::ocr::set_enabled(cfg.text_enabled);
@@ -276,8 +279,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
 /// Before v0.5.0 the name was a format ("NAME" in the format list); turning
 /// it off there means the name stays off.
 fn show_name(cfg: &AppConfig) -> bool {
-    cfg.show_name
-        .unwrap_or_else(|| cfg.formats.iter().find(|f| f.key == "NAME").is_none_or(|f| f.enabled))
+    cfg.show_name.unwrap_or_else(|| cfg.formats.iter().find(|f| f.key == "NAME").is_none_or(|f| f.enabled))
 }
 
 pub fn persist_config(ui: &AppWindow, history_store: &HistoryStore) {
@@ -306,7 +308,8 @@ mod tests {
 
     #[test]
     fn configs_from_before_v0_5_0_keep_their_choices() {
-        let old: AppConfig = serde_json::from_str(r#"{"dark_mode":true,"formats":[{"key":"NAME","enabled":false},{"key":"HEX","enabled":true}]}"#).unwrap();
+        let old: AppConfig =
+            serde_json::from_str(r#"{"dark_mode":true,"formats":[{"key":"NAME","enabled":false},{"key":"HEX","enabled":true}]}"#).unwrap();
         assert_eq!(old.theme, "system"); // everyone starts on the desktop's setting
         assert!(!show_name(&old)); // NAME was turned off as a format
         let named: AppConfig = serde_json::from_str(r#"{"formats":[{"key":"NAME","enabled":true}]}"#).unwrap();

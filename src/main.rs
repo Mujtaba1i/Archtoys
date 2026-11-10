@@ -32,8 +32,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use ui_state::{
-    clear_input_error, committed_rgb, copy_text_async, current_rgb, push_history, show_input_error,
-    show_message, sync_history_model, update_ui_colors, update_ui_preview_except_field,
+    clear_input_error, committed_rgb, copy_text_async, current_rgb, push_history, show_input_error, show_message, sync_history_model,
+    update_ui_colors, update_ui_preview_except_field,
 };
 
 pub(crate) const WINDOW_MIN_WIDTH: f64 = 480.0;
@@ -60,9 +60,7 @@ fn apply_hidden_startup_state(ui: &AppWindow) {
     let started = slint::spawn_local(async move {
         let Some(ui) = weak.upgrade() else { return };
         let Ok(window) = ui.window().winit_window().await else { return };
-        let wayland = window
-            .window_handle()
-            .is_ok_and(|handle| matches!(handle.as_raw(), RawWindowHandle::Wayland(..)));
+        let wayland = window.window_handle().is_ok_and(|handle| matches!(handle.as_raw(), RawWindowHandle::Wayland(..)));
         drop(window); // Slint only destroys a window nothing else holds
         if wayland {
             ui.window().show().ok();
@@ -206,10 +204,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let start_hidden = autostart || pick_now || extract_now;
 
     // each picker window opens full screen on its own monitor (freeze.rs)
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .with_winit_window_attributes_hook(picker::window_attributes)
-        .select()?;
+    slint::BackendSelector::new().backend_name("winit".into()).with_winit_window_attributes_hook(picker::window_attributes).select()?;
     let ui = AppWindow::new()?;
 
     // The Wayland app_id / X11 WM_CLASS. It must match archtoys.desktop, or
@@ -488,11 +483,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 use slint::winit_030::WinitWindowAccessor;
                 let list = ui.window().with_winit_window(|w| {
                     w.available_monitors()
-                        .map(|m| format!("{}x{} at {:.0}%", m.size().width, m.size().height, m.scale_factor() * 100.0))
+                        .map(|m| ((m.position().x, m.position().y), (m.size().width, m.size().height), m.scale_factor()))
                         .collect::<Vec<_>>()
                 });
                 diagnostics::Screens {
-                    screens: list.map(|l| format!("{}: {}", l.len(), l.join(", "))).unwrap_or_else(|| "unknown".into()),
+                    screens: list.map(diagnostics::screens_line).unwrap_or_else(|| "unknown".into()),
                     scale: ui.window().scale_factor(),
                 }
             })
@@ -501,6 +496,16 @@ fn main() -> Result<(), slint::PlatformError> {
             eprintln!("report: couldn't open the browser: {err}");
             if let Some(ui) = report_ui.upgrade() {
                 show_message(&ui, "No browser found. Report at github.com/Mujtaba1i/Archtoys/issues");
+            }
+        }
+    });
+
+    let coffee_ui = ui_handle.clone();
+    ui.on_buy_coffee(move || {
+        if let Err(err) = launch::open_support_page() {
+            eprintln!("support: couldn't open the browser: {err}");
+            if let Some(ui) = coffee_ui.upgrade() {
+                show_message(&ui, "No browser found. Support Archtoys at mujtaba1i.github.io/Archtoys/support");
             }
         }
     });

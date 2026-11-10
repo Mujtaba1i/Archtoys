@@ -349,7 +349,15 @@ mod tests {
 
     #[test]
     fn chinese_japanese_and_thai_get_no_spaces_between_characters() {
-        let words = parse_tsv(&tsv(&[(1, 1, 1, "设"), (1, 1, 1, "置"), (1, 1, 1, "and"), (1, 1, 1, "ダウ"), (1, 1, 1, "ン"), (1, 1, 1, "นี่"), (1, 1, 1, "คือ")]));
+        let words = parse_tsv(&tsv(&[
+            (1, 1, 1, "设"),
+            (1, 1, 1, "置"),
+            (1, 1, 1, "and"),
+            (1, 1, 1, "ダウ"),
+            (1, 1, 1, "ン"),
+            (1, 1, 1, "นี่"),
+            (1, 1, 1, "คือ"),
+        ]));
         assert_eq!(text_from_words(&words, true), "设置 and ダウン นี่คือ");
         assert_eq!(text_from_words(&words, false), "设置 and ダウン นี่คือ");
     }

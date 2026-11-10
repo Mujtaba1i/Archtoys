@@ -16,12 +16,7 @@ use std::time::Duration;
 use zbus::blocking::{Connection, Proxy};
 use zbus::zvariant::Value;
 
-pub(super) fn start(
-    ui_weak: slint::Weak<AppWindow>,
-    history_store: HistoryStore,
-    context: PickerContext,
-    hid_window: bool,
-) {
+pub(super) fn start(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore, context: PickerContext, hid_window: bool) {
     thread::spawn(move || {
         if hid_window {
             thread::sleep(Duration::from_millis(250));
@@ -37,13 +32,7 @@ pub(super) fn start(
             Ok(shot) => {
                 let _ = slint::invoke_from_event_loop(move || {
                     let (ui2, history2) = (ui_weak.clone(), history_store.clone());
-                    freeze::show(
-                        ui_weak,
-                        history_store,
-                        context,
-                        shot,
-                        Box::new(move || start_legacy(ui2, history2, context)),
-                    );
+                    freeze::show(ui_weak, history_store, context, shot, Box::new(move || start_legacy(ui2, history2, context)));
                 });
             }
             Err(err) => {
@@ -122,13 +111,9 @@ fn pick_color_via_portal() -> Result<Option<Rgb>, String> {
         Outcome::Cancelled => return Ok(None),
     };
 
-    let color_value = results
-        .get("color")
-        .ok_or_else(|| "portal: response did not include color".to_string())?;
-    let (red, green, blue): (f64, f64, f64) = color_value
-        .clone()
-        .try_into()
-        .map_err(|_| "portal: color type conversion failed".to_string())?;
+    let color_value = results.get("color").ok_or_else(|| "portal: response did not include color".to_string())?;
+    let (red, green, blue): (f64, f64, f64) =
+        color_value.clone().try_into().map_err(|_| "portal: color type conversion failed".to_string())?;
 
     let to_u8 = |value: f64| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
     Ok(Some((to_u8(red), to_u8(green), to_u8(blue))))
@@ -160,9 +145,5 @@ fn pick_color_via_kwin() -> Result<Option<Rgb>, String> {
     if (argb >> 24) & 0xff == 0 {
         return Ok(None);
     }
-    Ok(Some((
-        ((argb >> 16) & 0xff) as u8,
-        ((argb >> 8) & 0xff) as u8,
-        (argb & 0xff) as u8,
-    )))
+    Ok(Some((((argb >> 16) & 0xff) as u8, ((argb >> 8) & 0xff) as u8, (argb & 0xff) as u8)))
 }

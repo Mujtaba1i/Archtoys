@@ -18,9 +18,7 @@ pub struct FormatList {
 
 impl Default for FormatList {
     fn default() -> Self {
-        Self {
-            items: ColorField::ALL.iter().map(|f| (*f, f.on_by_default())).collect(),
-        }
+        Self { items: ColorField::ALL.iter().map(|f| (*f, f.on_by_default())).collect() }
     }
 }
 
@@ -52,13 +50,7 @@ impl FormatList {
     }
 
     pub fn to_saved(&self) -> Vec<FormatEntry> {
-        self.items
-            .iter()
-            .map(|(f, on)| FormatEntry {
-                key: f.label().to_string(),
-                enabled: *on,
-            })
-            .collect()
+        self.items.iter().map(|(f, on)| FormatEntry { key: f.label().to_string(), enabled: *on }).collect()
     }
 
     /// All formats with their on/off state, in order.
@@ -115,10 +107,7 @@ mod tests {
     #[test]
     fn defaults() {
         let list = FormatList::default();
-        assert_eq!(
-            list.enabled(),
-            vec![ColorField::Hex, ColorField::Rgb, ColorField::Hsl, ColorField::Hsv]
-        );
+        assert_eq!(list.enabled(), vec![ColorField::Hex, ColorField::Rgb, ColorField::Hsl, ColorField::Hsv]);
         assert_eq!(list.auto_copy_field(), ColorField::Hex);
     }
 
@@ -161,10 +150,7 @@ mod tests {
     #[test]
     fn a_saved_list_with_nothing_copyable_gets_hex_back() {
         let saved = vec![FormatEntry { key: "HEX".into(), enabled: false }];
-        let all_off: Vec<FormatEntry> = ColorField::ALL
-            .iter()
-            .map(|f| FormatEntry { key: f.label().into(), enabled: false })
-            .collect();
+        let all_off: Vec<FormatEntry> = ColorField::ALL.iter().map(|f| FormatEntry { key: f.label().into(), enabled: false }).collect();
         assert!(FormatList::from_saved(&saved).enabled().len() > 1);
         assert_eq!(FormatList::from_saved(&all_off).enabled(), vec![ColorField::Hex]);
     }

@@ -80,7 +80,7 @@ fn icon_with_dot(dot: Rgb) -> Vec<Icon> {
             under[3] = (out_alpha * 255.0).round() as u8;
         }
     }
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.rotate_right(1); // rgba -> argb
     }
     vec![Icon { width: *width as i32, height: *height as i32, data: pixels }]
@@ -163,7 +163,8 @@ mod tests {
         let icon = &icons[0];
         let at = |x: usize, y: usize| {
             let i = (y * icon.width as usize + x) * 4;
-            (icon.data[i], icon.data[i + 1], icon.data[i + 2], icon.data[i + 3]) // a, r, g, b
+            (icon.data[i], icon.data[i + 1], icon.data[i + 2], icon.data[i + 3])
+            // a, r, g, b
         };
         assert_eq!(at(40, 40), (255, 255, 196, 0)); // the centre is the color, opaque
         let (a, r, g, b) = at(40, 37); // 3.3 px up: in the outline

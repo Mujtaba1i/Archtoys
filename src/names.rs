@@ -170,7 +170,11 @@ fn nearest(lab: &[f32; 3]) -> Option<(Name, f32)> {
     let (mut lo, mut hi) = (0, len); // first name at least as light as `lab`
     while lo < hi {
         let mid = (lo + hi) / 2;
-        if lightness(mid) < lab[0] { lo = mid + 1 } else { hi = mid }
+        if lightness(mid) < lab[0] {
+            lo = mid + 1
+        } else {
+            hi = mid
+        }
     }
     let start = lo;
     let mut best: Option<(Name, f32)> = None;
@@ -181,9 +185,18 @@ fn nearest(lab: &[f32; 3]) -> Option<(Name, f32)> {
         let up = (hi < len).then(|| (lightness(hi) - lab[0]).powi(2)).filter(|dl| *dl < bound);
         let index = match (down, up) {
             (None, None) => break,
-            (Some(d), Some(u)) if d <= u => { lo -= 1; lo }
-            (Some(_), None) => { lo -= 1; lo }
-            _ => { hi += 1; hi - 1 }
+            (Some(d), Some(u)) if d <= u => {
+                lo -= 1;
+                lo
+            }
+            (Some(_), None) => {
+                lo -= 1;
+                lo
+            }
+            _ => {
+                hi += 1;
+                hi - 1
+            }
         };
         let entry = name(index);
         let d = distance(&entry.lab, lab);
@@ -253,11 +266,7 @@ mod tests {
             seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
             let rgb = ((seed >> 8) as u8, (seed >> 16) as u8, (seed >> 24) as u8);
             let lab = rgb_to_oklab(rgb);
-            let brute = (0..name_count())
-                .map(name)
-                .map(|e| (e, distance(&e.lab, &lab)))
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .unwrap();
+            let brute = (0..name_count()).map(name).map(|e| (e, distance(&e.lab, &lab))).min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
             let fast = nearest(&lab).unwrap();
             assert!((fast.1 - brute.1).abs() < 1e-9, "{rgb:?}: {} vs {}", fast.0.name, brute.0.name);
         }

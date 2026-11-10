@@ -37,10 +37,7 @@ pub fn search(query: &str) -> Results {
     if let Some(code) = color_code(query) {
         return match code {
             Ok(rgb) => Results { hits: nearest(rgb, 60), note: None },
-            Err(example) => Results {
-                hits: vec![],
-                note: Some(format!("Finish the color code, for example {example}")),
-            },
+            Err(example) => Results { hits: vec![], note: Some(format!("Finish the color code, for example {example}")) },
         };
     }
 
@@ -67,9 +64,7 @@ pub fn search(query: &str) -> Results {
     // 3: a hint.
     Results {
         hits: vec![],
-        note: Some(format!(
-            "No color matches '{query}'. Try a name like 'sky', a code like #FF46A2, or pick a color from your screen."
-        )),
+        note: Some(format!("No color matches '{query}'. Try a name like 'sky', a code like #FF46A2, or pick a color from your screen.")),
     }
 }
 
@@ -143,9 +138,7 @@ fn color_code(query: &str) -> Option<Result<Rgb, &'static str>> {
     let lower = query.to_ascii_lowercase();
     let open = lower.find('(')?;
     let prefix = lower[..open].trim();
-    let field = ColorField::ALL
-        .into_iter()
-        .find(|f| f.label().eq_ignore_ascii_case(prefix))?;
+    let field = ColorField::ALL.into_iter().find(|f| f.label().eq_ignore_ascii_case(prefix))?;
     Some(parse_color(field, query).ok_or(field.example()))
 }
 
@@ -252,9 +245,7 @@ fn brown_fit([l, c, h]: [f32; 3]) -> f32 {
 /// The constants were tuned by eye on the real list.
 fn fit(family: Family, lch: [f32; 3]) -> f32 {
     let [l, c, h] = lch;
-    let hue = |lo, hi, fade_lo, fade_hi| {
-        hue_band(h, lo, hi, fade_lo, fade_hi) * ramp(c, 0.03, 0.08) * ramp(l, 0.12, 0.25)
-    };
+    let hue = |lo, hi, fade_lo, fade_hi| hue_band(h, lo, hi, fade_lo, fade_hi) * ramp(c, 0.03, 0.08) * ramp(l, 0.12, 0.25);
     match family {
         Family::Red => hue(14.0, 36.0, 34.0, 26.0) * (1.0 - 0.6 * pink_fit(lch)),
         Family::Orange => hue(45.0, 78.0, 14.0, 14.0) * (1.0 - 0.6 * brown_fit(lch)),
@@ -648,7 +639,23 @@ mod tests {
     #[test]
     #[ignore]
     fn family_report() {
-        for word in ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta", "pink", "brown", "gray", "black", "white", "dark red", "pale blue"] {
+        for word in [
+            "red",
+            "orange",
+            "yellow",
+            "green",
+            "cyan",
+            "blue",
+            "purple",
+            "magenta",
+            "pink",
+            "brown",
+            "gray",
+            "black",
+            "white",
+            "dark red",
+            "pale blue",
+        ] {
             let r = search(word);
             let (shown, bottom): (Vec<u32>, Vec<u32>) = r.hits.iter().partition(|&&i| {
                 let item = item(i as usize);
@@ -659,17 +666,40 @@ mod tests {
                 fit(fam, item.lch) * sh.map_or(1.0, |s| shade_fit(s, item.lch[0])) >= SHOWN || item.norm == text
             });
             let show = |list: &[u32]| {
-                list.iter().map(|&i| {
-                    let (n, (r, g, b)) = entry(i);
-                    format!("{n}=#{r:02X}{g:02X}{b:02X}")
-                }).collect::<Vec<_>>().join(" | ")
+                list.iter()
+                    .map(|&i| {
+                        let (n, (r, g, b)) = entry(i);
+                        format!("{n}=#{r:02X}{g:02X}{b:02X}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ")
             };
-            println!("REPORT\t{word}\t{}\t{}\t{}\t{}", shown.len(), bottom.len(), show(&shown[..shown.len().min(40)]), show(&bottom[..bottom.len().min(15)]));
+            println!(
+                "REPORT\t{word}\t{}\t{}\t{}\t{}",
+                shown.len(),
+                bottom.len(),
+                show(&shown[..shown.len().min(40)]),
+                show(&bottom[..bottom.len().min(15)])
+            );
         }
         for name in ["Chocolate Red", "Hot Pink", "Brown", "Rosy Brown", "Slate Gray", "Indian Red", "Olive", "Teal", "Indigo", "Coral"] {
             let it = named(name);
-            let fits: Vec<String> = [Family::Red, Family::Orange, Family::Pink, Family::Brown, Family::Blue, Family::Purple, Family::Magenta, Family::Gray, Family::Green, Family::Cyan, Family::Yellow]
-                .iter().map(|f| format!("{f:?}={:.2}", fit(*f, it.lch))).collect();
+            let fits: Vec<String> = [
+                Family::Red,
+                Family::Orange,
+                Family::Pink,
+                Family::Brown,
+                Family::Blue,
+                Family::Purple,
+                Family::Magenta,
+                Family::Gray,
+                Family::Green,
+                Family::Cyan,
+                Family::Yellow,
+            ]
+            .iter()
+            .map(|f| format!("{f:?}={:.2}", fit(*f, it.lch)))
+            .collect();
             let (r, g, b) = it.rgb();
             println!("EDGE\t{name}\t#{r:02X}{g:02X}{b:02X}\t{}", fits.join(" "));
         }

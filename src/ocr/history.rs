@@ -9,6 +9,7 @@ pub(crate) const MAX: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub(crate) struct Entry {
     pub text: String,
     /// "English"
@@ -20,12 +21,6 @@ pub(crate) struct Entry {
     pub words: u32,
     /// seconds since 1970 (UTC)
     pub time: u64,
-}
-
-impl Default for Entry {
-    fn default() -> Self {
-        Self { text: String::new(), language: String::new(), sure: 0, size: 0, words: 0, time: 0 }
-    }
 }
 
 fn path() -> PathBuf {
@@ -90,7 +85,8 @@ fn local_parts(unix: u64) -> (i64, u32, u32, u32, u32) {
             fn localtime_r(time: *const i64, result: *mut Tm) -> *mut Tm;
         }
         let t = unix as i64;
-        let mut tm = Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
+        let mut tm =
+            Tm { sec: 0, min: 0, hour: 0, mday: 0, mon: 0, year: 0, wday: 0, yday: 0, isdst: 0, gmtoff: 0, zone: std::ptr::null() };
         // SAFETY: both pointers are valid for the call; localtime_r only writes `tm`.
         if !unsafe { localtime_r(&t, &mut tm) }.is_null() {
             return (tm.year as i64 + 1900, tm.mon as u32 + 1, tm.mday as u32, tm.hour as u32, tm.min as u32);

@@ -206,10 +206,7 @@ pub(crate) fn turn_on(ui: &AppWindow) {
                     save_config();
                     String::new()
                 }
-                (Ok(()), Some(v)) => format!(
-                    "Your system's packages have Tesseract {}, and Archtoys needs 4.1 or newer.",
-                    version_text(v)
-                ),
+                (Ok(()), Some(v)) => format!("Your system's packages have Tesseract {}, and Archtoys needs 4.1 or newer.", version_text(v)),
                 (Ok(()), None) => "It was installed, but Archtoys can't find the tesseract program.".to_string(),
                 (Err(err), _) => err,
             };
@@ -272,9 +269,8 @@ fn temp_png() -> std::path::PathBuf {
 /// script detection guessed wrong on a few words of most scripts; the reading
 /// it is surest of is right far more often (v0.7.1: 98% of the text right in
 /// 24 languages, from 80%). About 32 MB, downloaded together once.
-const SWEEP: &[&str] = &[
-    "ara", "fas", "urd", "rus", "ukr", "ell", "hin", "ben", "tam", "tha", "chi_sim", "chi_tra", "jpn", "kor", "tur", "vie",
-];
+const SWEEP: &[&str] =
+    &["ara", "fas", "urd", "rus", "ukr", "ell", "hin", "ben", "tam", "tha", "chi_sim", "chi_tra", "jpn", "kor", "tur", "vie"];
 /// Read in Latin letters (whatlang then names the exact language).
 const LATIN: &[&str] = &["eng", "tur", "vie"];
 /// Mean word confidence (and no word under 60) at which the first reading,
@@ -385,7 +381,13 @@ fn pick<'a>(tries: &'a [(&'static str, Vec<engine::Word>)]) -> Option<&'a (&'sta
     Some(best)
 }
 
-fn read_png(png: &std::path::Path, dir: &std::path::Path, scale: f32, keep_lines: bool, status: &dyn Fn(String)) -> Result<Reading, String> {
+fn read_png(
+    png: &std::path::Path,
+    dir: &std::path::Path,
+    scale: f32,
+    keep_lines: bool,
+    status: &dyn Fn(String),
+) -> Result<Reading, String> {
     let have = |code: &str| lang::has(dir, code);
     let get = |code: &str| -> Result<(), String> {
         status(format!("Downloading {}…", lang::display_name(code)));

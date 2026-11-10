@@ -1,0 +1,4 @@
+# Matches the code as it was written (longer lines than the default): the
+# smallest one-time change when cargo fmt became a CI check (v0.7.3).
+max_width = 140
+use_small_heuristics = "Max"

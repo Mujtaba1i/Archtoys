@@ -45,9 +45,7 @@ impl Distro {
 
 /// Reads /etc/os-release.
 pub(crate) fn detect() -> Distro {
-    let text = std::fs::read_to_string("/etc/os-release")
-        .or_else(|_| std::fs::read_to_string("/usr/lib/os-release"))
-        .unwrap_or_default();
+    let text = std::fs::read_to_string("/etc/os-release").or_else(|_| std::fs::read_to_string("/usr/lib/os-release")).unwrap_or_default();
     detect_from(&text, std::path::Path::new("/run/ostree-booted").exists())
 }
 
@@ -99,19 +97,14 @@ pub(crate) fn detect_from(os_release: &str, ostree: bool) -> Distro {
 /// can break the system, so it installs the version in the current lists.
 pub(crate) fn script_for(distro: &Distro) -> Option<String> {
     // pacman's and dnf's progress bars only show on a terminal: `script` gives them one
-    let tty = |cmd: &str| {
-        format!("if command -v script >/dev/null 2>&1; then script -qfec '{cmd}' /dev/null; else {cmd}; fi")
-    };
+    let tty = |cmd: &str| format!("if command -v script >/dev/null 2>&1; then script -qfec '{cmd}' /dev/null; else {cmd}; fi");
     match distro {
         Distro::Arch(_) => Some(tty("pacman -S --noconfirm tesseract tesseract-data-eng tesseract-data-osd")),
-        Distro::Fedora(_) => Some(tty(
-            "if dnf --version 2>/dev/null | grep -q dnf5; then \
+        Distro::Fedora(_) => Some(tty("if dnf --version 2>/dev/null | grep -q dnf5; then \
              dnf install -y --skip-unavailable tesseract tesseract-langpack-eng tesseract-osd && dnf upgrade -y tesseract; \
-             else dnf install -y --setopt=strict=0 tesseract tesseract-langpack-eng tesseract-osd && dnf upgrade -y tesseract; fi",
-        )),
+             else dnf install -y --setopt=strict=0 tesseract tesseract-langpack-eng tesseract-osd && dnf upgrade -y tesseract; fi")),
         Distro::Debian(_) => Some(
-            "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y -o APT::Status-Fd=1 tesseract-ocr"
-                .to_string(),
+            "export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y -o APT::Status-Fd=1 tesseract-ocr".to_string(),
         ),
         Distro::Other(..) => None,
     }
@@ -420,10 +413,7 @@ mod tests {
     fn updates_are_read_from_each_package_manager() {
         assert_eq!(parse_update("pacman", "firefox 1-1 -> 2-1\ntesseract 5.5.0-1 -> 5.5.1-1\n"), Some("5.5.1".into()));
         assert_eq!(parse_update("pacman", "tesseract-data-eng 2:4.1-1 -> 2:4.2-1\n"), None);
-        assert_eq!(
-            parse_update("dnf", "Available upgrades\ntesseract.x86_64   1:5.5.1-1.fc43   updates\n"),
-            Some("5.5.1".into())
-        );
+        assert_eq!(parse_update("dnf", "Available upgrades\ntesseract.x86_64   1:5.5.1-1.fc43   updates\n"), Some("5.5.1".into()));
         assert_eq!(parse_update("dnf", ""), None);
         assert_eq!(
             parse_update("apt", "Listing...\ntesseract-ocr/noble-updates 5.3.4-1build5 amd64 [upgradable from: 5.3.4-1build4]\n"),
@@ -464,7 +454,9 @@ mod tests {
     /// (.github/scripts/tesseract-install-test.sh): they must be what the app runs.
     #[test]
     fn the_ci_install_scripts_are_the_apps() {
-        let file = |name: &str| std::fs::read_to_string(format!("{}/.github/scripts/tesseract-install/{name}.sh", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let file = |name: &str| {
+            std::fs::read_to_string(format!("{}/.github/scripts/tesseract-install/{name}.sh", env!("CARGO_MANIFEST_DIR"))).unwrap()
+        };
         assert_eq!(file("arch").trim_end(), script_for(&Distro::Arch(String::new())).unwrap());
         assert_eq!(file("fedora").trim_end(), script_for(&Distro::Fedora(String::new())).unwrap());
         assert_eq!(file("debian").trim_end(), script_for(&Distro::Debian(String::new())).unwrap());

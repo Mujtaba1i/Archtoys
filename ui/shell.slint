@@ -8,9 +8,10 @@ component BarButton inherits Rectangle {
     in property <bool> active;
     out property <bool> hovered: touch.has-hover;
     callback clicked;
-    width: 34px;
-    height: 28px;
-    border-radius: 8px;
+    // as wide as the sidebar's items and with their 20 px icons (v0.7.3)
+    width: 44px;
+    height: 34px;
+    border-radius: 9px;
     background: root.active ? Skin.surface
         : touch.pressed ? Skin.border
         : touch.has-hover ? Skin.surface-hover : Skin.surface-hover.transparentize(1);
@@ -22,8 +23,8 @@ component BarButton inherits Rectangle {
     accessible-action-default => { root.clicked(); }
     Image {
         source: root.icon;
-        width: 16px;
-        height: 16px;
+        width: 20px;
+        height: 20px;
         colorize: root.active ? Skin.accent : Skin.icon-tint;
     }
     touch := TouchArea { clicked => { root.clicked(); } }
@@ -35,6 +36,8 @@ component BarButton inherits Rectangle {
 export component TitleBar inherits Rectangle {
     in property <string> title;
     in property <bool> menu-active;
+    // where the page's content starts (the pinned sidebar's width + its padding)
+    in property <length> title-x;
     out property <bool> menu-hovered: menu.hovered;
     callback menu-clicked();
     callback start-move();
@@ -60,41 +63,38 @@ export component TitleBar inherits Rectangle {
         }
     }
 
+    // the menu sits on the sidebar's icon column (centered 30 px in)
+    menu := BarButton {
+        x: 8px;
+        y: (root.height - self.height) / 2;
+        icon: @image-url("menu.svg");
+        label: "Menu";
+        active: root.menu-active;
+        clicked => { root.menu-clicked(); }
+    }
+    // the logo and the page's name start where the page does (after the
+    // pinned sidebar), or right after the menu when no sidebar is pinned
     HorizontalLayout {
-        padding-left: 5px;
-        padding-right: 6px;
-        spacing: 4px;
-        alignment: stretch;
+        x: max(menu.x + menu.width + 8px, root.title-x);
+        width: root.width - self.x - 6px;
+        spacing: 7px;
+        animate x { duration: 160ms; easing: ease-out; }
         VerticalLayout {
             alignment: center;
-            menu := BarButton {
-                icon: @image-url("menu.svg");
-                label: "Menu";
-                active: root.menu-active;
-                clicked => { root.menu-clicked(); }
+            Image {
+                source: @image-url("../packaging/archtoys-64.png");
+                width: 18px;
+                height: 18px;
             }
         }
-        HorizontalLayout {
-            padding-left: 4px;
-            spacing: 7px;
+        Text {
+            text: root.title;
+            color: Skin.text-main;
+            font-size: 14px;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
             horizontal-stretch: 1;
-            VerticalLayout {
-                alignment: center;
-                Image {
-                    source: @image-url("../packaging/archtoys-64.png");
-                    width: 18px;
-                    height: 18px;
-                }
-            }
-            Text {
-                text: root.title;
-                color: Skin.text-main;
-                font-size: 14px;
-                font-weight: 600;
-                vertical-alignment: center;
-                overflow: elide;
-                horizontal-stretch: 1;
-            }
         }
     }
 }

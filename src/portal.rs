@@ -29,10 +29,7 @@ pub enum Outcome {
 /// A unique token for `handle_token` / `session_handle_token`.
 pub fn new_token(prefix: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let millis = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}_{}_{millis}_{n}", std::process::id())
 }
@@ -46,13 +43,7 @@ fn predicted_request_path(conn: &Connection, token: &str) -> Option<String> {
 
 /// Calls `interface.method(body)` and waits for the portal's Response.
 /// `body` must already contain `handle_token` = `token` in its options.
-pub fn call<B>(
-    conn: &Connection,
-    interface: &str,
-    method: &str,
-    body: &B,
-    token: &str,
-) -> Result<Outcome, String>
+pub fn call<B>(conn: &Connection, interface: &str, method: &str, body: &B, token: &str) -> Result<Outcome, String>
 where
     B: serde::Serialize + DynamicType,
 {
@@ -63,46 +54,28 @@ where
         Some(path) => {
             let proxy = Proxy::new(conn, DESTINATION, path, "org.freedesktop.portal.Request")
                 .map_err(|err| format!("{tag}: request proxy failed: {err}"))?;
-            let signals = proxy
-                .receive_signal("Response")
-                .map_err(|err| format!("{tag}: subscribe failed: {err}"))?;
+            let signals = proxy.receive_signal("Response").map_err(|err| format!("{tag}: subscribe failed: {err}"))?;
             Some(signals)
         }
         None => None,
     };
 
     // 2. Call.
-    let portal = Proxy::new(conn, DESTINATION, PATH, interface)
-        .map_err(|err| format!("{tag}: proxy failed: {err}"))?;
-    let reply = portal
-        .call_method(method, body)
-        .map_err(|err| format!("{tag}: call failed: {err}"))?;
-    let (handle,): (OwnedObjectPath,) = reply
-        .body()
-        .deserialize()
-        .map_err(|err| format!("{tag}: reply decode failed: {err}"))?;
+    let portal = Proxy::new(conn, DESTINATION, PATH, interface).map_err(|err| format!("{tag}: proxy failed: {err}"))?;
+    let reply = portal.call_method(method, body).map_err(|err| format!("{tag}: call failed: {err}"))?;
+    let (handle,): (OwnedObjectPath,) = reply.body().deserialize().map_err(|err| format!("{tag}: reply decode failed: {err}"))?;
 
     // Very old portals may use a different path than predicted.
     let predicted = predicted_request_path(conn, token);
     if predicted.as_deref() != Some(handle.as_str()) {
         let proxy = Proxy::new(conn, DESTINATION, handle.as_str(), "org.freedesktop.portal.Request")
             .map_err(|err| format!("{tag}: request proxy failed: {err}"))?;
-        early = Some(
-            proxy
-                .receive_signal("Response")
-                .map_err(|err| format!("{tag}: subscribe failed: {err}"))?,
-        );
+        early = Some(proxy.receive_signal("Response").map_err(|err| format!("{tag}: subscribe failed: {err}"))?);
     }
 
     // 3. Wait for the answer.
-    let message = early
-        .as_mut()
-        .and_then(|signals| signals.next())
-        .ok_or_else(|| format!("{tag}: response stream ended"))?;
-    let (code, results): (u32, Results) = message
-        .body()
-        .deserialize()
-        .map_err(|err| format!("{tag}: response decode failed: {err}"))?;
+    let message = early.as_mut().and_then(|signals| signals.next()).ok_or_else(|| format!("{tag}: response stream ended"))?;
+    let (code, results): (u32, Results) = message.body().deserialize().map_err(|err| format!("{tag}: response decode failed: {err}"))?;
 
     match code {
         0 => Ok(Outcome::Success(results)),
@@ -121,11 +94,10 @@ pub fn options(token: &str) -> HashMap<&'static str, Value<'static>> {
 /// Tells the portal which app we are (newer portals; harmless if missing).
 /// Must be the first portal call on this connection.
 pub fn register_host_app(conn: &Connection, app_id: &str) {
-    let result = Proxy::new(conn, DESTINATION, PATH, "org.freedesktop.host.portal.Registry")
-        .and_then(|registry| {
-            let options: HashMap<&str, Value<'_>> = HashMap::new();
-            registry.call_method("Register", &(app_id, options))
-        });
+    let result = Proxy::new(conn, DESTINATION, PATH, "org.freedesktop.host.portal.Registry").and_then(|registry| {
+        let options: HashMap<&str, Value<'_>> = HashMap::new();
+        registry.call_method("Register", &(app_id, options))
+    });
     if let Err(err) = result {
         eprintln!("portal: host app registration not available ({err})");
         if err.to_string().contains("App info not found") {

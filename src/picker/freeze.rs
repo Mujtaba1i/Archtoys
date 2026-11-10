@@ -11,8 +11,8 @@
 //! and the image is freed when the pick ends.
 
 use super::{
-    center_rgb, crop_rgba, end_text_capture, finish_picker, magnifier_image, preview_text, show_hover, PickOutcome,
-    PickerContext, TextRestore, MAGNIFIER_RADIUS,
+    center_rgb, crop_rgba, end_text_capture, finish_picker, magnifier_image, preview_text, show_hover, PickOutcome, PickerContext,
+    TextRestore, MAGNIFIER_RADIUS,
 };
 use crate::color::Rgb;
 use crate::config::HistoryStore;
@@ -92,11 +92,7 @@ impl Layout {
             .iter()
             .zip(units)
             .zip(scales)
-            .map(|((&rect, &unit), &scale)| Screen {
-                rect,
-                unit,
-                step: ((fit.sx * unit / scale.max(0.1)).round() as i32).max(1),
-            })
+            .map(|((&rect, &unit), &scale)| Screen { rect, unit, step: ((fit.sx * unit / scale.max(0.1)).round() as i32).max(1) })
             .collect();
         Self { fit, screens }
     }
@@ -243,15 +239,9 @@ pub(crate) fn load_png(path: &Path) -> Result<Screenshot, String> {
     if let Err(err) = std::fs::remove_file(path) {
         eprintln!("freeze picker: could not delete {}: {err}", path.display());
     }
-    let img = loaded
-        .map_err(|err| format!("reading screenshot {}: {err}", path.display()))?
-        .into_rgba8();
+    let img = loaded.map_err(|err| format!("reading screenshot {}: {err}", path.display()))?.into_rgba8();
     let (width, height) = img.dimensions();
-    Ok(Screenshot {
-        rgba: img.into_raw(),
-        width,
-        height,
-    })
+    Ok(Screenshot { rgba: img.into_raw(), width, height })
 }
 
 fn logical_size(w: &FreezePickerWindow) -> (f32, f32, f32) {
@@ -264,7 +254,7 @@ fn logical_size(w: &FreezePickerWindow) -> (f32, f32, f32) {
 /// (seen on KDE Wayland: a laptop's one screen as eDP-1 twice), and mirrored
 /// screens share a place too. Two windows stacked on one place hide the
 /// preview: it is drawn on the lower one.
-fn one_per_place<T, K: PartialEq>(items: Vec<T>, key: impl Fn(&T) -> K) -> Vec<T> {
+pub(crate) fn one_per_place<T, K: PartialEq>(items: Vec<T>, key: impl Fn(&T) -> K) -> Vec<T> {
     let mut seen = Vec::new();
     items
         .into_iter()
@@ -278,6 +268,9 @@ fn one_per_place<T, K: PartialEq>(items: Vec<T>, key: impl Fn(&T) -> K) -> Vec<T
         })
         .collect()
 }
+
+/// Each monitor's place, its layout units per logical pixel, and its scale.
+type Measured = (Vec<Rect>, Vec<f32>, Vec<f32>);
 
 thread_local! {
     /// The monitor the next picker window opens full screen on (`window_attributes`).
@@ -313,11 +306,7 @@ fn put_on(window: &FreezePickerWindow, monitor: MonitorHandle) {
 fn is_wayland(w: &FreezePickerWindow) -> bool {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     w.window()
-        .with_winit_window(|window| {
-            window
-                .window_handle()
-                .is_ok_and(|handle| matches!(handle.as_raw(), RawWindowHandle::Wayland(..)))
-        })
+        .with_winit_window(|window| window.window_handle().is_ok_and(|handle| matches!(handle.as_raw(), RawWindowHandle::Wayland(..))))
         .unwrap_or(false)
 }
 
@@ -326,12 +315,8 @@ impl Session {
     fn finish(&self, outcome: PickOutcome) {
         if !self.done.replace(true) {
             match &self.purpose {
-                Purpose::Color { history_store, context } => {
-                    finish_picker(self.ui_weak.clone(), history_store.clone(), *context, outcome)
-                }
-                Purpose::Text(restore) => {
-                    end_text_capture(self.ui_weak.clone(), TextRestore { raise: self.open_app.get(), ..*restore })
-                }
+                Purpose::Color { history_store, context } => finish_picker(self.ui_weak.clone(), history_store.clone(), *context, outcome),
+                Purpose::Text(restore) => end_text_capture(self.ui_weak.clone(), TextRestore { raise: self.open_app.get(), ..*restore }),
             }
         }
     }
@@ -667,18 +652,14 @@ impl Session {
         let (monitors, current) = {
             let windows = self.windows.borrow();
             let Some((first, _)) = windows.first() else { return };
-            first
-                .window()
-                .with_winit_window(|w| (w.available_monitors().collect::<Vec<_>>(), w.current_monitor()))
-                .unwrap_or_default()
+            first.window().with_winit_window(|w| (w.available_monitors().collect::<Vec<_>>(), w.current_monitor())).unwrap_or_default()
         };
         let monitors = one_per_place(monitors, |m| (m.position(), m.size()));
         if monitors.len() < 2 {
             self.clone().lay_out(0, None);
             return;
         }
-        let Some(here) = current.clone().filter(|c| monitors.contains(c)).or_else(|| (tries >= 20).then(|| monitors[0].clone()))
-        else {
+        let Some(here) = current.clone().filter(|c| monitors.contains(c)).or_else(|| (tries >= 20).then(|| monitors[0].clone())) else {
             let s = self.clone();
             slint::Timer::single_shot(Duration::from_millis(15), move || {
                 if !s.done.get() {
@@ -722,7 +703,7 @@ impl Session {
 
     /// Each monitor's place, once every window has its fullscreen size on
     /// its own monitor; while they are still getting there, why not.
-    fn measure(&self) -> Result<(Vec<Rect>, Vec<f32>, Vec<f32>), String> {
+    fn measure(&self) -> Result<Measured, String> {
         let windows = self.windows.borrow();
         let (mut rects, mut units, mut scales) = (vec![], vec![], vec![]);
         for (i, (window, monitor)) in windows.iter().enumerate() {
@@ -814,9 +795,12 @@ impl Session {
                 self.shot.height
             );
             // show the magnifier at once, where the mouse is (no need to move it)
-            let under_mouse = self.windows.borrow().iter().enumerate().find_map(|(i, (w, _))| {
-                w.get_hovered().then(|| (i, w.get_hover_x(), w.get_hover_y()))
-            });
+            let under_mouse = self
+                .windows
+                .borrow()
+                .iter()
+                .enumerate()
+                .find_map(|(i, (w, _))| w.get_hovered().then(|| (i, w.get_hover_x(), w.get_hover_y())));
             let early = self.early.take();
             if let Some(point) = under_mouse.or(early).and_then(|(i, x, y)| self.pixel(i, x, y)) {
                 self.point.set(Some(point));

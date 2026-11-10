@@ -18,17 +18,8 @@ pub enum ColorField {
 
 impl ColorField {
     /// Every field, in the default order.
-    pub const ALL: [ColorField; 9] = [
-        Self::Hex,
-        Self::Rgb,
-        Self::Hsl,
-        Self::Hsv,
-        Self::Cmyk,
-        Self::Hsla,
-        Self::Oklch,
-        Self::Oklab,
-        Self::Hwb,
-    ];
+    pub const ALL: [ColorField; 9] =
+        [Self::Hex, Self::Rgb, Self::Hsl, Self::Hsv, Self::Cmyk, Self::Hsla, Self::Oklch, Self::Oklab, Self::Hwb];
 
     /// The short label shown in the row, also used as its key.
     pub fn label(self) -> &'static str {
@@ -178,7 +169,13 @@ pub fn format_hsl(r: u8, g: u8, b: u8) -> String {
     let (hue, max, min) = hue_parts((r, g, b));
     let l = (max + min) / 2.0;
     let sum = max + min;
-    let s = if max == min { 0.0 } else if sum > 1.0 { (max - min) / (2.0 - sum) } else { (max - min) / sum };
+    let s = if max == min {
+        0.0
+    } else if sum > 1.0 {
+        (max - min) / (2.0 - sum)
+    } else {
+        (max - min) / sum
+    };
     let h = round_hue(hue);
     let s = (s * 100.0).round().clamp(0.0, 100.0);
     let l = (l * 100.0).round().clamp(0.0, 100.0);
@@ -198,11 +195,8 @@ pub fn format_hsv(r: u8, g: u8, b: u8) -> String {
 pub fn format_cmyk(r: u8, g: u8, b: u8) -> String {
     let (rf, gf, bf) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
     let k = 1.0 - rf.max(gf).max(bf);
-    let (c, m, y) = if k >= 1.0 {
-        (0.0, 0.0, 0.0)
-    } else {
-        ((1.0 - rf - k) / (1.0 - k), (1.0 - gf - k) / (1.0 - k), (1.0 - bf - k) / (1.0 - k))
-    };
+    let (c, m, y) =
+        if k >= 1.0 { (0.0, 0.0, 0.0) } else { ((1.0 - rf - k) / (1.0 - k), (1.0 - gf - k) / (1.0 - k), (1.0 - bf - k) / (1.0 - k)) };
     let pct = |v: f32| (v * 100.0).round().clamp(0.0, 100.0);
     format!("cmyk({:.0}%,{:.0}%,{:.0}%,{:.0}%)", pct(c), pct(m), pct(y), pct(k))
 }
@@ -333,12 +327,7 @@ pub fn scale_rgb(rgb: Rgb, factor: f32) -> Rgb {
 /// The four shades shown in the bar on the left:
 /// (lighter 2, lighter 1, darker 1, darker 2).
 pub fn calculate_shades(rgb: Rgb) -> (Rgb, Rgb, Rgb, Rgb) {
-    (
-        scale_rgb(rgb, 1.5),
-        scale_rgb(rgb, 1.2),
-        scale_rgb(rgb, 0.7),
-        scale_rgb(rgb, 0.5),
-    )
+    (scale_rgb(rgb, 1.5), scale_rgb(rgb, 1.2), scale_rgb(rgb, 0.7), scale_rgb(rgb, 0.5))
 }
 
 pub fn parse_hex_flexible(value: &str) -> Option<Rgb> {
@@ -358,7 +347,7 @@ fn inner_function_payload<'a>(value: &'a str, func_name: &str) -> &'a str {
     let lower = trimmed.to_ascii_lowercase();
     let prefix = format!("{func_name}(");
 
-    if lower.starts_with(&prefix) && trimmed.ends_with(')') && trimmed.len() >= prefix.len() + 1 {
+    if lower.starts_with(&prefix) && trimmed.ends_with(')') && trimmed.len() > prefix.len() {
         let start = prefix.len();
         let end = trimmed.len() - 1;
         trimmed[start..end].trim()
@@ -379,11 +368,7 @@ pub fn parse_rgb_permissive(value: &str) -> Option<Rgb> {
         Some(raw.clamp(0, 255) as u8)
     };
 
-    Some((
-        parse_component(parts[0])?,
-        parse_component(parts[1])?,
-        parse_component(parts[2])?,
-    ))
+    Some((parse_component(parts[0])?, parse_component(parts[1])?, parse_component(parts[2])?))
 }
 
 fn parse_percentage_0_to_1(value: &str) -> Option<f32> {
@@ -548,7 +533,7 @@ pub fn parse_color(field: ColorField, value: &str) -> Option<Rgb> {
             for db in -1..=1 {
                 let c = (step(rgb.0, dr), step(rgb.1, dg), step(rgb.2, db));
                 let moved = dr.abs() + dg.abs() + db.abs();
-                if best.map_or(true, |(m, _)| moved < m) && shows_typed(c) {
+                if best.is_none_or(|(m, _)| moved < m) && shows_typed(c) {
                     best = Some((moved, c));
                 }
             }
@@ -559,9 +544,7 @@ pub fn parse_color(field: ColorField, value: &str) -> Option<Rgb> {
 
 /// The numbers in a color's text: "hsl(50, 60%, 70%)" and "50,60,70" both give [50, 60, 70].
 fn numbers(text: &str) -> Vec<f64> {
-    text.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
-        .filter_map(|part| part.parse::<f64>().ok())
-        .collect()
+    text.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-')).filter_map(|part| part.parse::<f64>().ok()).collect()
 }
 
 fn parse_nearest(field: ColorField, value: &str) -> Option<Rgb> {
@@ -715,7 +698,8 @@ mod tests {
             kept += (shown == format!("{h}°, {s}%, {l}%")) as i32;
         }
         assert_eq!(kept, 5);
-        assert_eq!(parse_color(ColorField::Hex, "#FF46A2"), Some((255, 70, 162))); // exact formats untouched
+        assert_eq!(parse_color(ColorField::Hex, "#FF46A2"), Some((255, 70, 162)));
+        // exact formats untouched
     }
 
     #[test]

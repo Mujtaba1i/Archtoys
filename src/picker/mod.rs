@@ -9,7 +9,7 @@
 //! click) puts back the color that was shown before picking started.
 
 mod freeze;
-pub(crate) use freeze::window_attributes;
+pub(crate) use freeze::{one_per_place, window_attributes};
 mod wayland;
 mod x11;
 
@@ -60,11 +60,7 @@ enum SessionType {
 }
 
 fn detect_session_type() -> SessionType {
-    match std::env::var("XDG_SESSION_TYPE")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    match std::env::var("XDG_SESSION_TYPE").unwrap_or_default().to_ascii_lowercase().as_str() {
         "x11" => SessionType::X11,
         "wayland" => SessionType::Wayland,
         _ => SessionType::Unknown,
@@ -73,10 +69,7 @@ fn detect_session_type() -> SessionType {
 
 /// Starts picking. Call on the UI thread.
 pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerSource) {
-    if PICKER_ACTIVE
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
+    if PICKER_ACTIVE.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return;
     }
     PICKER_CANCELLED.store(false, Ordering::SeqCst);
@@ -141,10 +134,7 @@ pub(crate) struct TextRestore {
 /// Text Extractor's capture: one screenshot, shown frozen on every monitor,
 /// where the user drags a rectangle over text. UI thread only.
 pub fn start_text_capture(ui: &AppWindow) {
-    if PICKER_ACTIVE
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
+    if PICKER_ACTIVE.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return; // a pick or a capture is already running
     }
     diagnostics::set_picker("text capture");
@@ -201,8 +191,7 @@ pub(crate) fn end_text_capture(ui_weak: slint::Weak<AppWindow>, restore: TextRes
         // also undoes the fade, and un-minimizes it after "Stay minimized"
         let kwin_raise = restore.raise && crate::kwin::available();
         if restore.faded || kwin_raise {
-            let result =
-                if kwin_raise { crate::kwin::raise_main_window() } else { crate::kwin::set_main_window_opacity(1.0) };
+            let result = if kwin_raise { crate::kwin::raise_main_window() } else { crate::kwin::set_main_window_opacity(1.0) };
             if let Err(err) = result {
                 eprintln!("text capture: couldn't bring the window back ({err})");
             }
@@ -254,12 +243,7 @@ pub(crate) fn show_hover(ui: &AppWindow, rgb: Rgb) {
 }
 
 /// Ends picking. Safe to call from any thread.
-pub(crate) fn finish_picker(
-    ui_weak: slint::Weak<AppWindow>,
-    history_store: HistoryStore,
-    context: PickerContext,
-    outcome: PickOutcome,
-) {
+pub(crate) fn finish_picker(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore, context: PickerContext, outcome: PickOutcome) {
     let result = slint::invoke_from_event_loop(move || {
         x11::release_windows();
         freeze::release_window();
@@ -285,10 +269,8 @@ pub(crate) fn finish_picker(
                 }
             };
 
-            let stealth = selected
-                && context.source == PickerSource::Hotkey
-                && !context.was_visible_before_trigger
-                && ui.get_setting_autocopy();
+            let stealth =
+                selected && context.source == PickerSource::Hotkey && !context.was_visible_before_trigger && ui.get_setting_autocopy();
 
             if context.faded {
                 if let Err(err) = crate::kwin::set_main_window_opacity(1.0) {

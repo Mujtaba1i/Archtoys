@@ -97,11 +97,44 @@ fn recent_messages() -> Vec<String> {
     RECENT.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
 }
 
-static PICKER: Mutex<&str> = Mutex::new("not used yet");
+/// The picker used since Archtoys started (None: none yet).
+static PICKER: Mutex<Option<&str>> = Mutex::new(None);
+/// The one used before, from config.json, so a report made before the first
+/// pick still says which picker this computer uses.
+static LAST_PICKER: Mutex<Option<String>> = Mutex::new(None);
 static HOTKEY: Mutex<&str> = Mutex::new("not started");
 
 pub fn set_picker(method: &'static str) {
-    *PICKER.lock().unwrap() = method;
+    *PICKER.lock().unwrap() = Some(method);
+}
+
+pub fn set_last_picker(saved: Option<String>) {
+    *LAST_PICKER.lock().unwrap_or_else(|e| e.into_inner()) = saved.filter(|s| !s.is_empty() && s.len() < 80);
+}
+
+/// What config.json keeps: this start's picker, else the one from before.
+pub fn picker_to_save() -> Option<String> {
+    let now = *PICKER.lock().unwrap_or_else(|e| e.into_inner());
+    now.map(str::to_string).or_else(|| LAST_PICKER.lock().unwrap_or_else(|e| e.into_inner()).clone())
+}
+
+fn picker_line(now: Option<&str>, last: Option<&str>) -> String {
+    match (now, last) {
+        (Some(now), _) => now.to_string(),
+        (None, Some(last)) => format!("{last} (last used; not since Archtoys started)"),
+        (None, None) => "not used yet".to_string(),
+    }
+}
+
+/// A screen as the windowing library gives it: place, size and scale.
+pub type Monitor = ((i32, i32), (u32, u32), f64);
+
+/// "1: 3440x1440 at 100%": each screen once. The windowing library can list a
+/// screen twice (KDE Wayland), so screens at the same place and size count once.
+pub fn screens_line(monitors: Vec<Monitor>) -> String {
+    let list = crate::picker::one_per_place(monitors, |(place, size, _)| (*place, *size));
+    let shown: Vec<String> = list.iter().map(|(_, (w, h), scale)| format!("{w}x{h} at {:.0}%", scale * 100.0)).collect();
+    format!("{}: {}", shown.len(), shown.join(", "))
 }
 
 pub fn set_hotkey(method: &'static str) {
@@ -121,10 +154,7 @@ fn install_method() -> &'static str {
 }
 
 fn pretty_name(os_release: &str) -> Option<String> {
-    os_release
-        .lines()
-        .find_map(|line| line.strip_prefix("PRETTY_NAME="))
-        .map(|value| value.trim_matches('"').to_string())
+    os_release.lines().find_map(|line| line.strip_prefix("PRETTY_NAME=")).map(|value| value.trim_matches('"').to_string())
 }
 
 fn env_or_unknown(name: &str) -> String {
@@ -160,10 +190,7 @@ pub struct Screens {
 }
 
 fn info(screens: &Screens) -> String {
-    let distro = std::fs::read_to_string("/etc/os-release")
-        .ok()
-        .and_then(|text| pretty_name(&text))
-        .unwrap_or_else(|| "unknown".into());
+    let distro = std::fs::read_to_string("/etc/os-release").ok().and_then(|text| pretty_name(&text)).unwrap_or_else(|| "unknown".into());
     // set by hand, Archtoys' scale differs from the desktop's (issue #11)
     let forced = std::env::var("SLINT_SCALE_FACTOR").ok().filter(|v| !v.is_empty());
     format!(
@@ -178,7 +205,7 @@ fn info(screens: &Screens) -> String {
         screens.scale * 100.0,
         forced.map(|v| format!(" (SLINT_SCALE_FACTOR={v})")).unwrap_or_default(),
         if cfg!(feature = "opengl") { "OpenGL" } else { "CPU" },
-        PICKER.lock().unwrap(),
+        picker_line(*PICKER.lock().unwrap_or_else(|e| e.into_inner()), LAST_PICKER.lock().unwrap_or_else(|e| e.into_inner()).as_deref()),
         HOTKEY.lock().unwrap(),
         crate::ocr::report_line(),
     )
@@ -196,10 +223,7 @@ pub fn issue_url(screens: &Screens) -> String {
             recent.join("\n").replace("```", "'''")
         )
     };
-    let body = format!(
-        "{}{messages}\n### What is broken\n\n\n### How to reproduce it\n\n\n### What you expected\n\n",
-        info(screens)
-    );
+    let body = format!("{}{messages}\n### What is broken\n\n\n### How to reproduce it\n\n\n### What you expected\n\n", info(screens));
     concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new?body=").to_string() + &percent_encode(&body)
 }
 
@@ -232,6 +256,22 @@ mod tests {
         let text = "NAME=\"Ubuntu\"\nPRETTY_NAME=\"Ubuntu 24.04.1 LTS\"\nID=ubuntu\n";
         assert_eq!(pretty_name(text).as_deref(), Some("Ubuntu 24.04.1 LTS"));
         assert_eq!(pretty_name("ID=arch\n"), None);
+    }
+
+    #[test]
+    fn a_screen_listed_twice_counts_once() {
+        // KDE Wayland listed one 3440x1440 screen twice (issue #11)
+        let one = vec![((0, 0), (3440, 1440), 1.0), ((0, 0), (3440, 1440), 1.0)];
+        assert_eq!(screens_line(one), "1: 3440x1440 at 100%");
+        let two = vec![((0, 0), (2560, 1440), 1.5), ((2560, 0), (1920, 1080), 1.0)];
+        assert_eq!(screens_line(two), "2: 2560x1440 at 150%, 1920x1080 at 100%");
+    }
+
+    #[test]
+    fn the_picker_used_before_shows_until_one_is_used() {
+        assert_eq!(picker_line(None, None), "not used yet");
+        assert_eq!(picker_line(None, Some("freeze frame (Wayland)")), "freeze frame (Wayland) (last used; not since Archtoys started)");
+        assert_eq!(picker_line(Some("live (X11)"), Some("freeze frame (Wayland)")), "live (X11)");
     }
 
     #[test]

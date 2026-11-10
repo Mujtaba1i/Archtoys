@@ -1154,6 +1154,8 @@ export component AppWindow inherits Window {
     callback open-hotkey-settings();
     callback clear-history();
     callback report-problem();
+    // "Buy me a coffee": opens the support page in the browser
+    callback buy-coffee();
 
     // --- Color search ---
     property <bool> search-open: false;
@@ -2041,6 +2043,14 @@ export component AppWindow inherits Window {
                                 }
                             }
                             SettingCard {
+                                title: "Buy me a coffee";
+                                subtitle: "If Archtoys saves you time, a one-time tip helps keep it going";
+                                PillButton {
+                                    text: "Support";
+                                    clicked => { root.buy-coffee(); }
+                                }
+                            }
+                            SettingCard {
                                 title: "Report a problem";
                                 subtitle: "Opens a GitHub issue with the app and system details filled in";
                                 PillButton {
@@ -2842,6 +2852,8 @@ export component AppWindow inherits Window {
             title: root.settings-open ? (root.about-open ? "About Archtoys" : "Settings")
                 : root.page == 0 ? "Archtoys" : root.page == 1 ? "Color Picker" : "Text Extractor";
             menu-active: root.sidebar-mode > 0;
+            // the pages start 18 px in from the pinned sidebar
+            title-x: root.toy-x + 18px;
             menu-clicked => { root.menu-clicked(); }
             start-move => { root.window-move(); }
         }

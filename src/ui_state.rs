@@ -124,12 +124,7 @@ fn next_revision() -> i32 {
 }
 
 fn make_row(field: ColorField, rgb: Rgb, revision: i32) -> FieldRow {
-    FieldRow {
-        key: field.label().into(),
-        label: field.label().into(),
-        value: format_bare(field, rgb).into(),
-        rev: revision,
-    }
+    FieldRow { key: field.label().into(), label: field.label().into(), value: format_bare(field, rgb).into(), rev: revision }
 }
 
 /// Rebuilds the card, the boxes and the options list after the format list changed.
@@ -145,15 +140,8 @@ fn rebuild_rows(ui: &AppWindow) {
         }
     });
     update_shades(ui, rgb);
-    let options: Vec<FormatOption> = list
-        .items()
-        .iter()
-        .map(|(f, on)| FormatOption {
-            key: f.label().into(),
-            label: f.label().into(),
-            enabled: *on,
-        })
-        .collect();
+    let options: Vec<FormatOption> =
+        list.items().iter().map(|(f, on)| FormatOption { key: f.label().into(), label: f.label().into(), enabled: *on }).collect();
     OPTIONS.with(|o| {
         if let Some(model) = o.borrow().as_ref() {
             model.set_vec(options);
@@ -352,17 +340,43 @@ pub fn show_window(ui: &AppWindow) {
 pub fn restore_size(ui: &AppWindow) {
     let Some((w, h)) = WINDOW_SIZE.with(Cell::get) else { return };
     let size = (w as f32, h as f32);
+    // Slint resizes the window to its own idea of its size whenever the two
+    // differ, and that idea was wrong twice with SLINT_SCALE_FACTOR: a size set
+    // before the window exists is kept at scale 1, so once the window exists
+    // (at 1.5) Slint "corrects" it to the layout's 520 px; and the later fix
+    // was undone the same way. The window showed at a wrong size and jumped to
+    // the saved one (issue #11: the size "pops", and on KDE the window crept to
+    // the top left). So Slint is told the size too (`Resized`, which only
+    // updates its idea), and it is applied again the moment the window exists,
+    // before its first frame (seen in the Wayland log: the first buffer has the
+    // saved size).
+    let apply = move |ui: &AppWindow| {
+        let window = ui.window();
+        let logical = fit_screen(ui, size);
+        let physical = to_physical(logical, window.scale_factor());
+        if window.size() != physical {
+            window.dispatch_event(slint::platform::WindowEvent::Resized { size: slint::LogicalSize::new(logical.0, logical.1) });
+            window.set_size(physical);
+        }
+    };
+    ui.window().dispatch_event(slint::platform::WindowEvent::Resized { size: slint::LogicalSize::new(size.0, size.1) });
     ui.window().set_size(to_physical(size, ui.window().scale_factor()));
-    // shortcut: Slint resets a re-created window to its default size while it
-    // creates it, so the size is set again once the window is up. Drop this when
-    // Slint keeps the size of a re-shown window on Wayland.
+    let weak = ui.as_weak();
+    let started = slint::spawn_local(async move {
+        use slint::winit_030::WinitWindowAccessor;
+        let Some(ui) = weak.upgrade() else { return };
+        if ui.window().winit_window().await.is_ok() {
+            apply(&ui);
+        }
+    });
+    if let Err(err) = started {
+        eprintln!("window: can't restore the size once the window is up: {err:?}");
+    }
+    // and once more when the window has settled (a desktop may still change it)
     let weak = ui.as_weak();
     slint::Timer::single_shot(Duration::from_millis(150), move || {
-        let Some(ui) = weak.upgrade() else { return };
-        let window = ui.window();
-        let size = to_physical(fit_screen(&ui, size), window.scale_factor());
-        if window.size() != size {
-            window.set_size(size);
+        if let Some(ui) = weak.upgrade() {
+            apply(&ui);
         }
     });
 }
@@ -417,7 +431,7 @@ fn search_summary(count: usize, took: Duration) -> String {
     let digits = count.to_string();
     let mut grouped = String::new();
     for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             grouped.push(',');
         }
         grouped.push(ch);

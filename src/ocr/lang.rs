@@ -16,15 +16,130 @@ const TESSDATA_URL: &str = "https://github.com/tesseract-ocr/tessdata_fast/raw/m
 /// except Hebrew and Yiddish (written in Hebrew letters): Archtoys reads no
 /// Hebrew, by choice (see `EXCLUDED`).
 pub(crate) const KNOWN: &[&str] = &[
-    "afr", "amh", "ara", "asm", "aze", "aze_cyrl", "bel", "ben", "bod", "bos", "bre", "bul", "cat", "ceb", "ces",
-    "chi_sim", "chi_sim_vert", "chi_tra", "chi_tra_vert", "chr", "cos", "cym", "dan", "deu", "deu_latf", "div", "dzo",
-    "ell", "eng", "enm", "epo", "equ", "est", "eus", "fao", "fas", "fil", "fin", "fra", "frk", "frm", "fry", "gla",
-    "gle", "glg", "grc", "guj", "hat", "hin", "hrv", "hun", "hye", "iku", "ind", "isl", "ita", "ita_old", "jav",
-    "jpn", "jpn_vert", "kan", "kat", "kat_old", "kaz", "khm", "kir", "kmr", "kor", "kor_vert", "lao", "lat", "lav",
-    "lit", "ltz", "mal", "mar", "mkd", "mlt", "mon", "mri", "msa", "mya", "nep", "nld", "nor", "oci", "ori", "osd",
-    "pan", "pol", "por", "pus", "que", "ron", "rus", "san", "sin", "slk", "slv", "snd", "spa", "spa_old", "sqi", "srp",
-    "srp_latn", "sun", "swa", "swe", "syr", "tam", "tat", "tel", "tgk", "tha", "tir", "ton", "tur", "uig", "ukr", "urd",
-    "uzb", "uzb_cyrl", "vie", "yor",
+    "afr",
+    "amh",
+    "ara",
+    "asm",
+    "aze",
+    "aze_cyrl",
+    "bel",
+    "ben",
+    "bod",
+    "bos",
+    "bre",
+    "bul",
+    "cat",
+    "ceb",
+    "ces",
+    "chi_sim",
+    "chi_sim_vert",
+    "chi_tra",
+    "chi_tra_vert",
+    "chr",
+    "cos",
+    "cym",
+    "dan",
+    "deu",
+    "deu_latf",
+    "div",
+    "dzo",
+    "ell",
+    "eng",
+    "enm",
+    "epo",
+    "equ",
+    "est",
+    "eus",
+    "fao",
+    "fas",
+    "fil",
+    "fin",
+    "fra",
+    "frk",
+    "frm",
+    "fry",
+    "gla",
+    "gle",
+    "glg",
+    "grc",
+    "guj",
+    "hat",
+    "hin",
+    "hrv",
+    "hun",
+    "hye",
+    "iku",
+    "ind",
+    "isl",
+    "ita",
+    "ita_old",
+    "jav",
+    "jpn",
+    "jpn_vert",
+    "kan",
+    "kat",
+    "kat_old",
+    "kaz",
+    "khm",
+    "kir",
+    "kmr",
+    "kor",
+    "kor_vert",
+    "lao",
+    "lat",
+    "lav",
+    "lit",
+    "ltz",
+    "mal",
+    "mar",
+    "mkd",
+    "mlt",
+    "mon",
+    "mri",
+    "msa",
+    "mya",
+    "nep",
+    "nld",
+    "nor",
+    "oci",
+    "ori",
+    "osd",
+    "pan",
+    "pol",
+    "por",
+    "pus",
+    "que",
+    "ron",
+    "rus",
+    "san",
+    "sin",
+    "slk",
+    "slv",
+    "snd",
+    "spa",
+    "spa_old",
+    "sqi",
+    "srp",
+    "srp_latn",
+    "sun",
+    "swa",
+    "swe",
+    "syr",
+    "tam",
+    "tat",
+    "tel",
+    "tgk",
+    "tha",
+    "tir",
+    "ton",
+    "tur",
+    "uig",
+    "ukr",
+    "urd",
+    "uzb",
+    "uzb_cyrl",
+    "vie",
+    "yor",
 ];
 
 /// Languages Archtoys never reads, even when the system has their data:
@@ -89,11 +204,7 @@ pub(crate) fn prepare_dir() -> Result<PathBuf, String> {
 /// desktop), through a temporary file so a cut-off download leaves nothing.
 fn fetch(url: &str, dest: &Path) -> Result<(), String> {
     let tmp = dest.with_extension("part");
-    let curl = Command::new("curl")
-        .args(["-fsSL", "--connect-timeout", "10", "--max-time", "300", "-o"])
-        .arg(&tmp)
-        .arg(url)
-        .status();
+    let curl = Command::new("curl").args(["-fsSL", "--connect-timeout", "10", "--max-time", "300", "-o"]).arg(&tmp).arg(url).status();
     let ok = match curl {
         Ok(status) => status.success(),
         Err(_) => Command::new("wget")
@@ -195,9 +306,7 @@ pub(crate) fn display_name(code: &str) -> String {
     if let Some(name) = special {
         return name.to_string();
     }
-    whatlang::Lang::from_code(code)
-        .map(|l| l.eng_name().to_string())
-        .unwrap_or_else(|| code.to_string())
+    whatlang::Lang::from_code(code).map(|l| l.eng_name().to_string()).unwrap_or_else(|| code.to_string())
 }
 
 /// The language the desktop is set to ("de_DE.UTF-8" → "deu"), when Tesseract knows it.
@@ -255,11 +364,7 @@ pub(crate) fn user_languages() -> &'static [&'static str] {
     LANGS.get_or_init(|| {
         let config = |path: &str| std::fs::read_to_string(config_home().join(path)).unwrap_or_default();
         let run = |cmd: &str, args: &[&str]| {
-            Command::new(cmd)
-                .args(args)
-                .output()
-                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
-                .unwrap_or_default()
+            Command::new(cmd).args(args).output().map(|out| String::from_utf8_lossy(&out.stdout).into_owned()).unwrap_or_default()
         };
         let mut names = Vec::new();
         names.extend(kde_layouts(&config("kxkbrc")));
@@ -303,10 +408,7 @@ fn fcitx5_methods(text: &str) -> Vec<String> {
 
 /// GNOME: `[('xkb', 'us'), ('xkb', 'ara'), ('ibus', 'hangul')]`.
 fn gnome_sources(text: &str) -> Vec<String> {
-    text.split('(')
-        .skip(1)
-        .filter_map(|item| item.split('\'').nth(3).map(str::to_string))
-        .collect()
+    text.split('(').skip(1).filter_map(|item| item.split('\'').nth(3).map(str::to_string)).collect()
 }
 
 /// X11: `layout:     us,ara` from `setxkbmap -query`.
@@ -383,7 +485,10 @@ mod tests {
     #[test]
     fn the_users_languages_come_from_layouts_and_input_methods() {
         assert_eq!(kde_layouts("[Layout]\nLayoutList=us,ara\nUse=true\n"), vec!["us", "ara"]);
-        assert_eq!(fcitx5_methods("[Groups/0/Items/0]\nName=keyboard-us\n[Groups/0/Items/1]\nName=hangul\n"), vec!["keyboard-us", "hangul"]);
+        assert_eq!(
+            fcitx5_methods("[Groups/0/Items/0]\nName=keyboard-us\n[Groups/0/Items/1]\nName=hangul\n"),
+            vec!["keyboard-us", "hangul"]
+        );
         assert_eq!(gnome_sources("[('xkb', 'us'), ('xkb', 'gr'), ('ibus', 'mozc-jp')]"), vec!["us", "gr", "mozc-jp"]);
         assert_eq!(setxkbmap_layouts("rules:      evdev\nlayout:     us,de\n"), vec!["us", "de"]);
         let langs: Vec<_> = ["keyboard-us", "hangul", "gr", "mozc-jp", "xkb:ara::ara", "de(nodeadkeys)", "pinyin", "klingon"]

@@ -8,8 +8,8 @@
 //! Enter picks; only those keys are taken from other apps while picking.
 
 use super::{
-    center_rgb, finish_picker, freeze, magnifier_image, preview_text, show_hover, PickOutcome, PickerContext,
-    MAGNIFIER_RADIUS, PICKER_CANCELLED,
+    center_rgb, finish_picker, freeze, magnifier_image, preview_text, show_hover, PickOutcome, PickerContext, MAGNIFIER_RADIUS,
+    PICKER_CANCELLED,
 };
 use crate::config::HistoryStore;
 use crate::{AppWindow, PickerOverlay, PickerShieldWindow};
@@ -217,12 +217,7 @@ impl Sampler {
         let (conn, screen_num) = x11rb::connect(None).map_err(|err| format!("connect: {err}"))?;
         let setup = conn.setup();
         let screen = setup.roots.get(screen_num).ok_or("no root screen")?;
-        let bpp = setup
-            .pixmap_formats
-            .iter()
-            .find(|f| f.depth == screen.root_depth)
-            .map(|f| f.bits_per_pixel)
-            .unwrap_or(0);
+        let bpp = setup.pixmap_formats.iter().find(|f| f.depth == screen.root_depth).map(|f| f.bits_per_pixel).unwrap_or(0);
         if bpp != 32 {
             return Err(format!("unsupported screen format ({bpp} bits per pixel)"));
         }
@@ -343,7 +338,7 @@ fn zpixmap32_to_rgba(data: &[u8], pixels: usize, lsb_first: bool) -> Result<Vec<
         return Err(format!("short image: {} bytes for {pixels} pixels", data.len()));
     }
     let mut out = Vec::with_capacity(pixels * 4);
-    for px in data[..pixels * 4].chunks_exact(4) {
+    for px in data[..pixels * 4].as_chunks::<4>().0 {
         if lsb_first {
             out.extend_from_slice(&[px[2], px[1], px[0], 255]);
         } else {
@@ -388,13 +383,8 @@ pub(super) fn start(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore
     });
 }
 
-fn run_live(
-    ui_weak: &slint::Weak<AppWindow>,
-    overlay_weak: &slint::Weak<PickerOverlay>,
-) -> Result<PickOutcome, String> {
-    let grab = PointerGrab::acquire()
-        .map_err(|err| eprintln!("x11 pointer grab warning: {err}"))
-        .ok();
+fn run_live(ui_weak: &slint::Weak<AppWindow>, overlay_weak: &slint::Weak<PickerOverlay>) -> Result<PickOutcome, String> {
+    let grab = PointerGrab::acquire().map_err(|err| eprintln!("x11 pointer grab warning: {err}")).ok();
     let sampler = Sampler::connect()?;
 
     let screen = (0, 0, sampler.width, sampler.height);
@@ -407,7 +397,7 @@ fn run_live(
     // The newest hover state, and whether the UI already has an update
     // queued. If the UI is busy we just replace the data instead of queuing
     // another update, so updates can't pile up and lag behind the mouse.
-    type Hover = (crate::color::Rgb, Vec<u8>, i32, i32);  // color, pixels, cursor x, y
+    type Hover = (crate::color::Rgb, Vec<u8>, i32, i32); // color, pixels, cursor x, y
     let newest: Arc<Mutex<Option<Hover>>> = Arc::new(Mutex::new(None));
     let queued = Arc::new(AtomicBool::new(false));
 
@@ -440,10 +430,7 @@ fn run_live(
         prev_right = right;
 
         // Redraw only when the position or the pixels changed.
-        let changed = last
-            .as_ref()
-            .map(|(lx, ly, la)| *lx != x || *ly != y || *la != area)
-            .unwrap_or(true);
+        let changed = last.as_ref().map(|(lx, ly, la)| *lx != x || *ly != y || *la != area).unwrap_or(true);
         if changed {
             *newest.lock().unwrap() = Some((rgb, area.clone(), x, y));
             if queued.swap(true, Ordering::SeqCst) {
@@ -477,9 +464,7 @@ fn run_live(
                     let h = (OVERLAY_HEIGHT as f32 * scale).ceil() as i32;
                     let monitor = monitor_at(&monitors, x, y, screen);
                     let (pos_x, pos_y) = overlay_position(x, y, w.max(OVERLAY_WIDTH), h, monitor);
-                    overlay
-                        .window()
-                        .set_position(LogicalPosition::new(pos_x as f32 / scale, pos_y as f32 / scale));
+                    overlay.window().set_position(LogicalPosition::new(pos_x as f32 / scale, pos_y as f32 / scale));
                     overlay.show().ok();
                 }
             });
@@ -492,12 +477,7 @@ fn run_live(
 
 /// Freeze-frame picking on X11 (only with ARCHTOYS_PICKER=freeze; mainly
 /// for testing the Wayland picker on an X11 machine).
-pub(super) fn start_freeze(
-    ui_weak: slint::Weak<AppWindow>,
-    history_store: HistoryStore,
-    context: PickerContext,
-    hid_window: bool,
-) {
+pub(super) fn start_freeze(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore, context: PickerContext, hid_window: bool) {
     thread::spawn(move || {
         if hid_window {
             thread::sleep(Duration::from_millis(250));

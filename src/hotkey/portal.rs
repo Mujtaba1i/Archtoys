@@ -49,10 +49,7 @@ impl PortalShortcut {
             }
         });
 
-        Self {
-            commands: Mutex::new(tx),
-            fallback,
-        }
+        Self { commands: Mutex::new(tx), fallback }
     }
 
     /// Changing a hotkey from inside Archtoys only works with the X11 fallback.
@@ -103,12 +100,12 @@ fn bind(conn: &Connection, shortcuts: &[Shortcut]) -> Result<(String, Vec<String
     let mut options = portal::options(&token);
     options.insert("session_handle_token", Value::from(session_token));
     let session = match portal::call(conn, INTERFACE, "CreateSession", &(options,), &token)? {
-        Outcome::Success(results) => portal::result_string(&results, "session_handle")
-            .ok_or("GlobalShortcuts: no session_handle in reply")?,
+        Outcome::Success(results) => {
+            portal::result_string(&results, "session_handle").ok_or("GlobalShortcuts: no session_handle in reply")?
+        }
         Outcome::Cancelled => return Err("GlobalShortcuts: session was refused".into()),
     };
-    let session_path = OwnedObjectPath::try_from(session.clone())
-        .map_err(|err| format!("GlobalShortcuts: bad session path: {err}"))?;
+    let session_path = OwnedObjectPath::try_from(session.clone()).map_err(|err| format!("GlobalShortcuts: bad session path: {err}"))?;
 
     // BindShortcuts. `preferred_trigger` is only a suggestion: the first time,
     // the desktop asks the user; after that it keeps its own setting.
@@ -135,8 +132,7 @@ fn bind(conn: &Connection, shortcuts: &[Shortcut]) -> Result<(String, Vec<String
 }
 
 fn list_shortcuts(conn: &Connection, session: &str, ids: &[&str]) -> Result<Vec<String>, String> {
-    let session_path =
-        OwnedObjectPath::try_from(session.to_string()).map_err(|err| format!("bad session path: {err}"))?;
+    let session_path = OwnedObjectPath::try_from(session.to_string()).map_err(|err| format!("bad session path: {err}"))?;
     let token = portal::new_token("archtoys_list");
     let options = portal::options(&token);
     match portal::call(conn, INTERFACE, "ListShortcuts", &(session_path, options), &token)? {
@@ -170,20 +166,13 @@ fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiv
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     portal::register_host_app(&conn, "archtoys");
 
-    let probe = Proxy::new(&conn, portal::DESTINATION, portal::PATH, INTERFACE)
-        .map_err(|err| format!("GlobalShortcuts proxy: {err}"))?;
-    let version: u32 = probe
-        .get_property("version")
-        .map_err(|_| "this desktop has no GlobalShortcuts portal".to_string())?;
+    let probe = Proxy::new(&conn, portal::DESTINATION, portal::PATH, INTERFACE).map_err(|err| format!("GlobalShortcuts proxy: {err}"))?;
+    let version: u32 = probe.get_property("version").map_err(|_| "this desktop has no GlobalShortcuts portal".to_string())?;
     eprintln!("hotkey: GlobalShortcuts portal version {version}");
 
     // Listen before binding, so nothing is missed.
-    let activated = probe
-        .receive_signal("Activated")
-        .map_err(|err| format!("GlobalShortcuts subscribe: {err}"))?;
-    let changed = probe
-        .receive_signal("ShortcutsChanged")
-        .map_err(|err| format!("GlobalShortcuts subscribe: {err}"))?;
+    let activated = probe.receive_signal("Activated").map_err(|err| format!("GlobalShortcuts subscribe: {err}"))?;
+    let changed = probe.receive_signal("ShortcutsChanged").map_err(|err| format!("GlobalShortcuts subscribe: {err}"))?;
 
     let (session, descriptions) = bind(&conn, shortcuts)?;
     on_status(HotkeyStatus::SystemManaged(descriptions));
@@ -236,9 +225,8 @@ fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiv
     }
 
     for message in activated {
-        let Ok((path, shortcut_id, _timestamp, _options)) = message
-            .body()
-            .deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>()
+        let Ok((path, shortcut_id, _timestamp, _options)) =
+            message.body().deserialize::<(OwnedObjectPath, String, u64, HashMap<String, OwnedValue>)>()
         else {
             continue;
         };

@@ -82,11 +82,7 @@ fn normalize_captured_hotkey_key(raw: &str) -> Option<String> {
     let token = trimmed.strip_prefix("Key.").unwrap_or(trimmed);
     let upper = token.to_ascii_uppercase();
 
-    if matches!(
-        upper.as_str(),
-        "CTRL" | "CONTROL" | "SHIFT" | "ALT" | "META" | "SUPER" | "CMD" | "COMMAND" | "WIN"
-            | "WINDOWS"
-    ) {
+    if matches!(upper.as_str(), "CTRL" | "CONTROL" | "SHIFT" | "ALT" | "META" | "SUPER" | "CMD" | "COMMAND" | "WIN" | "WINDOWS") {
         return None;
     }
 
@@ -115,20 +111,12 @@ fn normalize_captured_hotkey_key(raw: &str) -> Option<String> {
                 if ch.is_ascii_digit() {
                     return Some(ch.to_string());
                 }
-                if matches!(
-                    ch,
-                    '`' | '\\' | '[' | ']' | ',' | '=' | '-' | '.' | '\'' | ';' | '/'
-                ) {
+                if matches!(ch, '`' | '\\' | '[' | ']' | ',' | '=' | '-' | '.' | '\'' | ';' | '/') {
                     return Some(ch.to_string());
                 }
             }
 
-            if upper.starts_with('F')
-                && upper
-                    .strip_prefix('F')
-                    .and_then(|n| n.parse::<u8>().ok())
-                    .is_some_and(|n| (1..=24).contains(&n))
-            {
+            if upper.starts_with('F') && upper.strip_prefix('F').and_then(|n| n.parse::<u8>().ok()).is_some_and(|n| (1..=24).contains(&n)) {
                 return Some(upper);
             }
 
@@ -137,21 +125,13 @@ fn normalize_captured_hotkey_key(raw: &str) -> Option<String> {
     }
 }
 
-pub fn build_hotkey_from_capture(
-    key_text: &str,
-    ctrl: bool,
-    alt: bool,
-    shift: bool,
-    meta: bool,
-) -> Result<String, String> {
+pub fn build_hotkey_from_capture(key_text: &str, ctrl: bool, alt: bool, shift: bool, meta: bool) -> Result<String, String> {
     if !(ctrl || alt || shift || meta) {
-        return Err(
-            "hotkey must include at least one modifier (Ctrl, Alt, Shift, Super)".to_string(),
-        );
+        return Err("hotkey must include at least one modifier (Ctrl, Alt, Shift, Super)".to_string());
     }
 
-    let key = normalize_captured_hotkey_key(key_text)
-        .ok_or_else(|| "press a non-modifier key together with your modifier(s)".to_string())?;
+    let key =
+        normalize_captured_hotkey_key(key_text).ok_or_else(|| "press a non-modifier key together with your modifier(s)".to_string())?;
 
     let mut parts: Vec<String> = vec![];
     if ctrl {
@@ -224,10 +204,7 @@ struct X11Key {
 }
 
 enum Backend {
-    X11 {
-        manager: GlobalHotKeyManager,
-        keys: Arc<Mutex<Vec<X11Key>>>,
-    },
+    X11 { manager: GlobalHotKeyManager, keys: Arc<Mutex<Vec<X11Key>>> },
     Portal(portal::PortalShortcut),
 }
 
@@ -260,12 +237,8 @@ impl HotkeyService {
             .collect();
         let texts: Vec<String> = shortcuts.iter().map(|s| s.text.clone()).collect();
 
-        let forced_x11 = std::env::var("ARCHTOYS_HOTKEY_BACKEND")
-            .map(|v| v.eq_ignore_ascii_case("x11"))
-            .unwrap_or(false);
-        let wayland = std::env::var("XDG_SESSION_TYPE")
-            .map(|v| v.eq_ignore_ascii_case("wayland"))
-            .unwrap_or(false);
+        let forced_x11 = std::env::var("ARCHTOYS_HOTKEY_BACKEND").map(|v| v.eq_ignore_ascii_case("x11")).unwrap_or(false);
+        let wayland = std::env::var("XDG_SESSION_TYPE").map(|v| v.eq_ignore_ascii_case("wayland")).unwrap_or(false);
 
         if wayland && !forced_x11 {
             // The portal answers asynchronously (the desktop may show a
@@ -423,10 +396,7 @@ mod tests {
     fn default_hotkey_parses() {
         assert!(parse_hotkey_text(DEFAULT_HOTKEY_TEXT).is_ok());
         assert!(parse_hotkey_text(DEFAULT_TEXT_HOTKEY_TEXT).is_ok());
-        assert_ne!(
-            parse_hotkey_text(DEFAULT_HOTKEY_TEXT).unwrap().0.id(),
-            parse_hotkey_text(DEFAULT_TEXT_HOTKEY_TEXT).unwrap().0.id()
-        );
+        assert_ne!(parse_hotkey_text(DEFAULT_HOTKEY_TEXT).unwrap().0.id(), parse_hotkey_text(DEFAULT_TEXT_HOTKEY_TEXT).unwrap().0.id());
         assert_eq!(normalize_hotkey_text(" ctrl + win + c "), "ctrl+Super+c");
     }
 }

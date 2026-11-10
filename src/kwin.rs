@@ -136,12 +136,11 @@ fn run(plugin: &str, name: &str, js: &str) -> Result<(), String> {
     std::fs::write(&path, js).map_err(|err| format!("writing the KWin script: {err}"))?;
 
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
-    let scripting = Proxy::new(&conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting")
-        .map_err(|err| format!("KWin scripting: {err}"))?;
+    let scripting =
+        Proxy::new(&conn, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting").map_err(|err| format!("KWin scripting: {err}"))?;
     let _: bool = scripting.call("unloadScript", &(plugin,)).unwrap_or(false);
-    let id: i32 = scripting
-        .call("loadScript", &(path.to_string_lossy().as_ref(), plugin))
-        .map_err(|err| format!("KWin loadScript: {err}"))?;
+    let id: i32 =
+        scripting.call("loadScript", &(path.to_string_lossy().as_ref(), plugin)).map_err(|err| format!("KWin loadScript: {err}"))?;
     if id < 0 {
         return Err("KWin refused the script".to_string());
     }

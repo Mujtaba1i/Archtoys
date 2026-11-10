@@ -78,11 +78,7 @@ pub(crate) fn lightness(i: usize) -> f32 {
 #[inline]
 pub(crate) fn name(i: usize) -> Name {
     let r: &[u8; NAME] = record(name_offset(i));
-    Name {
-        lab: [le_f32(r, 0), le_f32(r, 4), le_f32(r, 8)],
-        rgb: (r[12], r[13], r[14]),
-        name: le_text(r, 15),
-    }
+    Name { lab: [le_f32(r, 0), le_f32(r, 4), le_f32(r, 8)], rgb: (r[12], r[13], r[14]), name: le_text(r, 15) }
 }
 
 /// One search entry. Matching reads only the fields; the name, color and
@@ -223,9 +219,7 @@ fn build() -> (Vec<u8>, String) {
         }
         let lab = rgb_to_oklab(rgb);
         let hue = lab[2].atan2(lab[1]).to_degrees().rem_euclid(360.0);
-        let quality = if good.contains(&norm) { 5 } else { 0 }
-            + if is_css { 3 } else { 0 }
-            + if norm.len() <= 10 { 2 } else { 0 };
+        let quality = if good.contains(&norm) { 5 } else { 0 } + if is_css { 3 } else { 0 } + if norm.len() <= 10 { 2 } else { 0 };
         pool.push(Pooled { name_index, norm, lch: [lab[0], lab[1].hypot(lab[2]), hue], quality });
     };
     for (k, (name, rgb)) in CSS_NAMES.iter().enumerate() {
@@ -250,11 +244,8 @@ fn build() -> (Vec<u8>, String) {
         bin.push(u8::try_from(s.len()).expect("a name longer than 255 bytes"));
         text.push_str(s);
     };
-    let names: Vec<(&str, Rgb, [f32; 3])> = csv
-        .iter()
-        .map(|e| (e.name, e.rgb, e.lab))
-        .chain(CSS_NAMES.iter().map(|(n, rgb)| (*n, *rgb, rgb_to_oklab(*rgb))))
-        .collect();
+    let names: Vec<(&str, Rgb, [f32; 3])> =
+        csv.iter().map(|e| (e.name, e.rgb, e.lab)).chain(CSS_NAMES.iter().map(|(n, rgb)| (*n, *rgb, rgb_to_oklab(*rgb)))).collect();
 
     // the words, and where each first appears in a search form
     let mut word_counts: HashMap<String, (u32, usize)> = HashMap::new();

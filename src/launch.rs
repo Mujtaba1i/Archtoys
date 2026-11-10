@@ -20,11 +20,7 @@ fn clean_environment(command: &mut Command, in_appimage: bool, host_library_path
 /// A command for a program outside the app.
 pub fn outside_command(program: &str) -> Command {
     let mut command = Command::new(program);
-    clean_environment(
-        &mut command,
-        std::env::var_os("APPIMAGE").is_some(),
-        std::env::var_os("ARCHTOYS_HOST_LD_LIBRARY_PATH"),
-    );
+    clean_environment(&mut command, std::env::var_os("APPIMAGE").is_some(), std::env::var_os("ARCHTOYS_HOST_LD_LIBRARY_PATH"));
     command
 }
 
@@ -38,15 +34,25 @@ pub fn spawn_and_reap(mut command: Command) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Where "Buy me a coffee" goes: a small page in the repo (GitHub Pages,
+/// docs/support/) that forwards to Ko-fi, so the Ko-fi link can change, or
+/// support can stop, without a new release of the app. The README button and
+/// .github/FUNDING.yml point at the same address (a CI check keeps them equal).
+pub const SUPPORT_URL: &str = "https://mujtaba1i.github.io/Archtoys/support/";
+
+/// Opens the support page in the browser. The app sends nothing itself.
+pub fn open_support_page() -> std::io::Result<()> {
+    let mut command = outside_command("xdg-open");
+    command.arg(SUPPORT_URL);
+    spawn_and_reap(command)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn library_path(command: &Command) -> Option<Option<OsString>> {
-        command
-            .get_envs()
-            .find(|(key, _)| *key == "LD_LIBRARY_PATH")
-            .map(|(_, value)| value.map(|v| v.to_owned()))
+        command.get_envs().find(|(key, _)| *key == "LD_LIBRARY_PATH").map(|(_, value)| value.map(|v| v.to_owned()))
     }
 
     #[test]
@@ -68,5 +74,13 @@ mod tests {
         let mut command = Command::new("true");
         clean_environment(&mut command, true, None);
         assert_eq!(library_path(&command), Some(None)); // removed
+    }
+
+    #[test]
+    fn the_support_page_is_this_repos_github_pages_page() {
+        // github.com/<owner>/<repo> -> <owner>.github.io/<repo>/support/
+        let repo = env!("CARGO_PKG_REPOSITORY").trim_end_matches('/');
+        let (owner, name) = repo.trim_start_matches("https://github.com/").split_once('/').unwrap();
+        assert_eq!(SUPPORT_URL, format!("https://{}.github.io/{name}/support/", owner.to_lowercase()));
     }
 }
