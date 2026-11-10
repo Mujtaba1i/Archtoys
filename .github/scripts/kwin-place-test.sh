@@ -68,6 +68,40 @@ where() { local tag; tag="WHERE$(date +%s%N)"
   kwin "$MAIN print(\"$tag \" + (w ? w.frameGeometry.x + \",\" + w.frameGeometry.y + \" \" + w.frameGeometry.width + \"x\" + w.frameGeometry.height : \"none\"));"
   grep -ao "$tag .*" /tmp/kwin.log | cut -d" " -f2- ; }  # -a: the debug log has a few binary bytes
 
+# Issue #11, again: Archtoys scaled on its own (SLINT_SCALE_FACTOR=1.5) with a
+# saved size. Slint could "correct" the window to the layout 520 px wide as it
+# appeared, and Archtoys set the saved size again a moment later: the size
+# popped, and on KDE the window crept to the top left. It must open at its saved
+# size (700x640 at 1.5 = 1050x960, plus the KWin frame), keep its place and size
+# through closes and reopens, and never show another size (v0.7.2 failed this
+# every time: at the wrong size, or at the right one after showing 520 px first).
+sized() {  # "x,y WxH" -> "its saved size", or the size it has
+  local s=${1#* } w h; w=${s%x*}; h=${s#*x}
+  if [ "${w:-0}" -ge 1048 ] && [ "${w:-0}" -le 1062 ] && [ "${h:-0}" -ge 958 ] && [ "${h:-0}" -le 1000 ]; then echo "its saved size"; else echo "${s:-nothing}"; fi; }
+H3="$(mktemp -d)"; mkdir -p "$H3/.config/archtoys-color-picker"
+echo "{\"last_page\":1,\"window_size\":[700,640],\"window_geometry\":[600,200,1050,996]}" > "$H3/.config/archtoys-color-picker/config.json"
+# every size the window has from the moment KWin adds it, so a jump shows
+kwin "(workspace.windowAdded || workspace.clientAdded).connect(w => { if (w.caption !== \"Archtoys\") return;
+  print(\"SIZES \" + w.frameGeometry.width + \"x\" + w.frameGeometry.height);
+  w.frameGeometryChanged.connect(() => print(\"SIZES \" + w.frameGeometry.width + \"x\" + w.frameGeometry.height)); });"
+SLINT_SCALE_FACTOR=1.5 HOME="$H3" "$BIN" > /tmp/app.log 2>&1 & app=$!
+sleep 4
+first="$(where)"; echo "scaled 1.5, saved 700x640 at 600,200: $first"
+check "Scaled 1.5 with a saved size: opens at" "its saved size" "$(sized "$first")"
+for _ in 1 2 3; do
+  kwin "$MAIN w.closeWindow();"; sleep 1.5
+  SLINT_SCALE_FACTOR=1.5 HOME="$H3" "$BIN" >/dev/null 2>&1; sleep 3
+done
+got="$(where)"; echo "after 3 closes and reopens: $got"
+check "Scaled 1.5, 3 closes and reopens: place" "600,200" "${got%% *}"
+check "Scaled 1.5, 3 closes and reopens: size" "its saved size" "$(sized "$got")"
+# never shown at another size, not even for a moment (4 openings)
+seen="$(grep -ao "SIZES [0-9]*x[0-9]*" /tmp/kwin.log | cut -d" " -f2 | while read -r z; do sized "0,0 $z"; done | sort | uniq -c | sed "s/^ *//" | tr "\n" ";" )"
+echo "sizes the window had: $seen"
+other="$(grep -ao "SIZES [0-9]*x[0-9]*" /tmp/kwin.log | cut -d" " -f2 | while read -r z; do [ "$(sized "0,0 $z")" = "its saved size" ] || echo "$z"; done | sort -u | tr "\n" " ")"
+check "Scaled 1.5: never shown at another size first" "no other size" "${other:-no other size}"
+kill $app; sleep 1
+
 H="$(mktemp -d)"; mkdir -p "$H/.config/archtoys-color-picker"; echo "{\"last_page\":1}" > "$H/.config/archtoys-color-picker/config.json"
 HOME="$H" "$BIN" > /tmp/app.log 2>&1 & app=$!
 sleep 4

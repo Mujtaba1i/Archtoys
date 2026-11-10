@@ -1,0 +1,31 @@
+# Dependabot: once a week, one pull request for the Rust libraries and one for
+# the GitHub Actions (their pinned commits). CI runs on each, including the
+# benchmark against main. Merged, they go in the release notes' folded
+# "Technical updates (by Dependabot)" panel (release_notes.py).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # libraries Archtoys uses through others too (most of the lock file),
+    # not only the ones in Cargo.toml
+    allow:
+      - dependency-type: all
+    groups:
+      rust-libraries:
+        patterns: ["*"]
+    commit-message:
+      prefix: "Bump"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "Bump"

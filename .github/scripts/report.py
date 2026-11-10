@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 ICON = {"success": "✅", "failure": "❌", "cancelled": "⚪", "skipped": "⏭️"}
 
@@ -271,8 +272,40 @@ def gh(*args, check=True):
 TS = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")
 
 
-def log_excerpt(repo, job_id):
-    text = gh("api", f"repos/{repo}/actions/jobs/{job_id}/logs", check=False)
+def run_gh(*args):
+    """gh, keeping its exit code and error message (tests replace this)."""
+    return subprocess.run(["gh", *args], capture_output=True, text=True)
+
+
+# gh run view --log prefixes each line with the job and step names
+RUN_VIEW = re.compile(r"^[^\t]*\t[^\t]*\t")
+
+
+def fetch_log(repo, job_id, tries=3, wait=10):
+    """A finished job's log, or ("", why) when GitHub didn't give it. Every
+    failure issue so far had an empty log because the error was thrown away:
+    now it is kept, the fetch is tried again (a log can take a moment to be
+    ready after its job ends), and `gh run view --log` is the second way."""
+    why = ""
+    for attempt in range(tries):
+        if attempt:
+            time.sleep(wait)
+        r = run_gh("api", f"repos/{repo}/actions/jobs/{job_id}/logs")
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout, ""
+        why = (r.stderr or "").strip().splitlines()[-1:] or ["GitHub returned an empty log"]
+        r = run_gh("run", "view", "--job", str(job_id), "--log", "-R", repo)
+        if r.returncode == 0 and r.stdout.strip():
+            return "\n".join(RUN_VIEW.sub("", line) for line in r.stdout.splitlines()), ""
+        why = why + ((r.stderr or "").strip().splitlines()[-1:])
+    return "", "; ".join(w for w in why if w)
+
+
+def log_excerpt(repo, job_id, tries=3, wait=10):
+    text, why = fetch_log(repo, job_id, tries, wait)
+    if not text:
+        return "", (f"(Archtoys couldn't fetch this job's log: {why}. "
+                    "The link above opens the full log on GitHub.)")
     lines = [TS.sub("", l) for l in text.splitlines()]
     errors = [l for l in lines if "##[error]" in l or l.startswith("::error") or "error:" in l.lower()][:15]
     clean = lambda ls: "\n".join(l.replace("```", "'''") for l in ls)  # noqa: E731

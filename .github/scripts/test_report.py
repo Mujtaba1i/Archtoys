@@ -94,3 +94,40 @@ class Report(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LogExcerpt(unittest.TestCase):
+    """Every failure issue had an empty "Last 60 log lines": the fetch's error was lost."""
+
+    def setUp(self):
+        self.calls, self.answers = [], []
+        self._run_gh, report.run_gh = report.run_gh, self.fake
+        self._sleep, report.time.sleep = report.time.sleep, lambda s: None
+
+    def tearDown(self):
+        report.run_gh, report.time.sleep = self._run_gh, self._sleep
+
+    def fake(self, *args):
+        self.calls.append(args[0])
+        code, out, err = self.answers.pop(0) if self.answers else (1, "", "HTTP 404: Not Found")
+        return report.subprocess.CompletedProcess(args, code, out, err)
+
+    def test_a_log_that_isnt_ready_yet_is_fetched_again(self):
+        self.answers = [(1, "", "HTTP 404"), (1, "", "no log"), (0, "2026-11-08T10:00:00.1Z step\n2026-11-08T10:00:01.1Z ##[error]boom\n", "")]
+        errors, tail = report.log_excerpt("o/r", 5)
+        self.assertIn("##[error]boom", errors)
+        self.assertIn("step", tail)
+
+    def test_the_second_way_strips_job_and_step_names(self):
+        self.answers = [(1, "", "HTTP 404"), (0, "Wait\tWait for CI\t2026-11-08T10:00:00.1Z ::error::CI failed\n", "")]
+        errors, tail = report.log_excerpt("o/r", 5)
+        self.assertEqual(errors, "::error::CI failed")
+        self.assertNotIn("Wait for CI\t", tail)
+
+    def test_no_log_says_why_instead_of_an_empty_box(self):
+        errors, tail = report.log_excerpt("o/r", 5)
+        self.assertEqual(errors, "")
+        self.assertIn("couldn't fetch this job's log", tail)
+        self.assertIn("HTTP 404: Not Found", tail)
+        self.assertIn("link above", tail)
+        self.assertEqual(len(self.calls), 6)  # 3 tries, 2 ways each

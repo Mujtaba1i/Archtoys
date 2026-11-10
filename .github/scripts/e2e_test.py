@@ -267,7 +267,7 @@ def main():
 # Where things are, in the default window (520 x 560, the sidebar closed).
 # Pinned icons ("rail", window 540 wide) for the pages and Settings.
 AT = {
-    "menu": (21, 20),
+    "menu": (30, 20),  # on the sidebar's icon column (v0.7.3)
     "home_picker_card": (127, 175),
     "pick": (66, 66),
     "history": [(143, 66), (175, 66), (207, 66), (239, 66)],
@@ -291,12 +291,13 @@ AT = {
     "s_minimize": (486, 301),
     "s_show_name": (486, 376),
     "s_gradient": (464, 460),
-    # Settings (rail): scrolled to the end
-    "s_autostart": (486, 196),
-    "s_tray": (486, 271),
-    "s_light": (346, 344),
-    "s_dark": (404, 344),
-    "s_report": (472, 500),
+    # Settings (rail): scrolled to the end (v0.7.3: Buy me a coffee above Report)
+    "s_autostart": (486, 104),
+    "s_tray": (486, 179),
+    "s_light": (343, 251),
+    "s_dark": (402, 251),
+    "s_coffee": (467, 407),
+    "s_report": (470, 500),
 }
 PICKER = {"last_page": 1, "last_color": [45, 92, 118],
           "history": [[45, 92, 118], [224, 64, 48], [32, 160, 96], [240, 192, 32]]}
@@ -553,6 +554,17 @@ def checks():
         return bool(wait_for(lambda: app.config().get("setting_minimize_tray") is False, 3)), \
             f"setting_minimize_tray {app.config().get('setting_minimize_tray')}"
 
+    @test("Support", "Buy me a coffee opens the support page")
+    def _():
+        app.click(*AT["s_coffee"], wait=1.5)
+        try:
+            with open(os.path.join(app.home, "opened.txt")) as f:
+                opened = f.read().split()
+        except OSError:
+            return False, "no browser was opened"
+        want = "https://mujtaba1i.github.io/Archtoys/support/"
+        return want in opened, f"opened {opened[-1] if opened else 'nothing'}"
+
     @test("Report", "Report a problem opens a filled-in GitHub issue")
     def _():
         app.click(*AT["s_report"], wait=1.5)
@@ -585,7 +597,10 @@ def checks():
             raise Skip("openbox isn't installed (the capture needs a window manager to go full screen)")
         keep = show_text(words, 900, 120)
         app.shot("text")
-        app.click(*AT["text_extract"], wait=2.5)
+        # the hotkey, not a click: the window manager's title bar moves the
+        # window's contents by its own height (22 px with Ubuntu's openbox)
+        xdo("key", "ctrl+super+t")
+        time.sleep(2.5)
         xdo("mousemove", 890, 110)
         xdo("mousedown", 1)
         xdo("mousemove", 1200, 150)

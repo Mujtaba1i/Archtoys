@@ -104,7 +104,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libx11-6 libxkbcommon0 libxkbcommon-x11-0 libxcursor1 libxi6 libxrender1 \
             libgl1 libegl1 libwayland-client0 libwayland-egl1 libfontconfig1 fonts-dejavu-core libgl1-mesa-dri \
-            xvfb xdotool >/dev/null
+            xvfb xdotool tesseract-ocr time >/dev/null   # Tesseract and GNU time: the text extraction rows
 
       - name: Download this release and the one before
         id: get

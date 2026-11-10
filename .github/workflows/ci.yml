@@ -33,6 +33,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: stable
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
 
@@ -114,6 +115,108 @@ jobs:
           # without the run summary: the scripts under test write their fake
           # releases there (they showed up as "COPR: build #5 for 0.3.1")
           env -u GITHUB_STEP_SUMMARY python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
+
+      # Code and project checks (v0.7.3). Each one is its own step that runs
+      # even when an earlier one failed, and writes a row to the run summary:
+      # what it checks, passed or not, and for a failure what it found and what
+      # to do (.github/scripts/check.sh).
+      - name: "Checks: summary table"
+        if: ${{ !cancelled() }}
+        run: printf '### Code and project checks\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "Code: formatting (cargo fmt)"
+        if: ${{ !cancelled() }}
+        run: >-
+          bash .github/scripts/check.sh "Formatting" "The code is formatted the same way everywhere (cargo fmt, settings in rustfmt.toml)"
+          "Run cargo fmt and commit the result. The lines below show where the code differs."
+          --keep '^(Diff in|[-+])' -- cargo fmt --check
+
+      - name: "Code: common Rust mistakes (clippy)"
+        if: ${{ !cancelled() }}
+        run: >-
+          bash .github/scripts/check.sh "Common mistakes" "Clippy finds no common Rust mistakes (warnings count as failures)"
+          "Each item below names the file and line and what clippy suggests; run cargo clippy --all-targets locally to see them, fix, and push."
+          --keep '^(warning|error)|-->|= help' -- cargo clippy --locked --all-targets -- -D warnings
+
+      - name: "Software centers: the metainfo and .desktop file are valid"
+        if: ${{ !cancelled() }}
+        run: |
+          sudo apt-get install -y appstream desktop-file-utils
+          rc=0  # every check here runs and reports, then the step fails if one did
+          bash .github/scripts/check.sh "Software centers" "The AppStream metainfo (what KDE Discover and GNOME Software show) is valid" \
+            "Fix the lines named below in packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml." \
+            -- appstreamcli validate --no-net --explain packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml || rc=1
+          bash .github/scripts/check.sh "Desktop file" "packaging/archtoys.desktop is valid (the app menu entry)" \
+            "Fix the keys named below in packaging/archtoys.desktop." \
+            --keep 'error' -- desktop-file-validate packaging/archtoys.desktop || rc=1
+          exit $rc
+
+      - name: "Buy me a coffee: every button points at the same support page"
+        if: ${{ !cancelled() }}
+        run: |
+          rc=0  # every check here runs and reports, then the step fails if one did
+          bash .github/scripts/check.sh "Support page" "The app, README, FUNDING.yml and metainfo all point at the same support page, and it works with and without a Ko-fi link" \
+            "Make every address equal to SUPPORT_URL in src/launch.rs (the lines below say which one differs)." \
+            -- python3 .github/scripts/check_support.py || rc=1
+          bash .github/scripts/check.sh "Ko-fi Worker" "The Cloudflare Worker passes supporters on correctly: right and wrong Ko-fi code, private supporters, Ko-fi's test, bad input, an expired GitHub token" \
+            "The failing case is named below; fix support/kofi-worker.js, then paste the new file into the Worker on Cloudflare." \
+            -- node support/kofi-worker.test.mjs || rc=1
+          # a warning only: a website being down must never hold back a release
+          bash .github/scripts/check.sh "Ko-fi page" "The Ko-fi page the support page forwards to exists" \
+            "Open the Ko-fi link in docs/support/index.html: if the page is gone, change the link (or empty it to pause support)." \
+            --warn -- bash -c 'link=$(grep -oP "<a id=\"kofi\" href=\"\K[^\"]*" docs/support/index.html); [ -z "$link" ] && exit 0; code=$(curl -s -o /dev/null -w "%{http_code}" -A "archtoys-ci" "$link"); echo "$link answered HTTP $code"; [ "$code" != 404 ] && [ "$code" -lt 500 ]'
+          exit $rc
+
+      # A crate with a known security hole fails CI (the RustSec database);
+      # the summary names the crate, the hole and the version that fixes it.
+      - name: "Security: no library with a known security hole (cargo deny advisories)"
+        if: ${{ !cancelled() }}
+        run: >-
+          bash .github/scripts/check.sh "Security advisories" "No library Archtoys uses has a known security hole (RustSec)"
+          "Update the library named below: cargo update -p NAME (the Solution line gives the version that fixes it), run the tests, commit Cargo.lock."
+          --keep '^(error|warning)\[|= (ID|Advisory|Solution|Announcement)|^[0-9]+ │' -- cargo deny check advisories
+
+  # A pull request's speed and memory against main's (a Dependabot update of
+  # Slint or winit, or a feature): the same benchmark as after a release
+  # (bench.sh), both built here. It reports in the run summary, never fails.
+  benchmark:
+    name: "Benchmark: this pull request vs main"
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev \
+            libxkbcommon-x11-0 libxcursor1 libxi6 fonts-dejavu-core xvfb xdotool tesseract-ocr time
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+
+      # both in the same target folder, so main's build reuses the libraries
+      - name: Build this pull request and main
+        run: |
+          cargo build --release --locked
+          cp target/release/archtoys "$RUNNER_TEMP/archtoys-pr"
+          git worktree add "$RUNNER_TEMP/main" "origin/${{ github.base_ref }}"
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/main/Cargo.toml" --target-dir target
+          cp target/release/archtoys "$RUNNER_TEMP/archtoys-main"
+
+      - name: Benchmark
+        env:
+          NEW_LABEL: this pull request
+          OLD_LABEL: ${{ github.base_ref }}
+          RUNS: 5
+        run: |
+          xvfb-run -a -s "-screen 0 1280x1024x24" \
+            bash .github/scripts/bench.sh "$RUNNER_TEMP/archtoys-pr" "$RUNNER_TEMP/archtoys-main"
 
   # KDE Plasma on Wayland, on a headless KWin: Plasma 5 on the runner (Ubuntu
   # 24.04 has 5.27), Plasma 6 in a Fedora container (they differ: KWin 6 holds
