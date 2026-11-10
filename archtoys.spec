@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.7.2
+Version:        0.7.3
 Release:        1%{?dist}
 Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
 
@@ -150,6 +150,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Tue Nov 10 2026 Mujtaba1i <mujtaba1i@github> - 0.7.3-1
+- Tests: the appimage package check closes the app not the launcher
+- The window opens at its saved size straight away when Archtoys is scaled on its own (SLINT_SCALE_FACTOR), instead of jumping to it, which on KDE could move it (issue #11). Report a problem counts each screen once and names the picker used last time. The menu button lines up with the sidebar's icons and the page name with the page. Buy me a coffee in Settings: a one-time tip on Ko-fi
+- Tests: libraries with known security holes fail CI (cargo deny advisories)
+- KDE Discover and GNOME Software show Archtoys' description, a screenshot and a Donate link; supporters who choose to be public are thanked in SUPPORTERS.md; releases come with SHA256SUMS
+- Tests: CI checks formatting, common mistakes, libraries with known security holes, the software-center file and the support page, each explaining what failed; failure issues show the job's log again; a fairer benchmark with more numbers, also for pull requests; Dependabot
+- README: Buy me a coffee, v0.7.3 done, the font finder moves to v0.7.4, then the Screen Ruler and Awake
+- Tests: the window-place test waits longer
+- fixed 2 known security holes (webbrowser , pulldown-cmark)
+
 * Sun Nov 08 2026 Mujtaba1i <mujtaba1i@github> - 0.7.2-1
 - CI: a shorter text extractor report
 - The color picker works again on two or more monitors on KDE Plasma (Wayland): the screens no longer stay black (issue #12). Report a problem also adds Archtoys' last messages, and fills in the desktop's version, the screens and their scale, Archtoys' own scale, CPU or OpenGL, and Text Extractor's state. archtoys --version (or -v) prints the version. The window keeps its size and its place: with Archtoys scaled on its own (SLINT_SCALE_FACTOR) it no longer gets a third smaller each time it is opened again, and on KDE Plasma (Wayland) it opens where you left it, also after a restart. Drag the bar at the top to move the window, for desktops that show no title bar (issue #11)
