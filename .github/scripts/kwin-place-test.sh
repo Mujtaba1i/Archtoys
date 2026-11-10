@@ -41,10 +41,18 @@ check() {  # check NAME EXPECTED GOT: one row, and a failure when they differ
   if [ "$2" = "$3" ]; then rows+=("| $1 | $2 | $3 | ✅ |"); else rows+=("| $1 | $2 | ${3:-nothing} | ❌ |"); fail "$1: expected $2, got ${3:-nothing}"; fi
 }
 fail() {
-  echo "::error title=Window place, $desktop::$*"
+  # every window KWin has (title [app]), so "none" can be told from a late window
+  windows_now=""
+  if declare -F kwin >/dev/null; then
+    local tag="WINDOWS$(date +%s%N)"
+    kwin "print(\"$tag \" + $WINDOWS.map(c => c.caption + \" [\" + c.resourceClass + \"]\").join(\" | \"));"
+    windows_now="$(grep -ao "$tag .*" /tmp/kwin.log | cut -d" " -f2-)"
+  fi
+  echo "::error title=Window place, $desktop::$* (windows KWin has: ${windows_now:-none})"
   report "❌ failed"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     { echo "<details><summary>KWin and Archtoys output</summary>"; echo; echo "\`\`\`"
+      echo "Windows KWin has: ${windows_now:-(not asked)}"
       grep -av "qt\.\|kf\.\|kwin_libinput\|kwin_wayland_backend\|^\s*$" /tmp/kwin.log 2>/dev/null | tail -15; echo "---"; tail -15 /tmp/app.log 2>/dev/null
       echo "\`\`\`"; echo "</details>"; echo; } >> "$GITHUB_STEP_SUMMARY"
   fi
@@ -67,6 +75,11 @@ MAIN="const w = $WINDOWS.find(c => c.caption === \"Archtoys\");"
 where() { local tag; tag="WHERE$(date +%s%N)"
   kwin "$MAIN print(\"$tag \" + (w ? w.frameGeometry.x + \",\" + w.frameGeometry.y + \" \" + w.frameGeometry.width + \"x\" + w.frameGeometry.height : \"none\"));"
   grep -ao "$tag .*" /tmp/kwin.log | cut -d" " -f2- ; }  # -a: the debug log has a few binary bytes
+# where, once the window is there: asks every second, up to 20 s (a first start
+# on a fresh runner with a debug build can take longer than a fixed wait)
+where_shown() { local got i
+  for i in $(seq 1 20); do got="$(where)"; [ -n "$got" ] && [ "$got" != none ] && break; done
+  echo "${got:-none}"; }
 
 # Issue #11, again: Archtoys scaled on its own (SLINT_SCALE_FACTOR=1.5) with a
 # saved size. Slint could "correct" the window to the layout 520 px wide as it
@@ -85,14 +98,13 @@ kwin "(workspace.windowAdded || workspace.clientAdded).connect(w => { if (w.capt
   print(\"SIZES \" + w.frameGeometry.width + \"x\" + w.frameGeometry.height);
   w.frameGeometryChanged.connect(() => print(\"SIZES \" + w.frameGeometry.width + \"x\" + w.frameGeometry.height)); });"
 SLINT_SCALE_FACTOR=1.5 HOME="$H3" "$BIN" > /tmp/app.log 2>&1 & app=$!
-sleep 4
-first="$(where)"; echo "scaled 1.5, saved 700x640 at 600,200: $first"
+first="$(where_shown)"; echo "scaled 1.5, saved 700x640 at 600,200: $first"
 check "Scaled 1.5 with a saved size: opens at" "its saved size" "$(sized "$first")"
 for _ in 1 2 3; do
   kwin "$MAIN w.closeWindow();"; sleep 1.5
-  SLINT_SCALE_FACTOR=1.5 HOME="$H3" "$BIN" >/dev/null 2>&1; sleep 3
+  SLINT_SCALE_FACTOR=1.5 HOME="$H3" "$BIN" >/dev/null 2>&1; where_shown >/dev/null
 done
-got="$(where)"; echo "after 3 closes and reopens: $got"
+got="$(where_shown)"; echo "after 3 closes and reopens: $got"
 check "Scaled 1.5, 3 closes and reopens: place" "600,200" "${got%% *}"
 check "Scaled 1.5, 3 closes and reopens: size" "its saved size" "$(sized "$got")"
 # never shown at another size, not even for a moment (4 openings)
@@ -104,22 +116,20 @@ kill $app; sleep 1
 
 H="$(mktemp -d)"; mkdir -p "$H/.config/archtoys-color-picker"; echo "{\"last_page\":1}" > "$H/.config/archtoys-color-picker/config.json"
 HOME="$H" "$BIN" > /tmp/app.log 2>&1 & app=$!
-sleep 4
-echo "opened (KWin places it): $(where)"
+echo "opened (KWin places it): $(where_shown)"
 # moved like a user would (the place only: Archtoys sets its own size)
 kwin "$MAIN w.frameGeometry = {x: 400, y: 300, width: w.frameGeometry.width, height: w.frameGeometry.height};"
 echo "moved to 400,300: $(where)"
 kwin "$MAIN w.closeWindow();"; sleep 1
-HOME="$H" "$BIN" >/dev/null 2>&1; sleep 3
-got="$(where)"; echo "closed and opened again: $got"
+HOME="$H" "$BIN" >/dev/null 2>&1
+got="$(where_shown)"; echo "closed and opened again: $got"
 check "Moved to 400,300, closed, opened again" "400,300" "${got%% *}"
 kill $app; sleep 1
 
 H2="$(mktemp -d)"; mkdir -p "$H2/.config/archtoys-color-picker"
 echo "{\"last_page\":1,\"window_geometry\":[700,250,800,600]}" > "$H2/.config/archtoys-color-picker/config.json"
 HOME="$H2" "$BIN" > /tmp/app.log 2>&1 & app=$!
-sleep 4
-got="$(where)"; echo "new start with 700,250 saved: $got"
+got="$(where_shown)"; echo "new start with 700,250 saved: $got"
 check "Started with 700,250 saved in config.json" "700,250" "${got%% *}"
 kill $app
 report "✅ passed"
