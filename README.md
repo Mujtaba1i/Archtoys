@@ -19,6 +19,8 @@ Wayland and X11 · at home on KDE Plasma · works offline
 [![AppImage](https://img.shields.io/badge/AppImage-any%20distro-informational)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/Mujtaba1i/Archtoys)](LICENSE)
 
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://mujtaba1i.github.io/Archtoys/support/)
+
 ![Archtoys picking a color, with the pixel magnifier next to the cursor](docs/screenshots/picker.png)
 
 </div>
@@ -315,10 +317,16 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, with the color
 - [x] A lighter, faster app and a much better Text Extractor in other languages (v0.7.1)
 - [x] The window opens where you left it and keeps its size, and its top bar moves it (v0.7.2)
 - [x] The color picker works again on two or more monitors on KDE Plasma (Wayland) (v0.7.2)
-- [ ] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.3)
-- [ ] Ideas for later: **Awake** (keep your PC from sleeping) and **Screen Ruler** (measure things on screen)
+- [x] The window opens at its saved size from the first frame, Report a problem counts each screen once, the menu button lines up with the sidebar, and a Buy me a coffee button (v0.7.3)
+- [ ] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.4)
+- [ ] **Screen Ruler**: measure things on screen (v0.7.5)
+- [ ] **Awake**: keep your PC from sleeping for as long as you choose (after the Screen Ruler)
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.
+
+## Support Archtoys
+
+Archtoys is free and always will be. If it saves you time, you can [buy me a coffee](https://mujtaba1i.github.io/Archtoys/support/) on Ko-fi: a one-time tip, no account needed. Tips are optional and don't buy features or support; they just help keep Archtoys going. Supporters who choose to show their name are thanked in [SUPPORTERS.md](SUPPORTERS.md). Thank you!
 
 ## Contributing
 
