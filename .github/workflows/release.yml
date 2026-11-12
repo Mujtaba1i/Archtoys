@@ -50,7 +50,7 @@ jobs:
       contents: read
       actions: read     # read the CI run's status
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts
 
@@ -70,7 +70,7 @@ jobs:
       sha: ${{ steps.prepare.outputs.sha }}
       notes: ${{ steps.prepare.outputs.notes }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0     # full history + tags, for the changelog
 
@@ -83,7 +83,7 @@ jobs:
     # Oldest supported Ubuntu LTS, so the binary runs on older distros too.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
@@ -98,7 +98,7 @@ jobs:
 
       # A release runs on a tag, and a tag can never read an earlier tag's cache, so
       # saving one here only fills GitHub's 10 GB cache storage.
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: false
 
@@ -138,7 +138,7 @@ jobs:
           (cd staging && tar -czf ../archtoys-linux-x86_64.tar.gz *)
           tar -tzf archtoys-linux-x86_64.tar.gz
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tarball
           path: archtoys-linux-x86_64.tar.gz
@@ -150,7 +150,7 @@ jobs:
     # Oldest supported Ubuntu LTS: the AppImage catalog tests on 22.04.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
@@ -168,7 +168,7 @@ jobs:
 
       # A release runs on a tag, and a tag can never read an earlier tag's cache, so
       # saving one here only fills GitHub's 10 GB cache storage.
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: false
 
@@ -214,7 +214,7 @@ jobs:
           fi
           cat smoke.log
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: appimage
           path: dist/Archtoys-*-x86_64.AppImage
@@ -229,7 +229,7 @@ jobs:
     # Oldest supported Ubuntu LTS, so one .deb works on Ubuntu 22.04+ and Debian 12+.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
@@ -244,7 +244,7 @@ jobs:
 
       # A release runs on a tag, and a tag can never read an earlier tag's cache, so
       # saving one here only fills GitHub's 10 GB cache storage.
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: false
 
@@ -311,7 +311,7 @@ jobs:
         if: always()
         run: docker rm -f clean || true
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: deb
           path: archtoys_*.deb
@@ -326,7 +326,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
           merge-multiple: true
@@ -341,7 +341,7 @@ jobs:
           ls | grep -vx SHA256SUMS | xargs sha256sum > SHA256SUMS
           cat SHA256SUMS
 
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ github.ref_name }}
           name: Archtoys ${{ github.ref_name }}
@@ -358,7 +358,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: deb
           path: deb
@@ -388,7 +388,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts
 
@@ -407,7 +407,7 @@ jobs:
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
@@ -417,7 +417,7 @@ jobs:
             packaging/aur-archtoys-bin/PKGBUILD
           grep -E '^pkg(ver|rel)=' packaging/aur-archtoys-bin/PKGBUILD
 
-      - uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
+      - uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
         with:
           pkgname: archtoys-bin
           pkgbuild: ./packaging/aur-archtoys-bin/PKGBUILD
@@ -437,7 +437,7 @@ jobs:
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
@@ -447,7 +447,7 @@ jobs:
             packaging/aur-archtoys/PKGBUILD
           grep -E '^pkg(ver|rel)=' packaging/aur-archtoys/PKGBUILD
 
-      - uses: KSXGitHub/github-actions-deploy-aur@a97f56a8425a7a7f3b8c58607f769c69b089cadb # v3.0.1
+      - uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
         with:
           pkgname: archtoys
           pkgbuild: ./packaging/aur-archtoys/PKGBUILD
@@ -491,7 +491,7 @@ jobs:
       actions: read     # read the failed job's log
       issues: write     # open / close the failure issue
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/scripts
 
