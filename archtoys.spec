@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.7.3
+Version:        0.7.4
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Thu Nov 12 2026 Mujtaba1i <mujtaba1i@github> - 0.7.4-1
+- Slint 1.18: smaller and lighter
+- CI: the end-to-end test runs on every push, failures name the real error, and the benchmark is fair to both builds
+- CI: fixed e2e test profile
+- Dependabot: major versions come as thier oen pull request
+- Restructure files:the frozen screen is shared, the interface is split by toy, and each toy wires its own buttons
+- NEW TOY! Screen Ruler: measure anything on screen
+- README changes plus conduct and a contributing guide
+- CI: the end-to-end test keeps each app in its own profile
+
 * Tue Nov 10 2026 Mujtaba1i <mujtaba1i@github> - 0.7.3-1
 - Tests: the appimage package check closes the app not the launcher
 - The window opens at its saved size straight away when Archtoys is scaled on its own (SLINT_SCALE_FACTOR), instead of jumping to it, which on KDE could move it (issue #11). Report a problem counts each screen once and names the picker used last time. The menu button lines up with the sidebar's icons and the page name with the page. Buy me a coffee in Settings: a one-time tip on Ko-fi
