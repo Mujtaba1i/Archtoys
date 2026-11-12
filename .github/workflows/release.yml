@@ -52,6 +52,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # the pushed commit: "prepare" moves the tag to the release commit,
+          # and checkout v7 refuses a tag that moved since the run started
+          ref: ${{ github.sha }}
           sparse-checkout: .github/scripts
 
       - name: Wait for CI on the tagged commit
@@ -390,6 +393,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # the pushed commit: "prepare" moves the tag to the release commit,
+          # and checkout v7 refuses a tag that moved since the run started
+          ref: ${{ github.sha }}
           sparse-checkout: .github/scripts
 
       - name: Check COPR's queue, then send the webhook
@@ -493,6 +499,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # the pushed commit: "prepare" moves the tag to the release commit,
+          # and checkout v7 refuses a tag that moved since the run started
+          ref: ${{ github.sha }}
           sparse-checkout: .github/scripts
 
       - name: Summarise and report failures
