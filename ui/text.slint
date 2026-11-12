@@ -256,8 +256,8 @@ export component TextExtractorPage inherits Rectangle {
 
     // --- Ready: Extract, the latest text, the history ---
     if root.state == 2 && root.detail < 0 : ScrollView {
-        viewport-width: self.visible-width;
-        viewport-height: ready-list.preferred-height;
+        content-width: self.visible-width;
+        content-height: ready-list.preferred-height;
         ready-list := VerticalLayout {
             width: parent.visible-width;
             padding: 20px;
@@ -415,8 +415,8 @@ export component TextExtractorPage inherits Rectangle {
     // --- One history entry, opened ---
     if root.state == 2 && root.detail >= 0 && root.detail < root.history.length : detail-view := ScrollView {
         property <TextEntry> entry: root.history[root.detail];
-        viewport-width: self.visible-width;
-        viewport-height: detail-list.preferred-height;
+        content-width: self.visible-width;
+        content-height: detail-list.preferred-height;
         detail-list := VerticalLayout {
             width: parent.visible-width;
             padding: 20px;

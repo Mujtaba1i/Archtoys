@@ -1106,7 +1106,7 @@ export component AppWindow inherits Window {
     }
     changed editor-open => {
         if self.editor-open {
-            body.viewport-y = 0;
+            body.content-y = 0;
             root.pen-hover = false;
             editor-keys.focus();
         } else {
@@ -1222,7 +1222,7 @@ export component AppWindow inherits Window {
         root.settings-open = false;
         root.search-open = true;
         root.search-highlight = -1;
-        body.viewport-y = 0;
+        body.content-y = 0;
         search-input.text = "";
         root.search-changed("");
         search-input.focus();
@@ -1486,7 +1486,7 @@ export component AppWindow inherits Window {
                             Flickable {
                                 x: 10px;
                                 width: parent.width - 10px;
-                                viewport-width: root.history-model.length * 32px;
+                                content-width: root.history-model.length * 32px;
                                 HorizontalLayout {
                                     spacing: 8px;
                                     alignment: start;
@@ -1538,8 +1538,8 @@ export component AppWindow inherits Window {
                             property <length> boxes-y: self.card-h + 14px;
                             property <length> shades-y: self.boxes-y + (self.box-rows == 0 ? 0px : self.box-rows * (self.box-h + self.box-gap) + 8px);
                             property <length> content-h: self.shades-y + 24px + 92px + root.pad;
-                            viewport-width: self.visible-width;
-                            viewport-height: root.search-open ? self.visible-height : Math.max(self.content-h, self.visible-height);
+                            content-width: self.visible-width;
+                            content-height: root.search-open ? self.visible-height : Math.max(self.content-h, self.visible-height);
 
                             // the search results, above the card
                             if root.search-t > 0.01 : Rectangle {
@@ -1571,21 +1571,21 @@ export component AppWindow inherits Window {
                                         property <length> card-h: self.card-w * 0.9;
                                         property <int> generation: root.search-generation;
                                         property <int> highlight: root.search-highlight;
-                                        viewport-height: Math.ceil(root.search-results.length / 5) * (self.card-h + self.gap) + 2 * self.edge;
+                                        content-height: Math.ceil(root.search-results.length / 5) * (self.card-h + self.gap) + 2 * self.edge;
 
-                                        changed generation => { self.viewport-y = 0; }
-                                        changed viewport-y => {
-                                            if -self.viewport-y + self.height > self.viewport-height - 2 * (self.card-h + self.gap) {
+                                        changed generation => { self.content-y = 0; }
+                                        changed content-y => {
+                                            if -self.content-y + self.height > self.content-height - 2 * (self.card-h + self.gap) {
                                                 root.search-load-more();
                                             }
                                         }
                                         // The arrow keys move the highlight: keep it in view.
                                         changed highlight => {
                                             if root.search-keyboard && self.highlight >= 0 {
-                                                if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) < -self.viewport-y {
-                                                    self.viewport-y = -Math.floor(self.highlight / 5) * (self.card-h + self.gap);
-                                                } else if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h + self.edge > -self.viewport-y + self.height {
-                                                    self.viewport-y = -(2 * self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h - self.height);
+                                                if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) < -self.content-y {
+                                                    self.content-y = -Math.floor(self.highlight / 5) * (self.card-h + self.gap);
+                                                } else if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h + self.edge > -self.content-y + self.height {
+                                                    self.content-y = -(2 * self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h - self.height);
                                                 }
                                             }
                                         }
@@ -1767,8 +1767,8 @@ export component AppWindow inherits Window {
                 if root.settings-t > 0.01 : settings-scroll := ScrollView {
                     x: (1 - root.settings-t) * 24px;
                     opacity: root.settings-t;
-                    viewport-width: self.visible-width;
-                    viewport-height: settings-list.preferred-height;
+                    content-width: self.visible-width;
+                    content-height: settings-list.preferred-height;
 
                     settings-list := VerticalLayout {
                         width: parent.visible-width;
@@ -1786,7 +1786,7 @@ export component AppWindow inherits Window {
                                 clicked => {
                                     if root.about-open {
                                         root.about-open = false;
-                                        settings-scroll.viewport-y = 0;
+                                        settings-scroll.content-y = 0;
                                     } else {
                                         root.close-settings();
                                     }
@@ -2038,7 +2038,7 @@ export component AppWindow inherits Window {
                                     text: "Open";
                                     clicked => {
                                         root.about-open = true;
-                                        settings-scroll.viewport-y = 0;
+                                        settings-scroll.content-y = 0;
                                     }
                                 }
                             }
@@ -2730,8 +2730,8 @@ export component AppWindow inherits Window {
                     TouchArea { }
 
                     ScrollView {
-                        viewport-width: self.visible-width;
-                        viewport-height: formats-list.preferred-height;
+                        content-width: self.visible-width;
+                        content-height: formats-list.preferred-height;
 
                         formats-list := VerticalLayout {
                             width: parent.visible-width;

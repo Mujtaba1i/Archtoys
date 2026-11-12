@@ -51,7 +51,7 @@ pub(crate) fn start_move(ui: &AppWindow) {
     let ui = ui.as_weak();
     slint::Timer::single_shot(std::time::Duration::ZERO, move || {
         if let Some(ui) = ui.upgrade() {
-            let _ = ui.window().try_dispatch_event(slint::platform::WindowEvent::PointerExited);
+            let _ = ui.window().dispatch_event_with_result(slint::platform::WindowEvent::PointerExited);
         }
     });
 }

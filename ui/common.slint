@@ -489,13 +489,17 @@ export component SettingCard inherits Rectangle {
                 font-weight: 700;
             }
             if root.subtitle != "" : Text {
+                // the width it really gets (the card minus its padding, gap and controls):
+                // Slint 1.18 measures a wrapped text's height at a wider width, so two-line
+                // subtitles counted as one line and Settings couldn't scroll to its end
+                width: root.width - 18px - 14px - 12px - controls.preferred-width;
                 text: root.subtitle;
                 color: Skin.text-muted;
                 font-size: 13px;
                 wrap: word-wrap;
             }
         }
-        VerticalLayout {
+        controls := VerticalLayout {
             alignment: center;
             @children
         }
