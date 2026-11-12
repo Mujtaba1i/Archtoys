@@ -36,7 +36,7 @@ pub(super) fn start(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore
                 });
             }
             Err(err) => {
-                eprintln!("wayland picker: freeze frame unavailable ({err}); using the system picker");
+                eprintln!("wayland picker: freeze frame unavailable ({err}), using the system picker");
                 run_legacy(ui_weak, history_store, context);
             }
         }

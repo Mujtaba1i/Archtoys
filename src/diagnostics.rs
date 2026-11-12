@@ -121,7 +121,7 @@ pub fn picker_to_save() -> Option<String> {
 fn picker_line(now: Option<&str>, last: Option<&str>) -> String {
     match (now, last) {
         (Some(now), _) => now.to_string(),
-        (None, Some(last)) => format!("{last} (last used; not since Archtoys started)"),
+        (None, Some(last)) => format!("{last} (last used, not since Archtoys started)"),
         (None, None) => "not used yet".to_string(),
     }
 }
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn the_picker_used_before_shows_until_one_is_used() {
         assert_eq!(picker_line(None, None), "not used yet");
-        assert_eq!(picker_line(None, Some("freeze frame (Wayland)")), "freeze frame (Wayland) (last used; not since Archtoys started)");
+        assert_eq!(picker_line(None, Some("freeze frame (Wayland)")), "freeze frame (Wayland) (last used, not since Archtoys started)");
         assert_eq!(picker_line(Some("live (X11)"), Some("freeze frame (Wayland)")), "live (X11)");
     }
 

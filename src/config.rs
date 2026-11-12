@@ -75,6 +75,33 @@ pub struct AppConfig {
     /// Keep line breaks (off: join the lines of a paragraph).
     #[serde(default = "default_true")]
     pub text_keep_lines: bool,
+    /// The Screen Ruler (v0.7.4): its hotkey, the mode it opens in (0: the
+    /// last one used, else 1 Bounds to 4 Vertical), the last one used (0
+    /// Bounds to 3 Vertical), the tolerance, − and + buttons for it instead
+    /// of the scroll wheel, and the units (0 px, 1 cm, 2 in).
+    #[serde(default = "default_ruler_hotkey")]
+    pub ruler_hotkey: String,
+    pub ruler_start: i32,
+    #[serde(default = "default_ruler_mode")]
+    pub ruler_mode: i32,
+    #[serde(default = "default_ruler_tolerance")]
+    pub ruler_tolerance: i32,
+    pub ruler_buttons: bool,
+    pub ruler_units: i32,
+    /// a measure may go on past its screen's edge (only offered with several screens)
+    pub ruler_cross: bool,
+}
+
+fn default_ruler_hotkey() -> String {
+    crate::hotkey::DEFAULT_RULER_HOTKEY_TEXT.to_string()
+}
+
+fn default_ruler_mode() -> i32 {
+    1 // Spacing
+}
+
+fn default_ruler_tolerance() -> i32 {
+    30
 }
 
 fn default_true() -> bool {
@@ -111,6 +138,13 @@ impl Default for AppConfig {
             text_tools: true,
             text_stay_minimized: false,
             text_keep_lines: true,
+            ruler_hotkey: default_ruler_hotkey(),
+            ruler_start: 0,
+            ruler_mode: default_ruler_mode(),
+            ruler_tolerance: default_ruler_tolerance(),
+            ruler_buttons: false,
+            ruler_units: 0,
+            ruler_cross: false,
         }
     }
 }
@@ -226,6 +260,13 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         text_tools: ui.get_setting_text_tools(),
         text_stay_minimized: ui.get_setting_text_stay_minimized(),
         text_keep_lines: ui.get_setting_text_keep_lines(),
+        ruler_hotkey: ui.get_setting_ruler_hotkey().to_string(),
+        ruler_start: ui.get_setting_ruler_start(),
+        ruler_mode: ui.get_setting_ruler_mode(),
+        ruler_tolerance: ui.get_setting_ruler_tolerance(),
+        ruler_buttons: ui.get_setting_ruler_buttons(),
+        ruler_units: ui.get_setting_ruler_units(),
+        ruler_cross: ui.get_setting_ruler_cross(),
     }
 }
 
@@ -256,7 +297,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
 
     crate::kwin::set_geometry(cfg.window_geometry);
     crate::diagnostics::set_last_picker(cfg.last_picker.clone());
-    ui.set_page(cfg.last_page.unwrap_or(0).clamp(0, 2));
+    ui.set_page(cfg.last_page.unwrap_or(0).clamp(0, 3));
     ui.set_sidebar_mode(cfg.sidebar_mode.clamp(0, 2));
     crate::ocr::set_enabled(cfg.text_enabled);
     if !cfg.text_hotkey.trim().is_empty() {
@@ -265,6 +306,15 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     ui.set_setting_text_tools(cfg.text_tools);
     ui.set_setting_text_stay_minimized(cfg.text_stay_minimized);
     ui.set_setting_text_keep_lines(cfg.text_keep_lines);
+    if !cfg.ruler_hotkey.trim().is_empty() {
+        ui.set_setting_ruler_hotkey(cfg.ruler_hotkey.clone().into());
+    }
+    ui.set_setting_ruler_start(cfg.ruler_start.clamp(0, 4));
+    ui.set_setting_ruler_mode(cfg.ruler_mode.clamp(0, 3));
+    ui.set_setting_ruler_tolerance(cfg.ruler_tolerance.clamp(0, 255));
+    ui.set_setting_ruler_buttons(cfg.ruler_buttons);
+    ui.set_setting_ruler_units(cfg.ruler_units.clamp(0, 2));
+    ui.set_setting_ruler_cross(cfg.ruler_cross);
 
     if !cfg.history.is_empty() {
         let mut guard = history_store.lock().unwrap();

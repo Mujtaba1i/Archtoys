@@ -71,3 +71,9 @@ pub(crate) fn sidebar_mode_changed(ui: &AppWindow, old: i32, new: i32) {
     let width = (w as f64 + extra - pinned_width(old)).clamp(crate::WINDOW_MIN_WIDTH + extra, crate::WINDOW_MAX_WIDTH + extra);
     window.set_size(to_physical((width as f32, h), scale));
 }
+
+/// How many screens there are (the same place counted once, like the frozen screen does).
+pub(crate) fn screen_count(ui: &AppWindow) -> usize {
+    let monitors = ui.window().with_winit_window(|w| w.available_monitors().collect::<Vec<_>>()).unwrap_or_default();
+    crate::freeze::one_per_place(monitors, |m| (m.position(), m.size())).len().max(1)
+}

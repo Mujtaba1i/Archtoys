@@ -2,6 +2,7 @@
 // those of the toy they were opened from (opened from Home: every toy's).
 // Everything it shows and changes belongs to AppWindow, bound below.
 import { ScrollView, AboutSlint } from "std-widgets.slint";
+import { ComboBox } from "std-widgets.slint";
 import { Skin, HeaderButton, PillButton, Switch, Segmented, SettingCard, SectionLabel } from "common.slint";
 
 export component SettingsPage inherits ScrollView {
@@ -49,6 +50,15 @@ export component SettingsPage inherits ScrollView {
     // app.slint's function and the hotkey recorder (outside this page)
     callback close-settings();
     callback focus-hotkey-recorder();
+    // the Screen Ruler (v0.7.4)
+    in-out property <string> setting-ruler-hotkey;
+    in-out property <string> ruler-hotkey-display;
+    in-out property <int> setting-ruler-start;
+    in-out property <bool> setting-ruler-buttons;
+    in-out property <int> setting-ruler-units;
+    in-out property <bool> setting-ruler-cross;
+    in property <bool> several-screens;
+    callback ruler-clear();
 
     content-width: self.visible-width;
     content-height: settings-list.preferred-height;
@@ -84,7 +94,7 @@ export component SettingsPage inherits ScrollView {
             }
         }
 
-        if !root.about-open && root.settings-scope != 2 : VerticalLayout {
+        if !root.about-open && (root.settings-scope == 0 || root.settings-scope == 1) : VerticalLayout {
             spacing: 10px;
             SectionLabel { text: "COLOR PICKER"; }
 
@@ -201,7 +211,7 @@ export component SettingsPage inherits ScrollView {
             }
         }
 
-        if !root.about-open && root.settings-scope != 1 : VerticalLayout {
+        if !root.about-open && (root.settings-scope == 0 || root.settings-scope == 2) : VerticalLayout {
             spacing: 10px;
             SectionLabel { text: "TEXT EXTRACTOR"; }
 
@@ -284,6 +294,77 @@ export component SettingsPage inherits ScrollView {
             }
         }
 
+        if !root.about-open && (root.settings-scope == 0 || root.settings-scope == 3) : VerticalLayout {
+            spacing: 10px;
+            SectionLabel { text: "SCREEN RULER"; }
+
+            SettingCard {
+                title: "Hotkey";
+                subtitle: root.hotkey-system-managed ? "Your desktop manages it. Click to change it in System Settings."
+                    : root.setting-hotkey-recording && root.hotkey-target == 2 ? "Press the new keys, or Esc to cancel"
+                    : "Opens the ruler from anywhere";
+                PillButton {
+                    text: root.hotkey-system-managed ? (root.ruler-hotkey-display == "" ? "Not set" : root.ruler-hotkey-display)
+                        : root.setting-hotkey-recording && root.hotkey-target == 2 ? "Press keys…" : root.setting-ruler-hotkey;
+                    highlighted: root.setting-hotkey-recording && root.hotkey-target == 2;
+                    clicked => {
+                        if root.hotkey-system-managed {
+                            root.open-hotkey-settings();
+                        } else {
+                            root.hotkey-target = 2;
+                            root.setting-hotkey-recording = true;
+                            root.focus-hotkey-recorder();
+                        }
+                    }
+                }
+            }
+            SettingCard {
+                title: "Change the tolerance with";
+                subtitle: "How much a color must differ to be an edge";
+                Segmented {
+                    options: ["Scroll wheel", "− and + buttons"];
+                    selected: root.setting-ruler-buttons ? 1 : 0;
+                    picked(i) => { root.setting-ruler-buttons = i == 1; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Mode when it opens";
+                subtitle: "The last one you used, or always one";
+                ComboBox {
+                    model: ["Last used", "Bounds", "Spacing", "Horizontal", "Vertical"];
+                    current-index: root.setting-ruler-start;
+                    selected => { root.setting-ruler-start = self.current-index; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Units";
+                subtitle: "cm and inches when the screen reports its size";
+                Segmented {
+                    options: ["px", "cm", "in"];
+                    selected: root.setting-ruler-units;
+                    picked(i) => { root.setting-ruler-units = i; root.settings-changed(); }
+                }
+            }
+            if root.several-screens : SettingCard {
+                title: "Across screens";
+                subtitle: root.setting-ruler-cross ? "A measure can go on to the next screen"
+                    : "A measure stops at the edge of its screen";
+                Switch {
+                    label: "Across screens";
+                    checked: root.setting-ruler-cross;
+                    toggled(on) => { root.setting-ruler-cross = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "History";
+                subtitle: "Sizes only, the last 500";
+                PillButton {
+                    text: "Clear";
+                    clicked => { root.ruler-clear(); }
+                }
+            }
+        }
+
         if !root.about-open : VerticalLayout {
             spacing: 10px;
             SectionLabel { text: "APP"; }
@@ -354,7 +435,7 @@ export component SettingsPage inherits ScrollView {
                 font-weight: 700;
             }
             Text {
-                text: "MIT License © 2026 Mujtaba1i. Inspired by Microsoft PowerToys; not affiliated with or endorsed by Microsoft.";
+                text: "MIT License © 2026 Mujtaba1i. Inspired by Microsoft PowerToys. Not affiliated with or endorsed by Microsoft.";
                 color: Skin.text-muted;
                 font-size: 12px;
                 wrap: word-wrap;
@@ -391,6 +472,11 @@ export component SettingsPage inherits ScrollView {
                 title: "Color names by David Aerne";
                 subtitle: "The 32,000 color names (meodai/color-names) · MIT";
                 PillButton { text: "Website"; clicked => { root.open-link("https://github.com/meodai/color-names"); } }
+            }
+            SettingCard {
+                title: "PixelKit by Kuucheen";
+                subtitle: "The idea for the Screen Ruler · MIT";
+                PillButton { text: "Website"; clicked => { root.open-link("https://github.com/Kuucheen/PixelKit"); } }
             }
             SettingCard {
                 title: "Slint";

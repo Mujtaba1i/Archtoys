@@ -17,6 +17,7 @@ mod names;
 mod ocr;
 mod picker;
 mod portal;
+mod ruler;
 mod search;
 mod single_instance;
 mod tray;
@@ -24,7 +25,10 @@ mod ui_state;
 mod window;
 
 use config::{apply_config, load_config, persist_config, sync_autostart_entry, HistoryStore};
-use hotkey::{build_hotkey_from_capture, HotkeyService, HotkeyStatus, Shortcut, DEFAULT_HOTKEY_TEXT, DEFAULT_TEXT_HOTKEY_TEXT};
+use hotkey::{
+    build_hotkey_from_capture, HotkeyService, HotkeyStatus, Shortcut, DEFAULT_HOTKEY_TEXT, DEFAULT_RULER_HOTKEY_TEXT,
+    DEFAULT_TEXT_HOTKEY_TEXT,
+};
 use ksni::blocking::TrayMethods;
 use picker::{start_picker, PickerSource};
 use std::cell::RefCell;
@@ -148,6 +152,8 @@ fn open_licenses() {
 
 fn main() -> Result<(), slint::PlatformError> {
     install_panic_hook();
+    // 12- or 24-hour times, before any other thread runs (setlocale)
+    ocr::history::init_clock();
     // Text Extractor's helpers for CI and scripts: no window, no tray
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--extract-file") {
@@ -173,6 +179,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let autostart = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
     let pick_now = std::env::args().any(|arg| arg == "--pick");
     let extract_now = std::env::args().any(|arg| arg == "--extract");
+    let measure_now = std::env::args().any(|arg| arg == "--measure");
 
     let _instance_lock = match single_instance::acquire() {
         single_instance::Lock::TakenByAnother => {
@@ -182,6 +189,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     "Pick"
                 } else if extract_now {
                     "Extract"
+                } else if measure_now {
+                    "Measure"
                 } else {
                     "Show"
                 };
@@ -198,7 +207,7 @@ fn main() -> Result<(), slint::PlatformError> {
     diagnostics::keep_recent_messages();
     // `archtoys --pick` / `--extract` with no copy running starts in the tray
     // and picks (or captures text), like the hotkey.
-    let start_hidden = autostart || pick_now || extract_now;
+    let start_hidden = autostart || pick_now || extract_now || measure_now;
 
     // each picker window opens full screen on its own monitor (freeze.rs)
     slint::BackendSelector::new().backend_name("winit".into()).with_winit_window_attributes_hook(freeze::window_attributes).select()?;
@@ -245,12 +254,21 @@ fn main() -> Result<(), slint::PlatformError> {
     if ui.get_setting_text_hotkey().trim().is_empty() {
         ui.set_setting_text_hotkey(DEFAULT_TEXT_HOTKEY_TEXT.into());
     }
+    if ui.get_setting_ruler_hotkey().trim().is_empty() {
+        ui.set_setting_ruler_hotkey(DEFAULT_RULER_HOTKEY_TEXT.into());
+    }
     // the size limits, with the sidebar's width if it was pinned
     window::apply_constraints(&ui);
     sync_autostart_entry(ui.get_setting_autostart());
     {
         let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
         ocr::install_ui(&ui, move || {
+            if let Some(ui) = save_ui.upgrade() {
+                persist_config(&ui, &save_history);
+            }
+        });
+        let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
+        ruler::install(&ui, &history_store, move || {
             if let Some(ui) = save_ui.upgrade() {
                 persist_config(&ui, &save_history);
             }
@@ -278,6 +296,17 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| ocr::start_capture(&ui));
         })
     };
+    let measure_trigger: hotkey::Trigger = {
+        let ui_weak = Mutex::new(ui_handle.clone());
+        Arc::new(move || {
+            let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| {
+                if ui.get_page() != 3 {
+                    ui.invoke_go(3);
+                }
+                ruler::start(&ui);
+            });
+        })
+    };
     // Shows who owns the shortcut. When the desktop does, the settings show
     // the desktop's real shortcut and a button to change it there.
     let on_status: hotkey::StatusCallback = {
@@ -289,6 +318,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_hotkey_system_managed(true);
                     ui.set_hotkey_display(descriptions.first().cloned().unwrap_or_default().into());
                     ui.set_text_hotkey_display(descriptions.get(1).cloned().unwrap_or_default().into());
+                    ui.set_ruler_hotkey_display(descriptions.get(2).cloned().unwrap_or_default().into());
                 }
                 HotkeyStatus::AppManaged => {
                     diagnostics::set_hotkey("X11 (global-hotkey)");
@@ -312,6 +342,13 @@ fn main() -> Result<(), slint::PlatformError> {
             default: DEFAULT_TEXT_HOTKEY_TEXT,
             trigger: extract_trigger.clone(),
         },
+        Shortcut {
+            id: "measure",
+            description: "Measure on the screen (Archtoys)",
+            text: ui.get_setting_ruler_hotkey().to_string(),
+            default: DEFAULT_RULER_HOTKEY_TEXT,
+            trigger: measure_trigger.clone(),
+        },
     ];
     let (hotkey_service, hotkey_texts) = HotkeyService::start(shortcuts, on_status);
 
@@ -322,17 +359,21 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| bring_to_front(&ui));
         })
     };
-    let _remote = single_instance::serve(show, trigger.clone(), extract_trigger.clone());
+    let _remote = single_instance::serve(show, trigger.clone(), extract_trigger.clone(), measure_trigger.clone());
     if pick_now {
         trigger();
     }
     if extract_now {
         extract_trigger();
     }
+    if measure_now {
+        measure_trigger();
+    }
     let hotkey_service = Rc::new(hotkey_service);
     let active_hotkey_texts = Rc::new(RefCell::new(hotkey_texts.clone()));
     ui.set_setting_hotkey(hotkey_texts[0].clone().into());
     ui.set_setting_text_hotkey(hotkey_texts[1].clone().into());
+    ui.set_setting_ruler_hotkey(hotkey_texts[2].clone().into());
 
     sync_history_model(&ui, &history_store);
     update_ui_colors(&ui, start_color);
@@ -355,15 +396,13 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         };
         // which toy's hotkey was being recorded
-        let index = ui.get_hotkey_target().clamp(0, 1) as usize;
+        let index = ui.get_hotkey_target().clamp(0, 2) as usize;
         let result = build_hotkey_from_capture(&key_text, ctrl, alt, shift, meta)
             .and_then(|candidate| hotkey_service_apply.change(index, &candidate));
-        let set = |ui: &AppWindow, text: String| {
-            if index == 0 {
-                ui.set_setting_hotkey(text.into());
-            } else {
-                ui.set_setting_text_hotkey(text.into());
-            }
+        let set = |ui: &AppWindow, text: String| match index {
+            0 => ui.set_setting_hotkey(text.into()),
+            1 => ui.set_setting_text_hotkey(text.into()),
+            _ => ui.set_setting_ruler_hotkey(text.into()),
         };
         match result {
             Ok(text) => {
@@ -388,6 +427,7 @@ fn main() -> Result<(), slint::PlatformError> {
         refresh_service.refresh();
         if let Some(ui) = refresh_ui.upgrade() {
             ocr::page_shown(&ui); // the engine and languages in Text Extractor's settings
+            ui.set_several_screens(window::screen_count(&ui) > 1); // offers the ruler's "Across screens"
         }
     });
 
@@ -422,6 +462,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // --- Each toy's page ---
     picker::page::wire(&ui, &history_store);
     ocr::page::wire(&ui);
+    ruler::page::wire(&ui, &history_store);
 
     let report_ui = ui_handle.clone();
     ui.on_report_problem(move || {

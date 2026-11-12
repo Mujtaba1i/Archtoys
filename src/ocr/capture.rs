@@ -39,7 +39,7 @@ pub(crate) fn start(ui: &AppWindow) {
         && !minimize
         && crate::kwin::available()
         && crate::kwin::set_main_window_opacity(0.0)
-            .map_err(|err| eprintln!("text capture: couldn't fade the window ({err}); hiding it"))
+            .map_err(|err| eprintln!("text capture: couldn't fade the window ({err}), hiding it"))
             .is_ok();
     if visible && !faded && !minimize {
         hide_window(ui);
@@ -212,7 +212,7 @@ impl State {
 }
 
 impl Toy for TextCapture {
-    fn window_created(&self, window: &FreezePickerWindow) {
+    fn window_created(&self, window: &FreezePickerWindow, _i: usize) {
         window.set_text_mode(true);
     }
 

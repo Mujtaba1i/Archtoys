@@ -1,0 +1,563 @@
+// The Screen Ruler (v0.7.4): what it draws over the frozen screen (the lines,
+// the boxes, their sizes and the toolbar), the drawing of the latest
+// measurement, and its page. Rust (ruler/) works out every position.
+import { ScrollView } from "std-widgets.slint";
+import { Skin, PillButton, ActionButton } from "common.slint";
+
+// A straight piece of line, or one dash of an outline. `faint`: see-through
+// (the first of three shapes).
+export struct RulerBar {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    faint: bool,
+}
+
+// A size in a dark pill. `x` is its left edge, or its center when `centered`.
+export struct RulerLabel {
+    x: length,
+    y: length,
+    text: string,
+    centered: bool,
+}
+
+// A box in the drawing on the ruler's page: filled when it's solid.
+export struct RulerFrame {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    solid: bool,
+}
+
+// One measurement in the history.
+export struct RulerEntry {
+    // "360 × 94 px"
+    text: string,
+    // "Spacing · Today 14:20"
+    detail: string,
+    // shown in the card at the top
+    selected: bool,
+}
+
+component SizePill inherits Rectangle {
+    in property <string> text;
+    in property <length> size: 15px;
+    width: label.preferred-width + 14px;
+    height: label.preferred-height + 6px;
+    border-radius: 6px;
+    background: #111418e0;
+    label := Text {
+        text: root.text;
+        color: #ffffff;
+        font-size: root.size;
+        font-weight: 700;
+        font-family: "monospace";
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// A button of the ruler's toolbar (in the app's theme, light or dark).
+component ToolButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+    height: 36px;
+    width: row.preferred-width;
+    border-radius: 9px;
+    background: root.active ? Skin.pick(#1e3a52, #e8f1fa) : touch.has-hover ? Skin.pick(#2a2d35, #f0f2f5) : transparent;
+    border-width: 1px;
+    border-color: root.active ? Skin.pick(#2e5b80, #b9d3ea) : transparent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    row := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 7px;
+        alignment: center;
+        if root.icon.width > 0 : Image {
+            source: root.icon;
+            width: 16px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            colorize: root.active ? Skin.pick(#7cc0f0, #1d5f99) : Skin.pick(#d4d7de, #3b424a);
+        }
+        Text {
+            text: root.text;
+            color: root.active ? Skin.pick(#7cc0f0, #1d5f99) : Skin.pick(#d4d7de, #3b424a);
+            font-size: 13px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component ToolSeparator inherits Rectangle {
+    width: 1px;
+    height: 24px;
+    background: Skin.border;
+}
+
+// What the ruler draws over one monitor's frozen screen.
+export component RulerOverlay inherits Rectangle {
+    // the mode: 0 Bounds, 1 Spacing, 2 Horizontal, 3 Vertical
+    in property <int> tool;
+    in property <color> line;
+    in property <[RulerBar]> bars;
+    in property <[RulerLabel]> labels;
+    // the box being dragged (Bounds)
+    in property <bool> box-on;
+    in property <length> box-x;
+    in property <length> box-y;
+    in property <length> box-w;
+    in property <length> box-h;
+    in property <int> tolerance;
+    // − and + buttons for the tolerance, else the scroll wheel
+    in property <bool> buttons;
+    // shapes kept or drawn (Bounds)
+    in property <int> count;
+    in property <string> toast;
+    callback tool-picked(int);
+    callback tolerance-step(int);
+    callback copy();
+    callback close();
+
+    for bar in root.bars : Rectangle {
+        x: bar.x;
+        y: bar.y;
+        width: bar.w;
+        height: bar.h;
+        background: bar.faint ? root.line.with-alpha(0.45) : root.line;
+    }
+    if root.box-on : Rectangle {
+        x: root.box-x;
+        y: root.box-y;
+        width: root.box-w;
+        height: root.box-h;
+        border-width: 2px;
+        border-color: root.line;
+        background: root.line.with-alpha(0.08);
+    }
+    for label in root.labels : SizePill {
+        x: label.centered ? label.x - self.width / 2 : label.x;
+        y: label.y;
+        text: label.text;
+    }
+
+    // the toolbar, at the top in the middle
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: 22px;
+        width: bar-row.preferred-width;
+        height: 50px;
+        border-radius: 14px;
+        background: Skin.surface;
+        border-width: 1px;
+        border-color: Skin.border;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000040;
+        TouchArea { } // clicks on the toolbar don't measure
+        bar-row := HorizontalLayout {
+            padding: 6px;
+            spacing: 6px;
+            alignment: center;
+            for mode[i] in [
+                { name: "Bounds", icon: @image-url("bounds.svg") },
+                { name: "Spacing", icon: @image-url("spacing.svg") },
+                { name: "Horizontal", icon: @image-url("horizontal.svg") },
+                { name: "Vertical", icon: @image-url("vertical.svg") },
+            ] : ToolButton {
+                icon: mode.icon;
+                text: mode.name;
+                active: root.tool == i;
+                clicked => { root.tool-picked(i); }
+            }
+            VerticalLayout { alignment: center; ToolSeparator { } }
+            if !root.buttons : HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 6px;
+                Image {
+                    source: @image-url("mouse.svg");
+                    width: 14px;
+                    height: 16px;
+                    y: (parent.height - self.height) / 2;
+                    colorize: Skin.text-muted;
+                }
+                Text { text: "Tolerance"; color: Skin.text-muted; font-size: 13px; vertical-alignment: center; }
+                Text { text: root.tolerance; color: Skin.text-main; font-size: 13px; font-weight: 700; vertical-alignment: center; }
+            }
+            if root.buttons : HorizontalLayout {
+                spacing: 2px;
+                ToolButton { text: "−"; clicked => { root.tolerance-step(-1); } }
+                Text { text: "Tolerance " + root.tolerance; color: Skin.text-main; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+                ToolButton { text: "+"; clicked => { root.tolerance-step(1); } }
+            }
+            VerticalLayout { alignment: center; ToolSeparator { } }
+            if root.count > 1 : Text {
+                text: root.count + " measurements";
+                color: Skin.text-muted;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+            ToolButton {
+                text: root.count > 1 ? "Copy all" : "Copy";
+                clicked => { root.copy(); }
+            }
+            ToolButton {
+                icon: @image-url("close.svg");
+                text: "";
+                clicked => { root.close(); }
+            }
+        }
+    }
+
+    // how to use it, or a short message (the tolerance, 3 at most)
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - self.height - 36px;
+        width: hint.preferred-width + 32px;
+        height: 40px;
+        border-radius: 12px;
+        background: #111418e6;
+        hint := Text {
+            text: root.toast != "" ? root.toast
+                : root.tool == 0 ? "Drag to measure · Shift-click keeps it · Ctrl+C copies · Esc closes"
+                : (root.buttons ? "Move over the screen · − and + change the tolerance" : "Move over the screen · scroll to change the tolerance")
+                    + " · a click or Ctrl+C copies · Esc closes";
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: root.toast != "" ? 700 : 400;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// The latest measurement drawn to scale: in its base size (236 × 99 for one
+// shape, 546 × 150 for several) stretched to the width it gets.
+export component RulerPreview inherits Rectangle {
+    in property <length> base-w: 236px;
+    in property <length> base-h: 99px;
+    in property <[RulerBar]> bars;
+    in property <[RulerFrame]> frames;
+    in property <[RulerLabel]> labels;
+    in property <color> line;
+    property <float> k: root.width / root.base-w;
+    height: root.base-h * root.k;
+    border-radius: 8px;
+    background: Skin.pick(#15191e, #eef1f4);
+    border-width: 1px;
+    border-color: Skin.border;
+    clip: true;
+    for frame in root.frames : Rectangle {
+        x: frame.x * root.k;
+        y: frame.y * root.k;
+        width: frame.w * root.k;
+        height: frame.h * root.k;
+        background: frame.solid ? root.line.with-alpha(0.1) : transparent;
+        border-width: frame.solid ? 2px : 0px;
+        border-color: root.line;
+    }
+    for bar in root.bars : Rectangle {
+        x: bar.x * root.k;
+        y: bar.y * root.k;
+        width: Math.max(bar.w * root.k, 1px);
+        height: Math.max(bar.h * root.k, 1px);
+        background: bar.faint ? root.line.with-alpha(0.45) : root.line;
+    }
+    for label in root.labels : SizePill {
+        x: label.centered ? label.x * root.k - self.width / 2 : Math.min(label.x * root.k, root.width - 6px) - self.width;
+        y: label.centered ? label.y * root.k : Math.min(label.y * root.k, root.height - 6px) - self.height;
+        text: label.text;
+    }
+}
+
+component Card inherits Rectangle {
+    border-radius: 18px;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: Skin.border;
+}
+
+component SectionTitle inherits Text {
+    color: Skin.text-muted;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    vertical-alignment: center;
+}
+
+component SmallLink inherits Text {
+    callback clicked;
+    font-size: 14px;
+    font-weight: 600;
+    color: touch.has-hover ? Skin.text-main : Skin.text-muted;
+    accessible-role: button;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// The Screen Ruler's page: Measure and the mode it opens in, the latest
+// measurement and the history of the copied ones.
+export component RulerPage inherits Rectangle {
+    in property <string> hotkey;
+    in property <image> icon;
+    // the mode Measure opens in (the last one used)
+    in property <int> mode;
+    in property <bool> has-latest;
+    // "LATEST · SPACING · TODAY 14:20"
+    in property <string> latest-title;
+    // "360 × 94 px" (the newest shape)
+    in property <string> latest-big;
+    // "≈ 9.5 × 2.5 cm on this screen", or ""
+    in property <string> latest-physical;
+    // several shapes: the drawing takes the whole width
+    in property <bool> latest-wide;
+    in property <length> preview-w;
+    in property <length> preview-h;
+    in property <[RulerBar]> preview-bars;
+    in property <[RulerFrame]> preview-frames;
+    in property <[RulerLabel]> preview-labels;
+    in property <color> line;
+    in property <[RulerEntry]> history;
+    callback measure();
+    callback mode-picked(int);
+    callback copy-latest();
+    callback delete-entry(int);
+    // a click on a history entry shows it in the card at the top
+    callback select-entry(int);
+    callback clear-history();
+
+    ScrollView {
+        content-width: self.visible-width;
+        content-height: list.preferred-height;
+        list := VerticalLayout {
+            width: parent.visible-width;
+            padding: 20px;
+            padding-top: 10px;
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 12px;
+                ActionButton {
+                    icon: root.icon;
+                    text: "Measure";
+                    label: "Measure on the screen";
+                    clicked => { root.measure(); }
+                }
+                // the modes are on the ruler's own toolbar, over the screen
+                Rectangle { horizontal-stretch: 1; }
+                // the hotkey, as a key
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle {
+                        height: 30px;
+                        width: key-text.preferred-width + 20px;
+                        border-radius: 8px;
+                        background: Skin.surface;
+                        border-width: 1px;
+                        border-color: Skin.border;
+                        key-text := Text {
+                            text: root.hotkey;
+                            color: Skin.text-muted;
+                            font-size: 13px;
+                            font-family: "monospace";
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+
+            // nothing measured yet: how it works
+            if !root.has-latest : Card {
+                min-height: 280px;
+                VerticalLayout {
+                    padding: 28px;
+                    spacing: 12px;
+                    alignment: center;
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 64px;
+                            height: 64px;
+                            border-radius: 18px;
+                            background: Skin.surface;
+                            border-width: 1px;
+                            border-color: Skin.border;
+                            Image { source: root.icon; width: 30px; height: 30px; colorize: Skin.text-muted; }
+                        }
+                    }
+                    Text {
+                        text: "Nothing measured yet";
+                        color: Skin.text-main;
+                        font-size: 18px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "Press Measure (or " + root.hotkey + "), then move over the screen: the lines stop where the color changes. A click or Ctrl+C copies the size.";
+                        color: Skin.text-muted;
+                        font-size: 15px;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            if root.has-latest : VerticalLayout {
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    SectionTitle {
+                        text: root.latest-title;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    PillButton {
+                        text: "Copy";
+                        clicked => { root.copy-latest(); }
+                    }
+                }
+                // one shape: its drawing beside the size
+                if !root.latest-wide : Card {
+                    height: 132px;
+                    RulerPreview {
+                        x: 16px;
+                        y: 16px;
+                        width: 236px;
+                        base-w: root.preview-w;
+                        base-h: root.preview-h;
+                        bars: root.preview-bars;
+                        frames: root.preview-frames;
+                        labels: root.preview-labels;
+                        line: root.line;
+                    }
+                    VerticalLayout {
+                        x: 16px + 236px + 24px;
+                        width: parent.width - self.x - 16px;
+                        alignment: center;
+                        spacing: 4px;
+                        Text {
+                            text: root.latest-big;
+                            color: Skin.text-main;
+                            font-size: Math.min(30px, parent.width / 6.8);
+                            font-weight: 700;
+                            font-family: "monospace";
+                            overflow: elide;
+                        }
+                        if root.latest-physical != "" : Text {
+                            text: root.latest-physical;
+                            color: Skin.text-muted;
+                            font-size: 14px;
+                            overflow: elide;
+                        }
+                    }
+                }
+                // several shapes: the drawing takes the whole width, the newest's size under it
+                if root.latest-wide : Card {
+                    height: wide-col.preferred-height;
+                    wide-col := VerticalLayout {
+                        padding: 15px;
+                        spacing: 14px;
+                        RulerPreview {
+                            base-w: root.preview-w;
+                            base-h: root.preview-h;
+                            bars: root.preview-bars;
+                            frames: root.preview-frames;
+                            labels: root.preview-labels;
+                            line: root.line;
+                        }
+                        VerticalLayout {
+                            spacing: 4px;
+                            Text {
+                                text: root.latest-big;
+                                color: Skin.text-main;
+                                font-size: 30px;
+                                font-weight: 700;
+                                font-family: "monospace";
+                                overflow: elide;
+                            }
+                            if root.latest-physical != "" : Text {
+                                text: root.latest-physical;
+                                color: Skin.text-muted;
+                                font-size: 14px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.history.length > 0 : HorizontalLayout {
+                padding-top: 4px;
+                SectionTitle {
+                    text: "HISTORY · " + root.history.length;
+                    horizontal-stretch: 1;
+                }
+                SmallLink {
+                    text: "Clear all";
+                    clicked => { root.clear-history(); }
+                }
+            }
+            for entry[i] in root.history : Rectangle {
+                height: 54px;
+                border-radius: 14px;
+                background: row-touch.has-hover ? Skin.surface-hover : Skin.surface;
+                border-width: 1px;
+                border-color: entry.selected ? Skin.accent : Skin.border;
+                accessible-role: button;
+                accessible-label: entry.text;
+                accessible-action-default => { root.select-entry(i); }
+                // under the delete button, so that one still deletes
+                row-touch := TouchArea { clicked => { root.select-entry(i); } }
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 6px;
+                    spacing: 12px;
+                    Text {
+                        text: entry.text;
+                        color: Skin.text-main;
+                        font-size: 15px;
+                        font-weight: 700;
+                        font-family: "monospace";
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: entry.detail;
+                        color: Skin.text-muted;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 40px;
+                        accessible-role: button;
+                        accessible-label: "Delete this measurement";
+                        accessible-action-default => { root.delete-entry(i); }
+                        Rectangle {
+                            width: 30px;
+                            height: 30px;
+                            border-radius: 8px;
+                            background: del-touch.has-hover ? #e5484d26 : transparent;
+                        }
+                        Text {
+                            text: "✕";
+                            color: del-touch.has-hover ? #e5484d : Skin.text-muted;
+                            font-size: 15px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        del-touch := TouchArea { clicked => { root.delete-entry(i); } }
+                    }
+                }
+            }
+        }
+    }
+}

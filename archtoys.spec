@@ -1,7 +1,7 @@
 Name:           archtoys
 Version:        0.7.3
 Release:        1%{?dist}
-Summary:        A fast, system-wide color picker for Linux, inspired by PowerToys
+Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
 License:        MIT
 URL:            https://github.com/Mujtaba1i/Archtoys
@@ -63,10 +63,10 @@ Suggests:       tesseract
 Suggests:       tesseract-langpack-eng
 
 %description
-Archtoys is a fast, system-wide color picker for Linux, inspired by PowerToys
-Color Picker. It is built to feel native on KDE Plasma and targets both Wayland
-and X11. Features include a configurable hotkey, smart input engine, light/dark
-themes, color history, and a system tray icon.
+Archtoys is a set of PowerToys-style tools for Linux, inspired by Microsoft
+PowerToys: a Color Picker, a Text Extractor and a Screen Ruler. It is built to
+feel native on KDE Plasma and works on both Wayland and X11, with a hotkey for
+each tool, light and dark themes and a system tray icon.
 
 %prep
 %autosetup -n Archtoys-%{version}

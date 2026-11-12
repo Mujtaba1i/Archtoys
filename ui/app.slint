@@ -2,10 +2,12 @@ import { FieldRow, FormatOption, SearchCard, ShadeCell, Skin, RingGlow } from "c
 import { TitleBar, Sidebar, HomePage } from "shell.slint";
 import { TextExtractorPage, TextEntry } from "text.slint";
 import { SettingsPage } from "settings.slint";
+import { RulerPage, RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.slint";
 import { FormatsPanel, ColorEditor, SearchBar, ColorPickerPage } from "picker.slint";
 // Rust reaches these through this file
 export { FieldRow, FormatOption, SearchCard, ShadeCell, Skin } from "common.slint";
 export { TextEntry } from "text.slint";
+export { RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.slint";
 export { PickerOverlay, PickerShieldWindow, FreezePickerWindow, TextBox } from "freeze.slint";
 
 export component AppWindow inherits Window {
@@ -70,6 +72,43 @@ export component AppWindow inherits Window {
     in-out property <int> text-detail: -1;
     in-out property <string> setting-text-hotkey: "Ctrl+Super+T";
     in-out property <string> text-hotkey-display: "";
+    // --- The Screen Ruler (v0.7.4, ruler/ in Rust) ---
+    in-out property <string> setting-ruler-hotkey: "Ctrl+Super+M";
+    in-out property <string> ruler-hotkey-display: "";
+    // the mode it opens in: 0 the last one used, else 1 Bounds to 4 Vertical
+    in-out property <int> setting-ruler-start: 0;
+    // the last one used: 0 Bounds, 1 Spacing, 2 Horizontal, 3 Vertical
+    in-out property <int> setting-ruler-mode: 1;
+    in-out property <int> setting-ruler-tolerance: 30;
+    // the tolerance with − and + buttons, else the scroll wheel
+    in-out property <bool> setting-ruler-buttons: false;
+    // 0 px, 1 cm, 2 in
+    in-out property <int> setting-ruler-units: 0;
+    // a measure may go on past its screen's edge
+    in-out property <bool> setting-ruler-cross: false;
+    // more than one screen: Settings offers the one above
+    in property <bool> several-screens;
+    in property <image> ruler-icon: @image-url("ruler.svg");
+    in property <color> ruler-line: #fc4c02;
+    in property <bool> ruler-has-latest;
+    in property <string> ruler-latest-title;
+    in property <string> ruler-latest-big;
+    in property <string> ruler-latest-physical;
+    in property <bool> ruler-latest-wide;
+    in property <length> ruler-preview-w: 236px;
+    in property <length> ruler-preview-h: 99px;
+    in property <[RulerBar]> ruler-preview-bars;
+    in property <[RulerFrame]> ruler-preview-frames;
+    in property <[RulerLabel]> ruler-preview-labels;
+    in property <[RulerEntry]> ruler-history;
+    in property <string> home-last-measure;
+    in property <string> home-last-measure-detail;
+    callback ruler-measure();
+    callback ruler-mode-picked(int);
+    callback ruler-copy-latest();
+    callback ruler-delete(int);
+    callback ruler-select(int);
+    callback ruler-clear();
     in-out property <bool> setting-text-tools: true;
     in-out property <bool> setting-text-stay-minimized: false;
     in-out property <bool> setting-text-keep-lines: true;
@@ -428,19 +467,19 @@ export component AppWindow inherits Window {
                         return accept;
                     }
                     if event.text == Key.LeftArrow {
-                        root.pick-nudge(-1, 0);
+                        root.pick-nudge(event.modifiers.shift ? -10 : -1, 0);
                         return accept;
                     }
                     if event.text == Key.RightArrow {
-                        root.pick-nudge(1, 0);
+                        root.pick-nudge(event.modifiers.shift ? 10 : 1, 0);
                         return accept;
                     }
                     if event.text == Key.UpArrow {
-                        root.pick-nudge(0, -1);
+                        root.pick-nudge(0, event.modifiers.shift ? -10 : -1);
                         return accept;
                     }
                     if event.text == Key.DownArrow {
-                        root.pick-nudge(0, 1);
+                        root.pick-nudge(0, event.modifiers.shift ? 10 : 1);
                         return accept;
                     }
                     if event.text == Key.Return {
@@ -566,7 +605,38 @@ export component AppWindow inherits Window {
                     last-color-name: root.card-name;
                     last-text: root.text-history.length > 0 ? root.text-history[0].preview : "";
                     last-text-detail: root.text-history.length > 0 ? root.text-history[0].language + " · " + root.text-history[0].when : "";
+                    ruler-hotkey: root.hotkey-system-managed ? root.ruler-hotkey-display : root.setting-ruler-hotkey;
+                    ruler-icon: root.ruler-icon;
+                    last-measure: root.home-last-measure;
+                    last-measure-detail: root.home-last-measure-detail;
                     open-toy(i) => { root.go(i); }
+                    ruler-line: root.ruler-line;
+                }
+
+                // --- The Screen Ruler ---
+                if root.page == 3 && root.settings-t < 0.99 : RulerPage {
+                    opacity: 1 - root.settings-t;
+                    hotkey: root.hotkey-system-managed ? root.ruler-hotkey-display : root.setting-ruler-hotkey;
+                    icon: root.ruler-icon;
+                    mode: root.setting-ruler-mode;
+                    has-latest: root.ruler-has-latest;
+                    latest-title: root.ruler-latest-title;
+                    latest-big: root.ruler-latest-big;
+                    latest-physical: root.ruler-latest-physical;
+                    latest-wide: root.ruler-latest-wide;
+                    preview-w: root.ruler-preview-w;
+                    preview-h: root.ruler-preview-h;
+                    preview-bars: root.ruler-preview-bars;
+                    preview-frames: root.ruler-preview-frames;
+                    preview-labels: root.ruler-preview-labels;
+                    line: root.ruler-line;
+                    history: root.ruler-history;
+                    measure => { root.ruler-measure(); }
+                    mode-picked(i) => { root.ruler-mode-picked(i); }
+                    copy-latest => { root.ruler-copy-latest(); }
+                    delete-entry(i) => { root.ruler-delete(i); }
+                    select-entry(i) => { root.ruler-select(i); }
+                    clear-history => { root.ruler-clear(); }
                 }
 
                 // --- Text Extractor ---
@@ -630,6 +700,14 @@ export component AppWindow inherits Window {
                     settings-scope <=> root.settings-scope;
                     settings-t <=> root.settings-t;
                     text-clear() => { root.text-clear(); }
+                    setting-ruler-hotkey <=> root.setting-ruler-hotkey;
+                    ruler-hotkey-display <=> root.ruler-hotkey-display;
+                    setting-ruler-start <=> root.setting-ruler-start;
+                    setting-ruler-buttons <=> root.setting-ruler-buttons;
+                    setting-ruler-units <=> root.setting-ruler-units;
+                    setting-ruler-cross <=> root.setting-ruler-cross;
+                    several-screens: root.several-screens;
+                    ruler-clear() => { root.ruler-clear(); }
                     text-delete-languages() => { root.text-delete-languages(); }
                     text-engine-info: root.text-engine-info;
                     text-hotkey-display <=> root.text-hotkey-display;
@@ -797,7 +875,7 @@ export component AppWindow inherits Window {
             y: 0;
             width: parent.width;
             title: root.settings-open ? (root.about-open ? "About Archtoys" : "Settings")
-                : root.page == 0 ? "Archtoys" : root.page == 1 ? "Color Picker" : "Text Extractor";
+                : root.page == 0 ? "Archtoys" : root.page == 1 ? "Color Picker" : root.page == 2 ? "Text Extractor" : "Screen Ruler";
             menu-active: root.sidebar-mode > 0;
             // the pages start 18 px in from the pinned sidebar
             title-x: root.toy-x + 18px;
@@ -819,6 +897,7 @@ export component AppWindow inherits Window {
             background: root.sidebar-mode > 0 && !root.sidebar-shown ? Skin.bg-color.transparentize(1) : Skin.bg-color;
             page: root.page;
             settings-open: root.settings-open;
+            ruler-icon: root.ruler-icon;
             navigate(i) => { root.go(i); }
             open-settings => { root.open-settings(); }
             // the line between it and the toy

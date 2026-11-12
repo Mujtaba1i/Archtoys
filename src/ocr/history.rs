@@ -58,6 +58,64 @@ pub(crate) fn push(entries: &mut Vec<Entry>, entry: Entry) {
     entries.truncate(MAX);
 }
 
+/// The system's clock: 12 hours ("2:20 PM") or 24 ("14:20"). Read once at
+/// startup, before any other thread runs (`init_clock`, main.rs).
+static TWELVE_HOURS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Reads whether the system shows 12-hour times: the locale's time format
+/// (what KDE's Region settings set), and on GNOME its own clock setting.
+/// Call it first thing in main: setlocale isn't safe once threads run.
+pub(crate) fn init_clock() {
+    #[cfg(target_env = "gnu")]
+    {
+        extern "C" {
+            fn setlocale(category: i32, locale: *const std::ffi::c_char) -> *mut std::ffi::c_char;
+            fn nl_langinfo(item: i32) -> *const std::ffi::c_char;
+        }
+        const LC_TIME: i32 = 2;
+        const T_FMT: i32 = 0x2002A;
+        // SAFETY: called before any other thread exists; the strings are glibc's own, read at once.
+        let format = unsafe {
+            setlocale(LC_TIME, c"".as_ptr());
+            let p = nl_langinfo(T_FMT);
+            if p.is_null() {
+                String::new()
+            } else {
+                std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+            }
+        };
+        TWELVE_HOURS.store(twelve_hour_format(&format), std::sync::atomic::Ordering::Relaxed);
+    }
+    if std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.to_ascii_uppercase().contains("GNOME")) {
+        std::thread::spawn(|| {
+            let out = std::process::Command::new("gsettings").args(["get", "org.gnome.desktop.interface", "clock-format"]).output();
+            if let Some(out) = out.ok().filter(|o| o.status.success()) {
+                let value = String::from_utf8_lossy(&out.stdout);
+                TWELVE_HOURS.store(value.contains("12h"), std::sync::atomic::Ordering::Relaxed);
+            }
+        });
+    }
+}
+
+/// A strftime time format that shows AM/PM ("%r", "%I:%M %p")?
+fn twelve_hour_format(format: &str) -> bool {
+    ["%r", "%I", "%l", "%p", "%P"].iter().any(|f| format.contains(f))
+}
+
+/// "14:20", or "2:20 PM" when the system uses 12-hour times.
+fn clock(hh: u32, mm: u32) -> String {
+    clock_as(hh, mm, TWELVE_HOURS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+fn clock_as(hh: u32, mm: u32, twelve: bool) -> String {
+    if twelve {
+        let h = if hh.is_multiple_of(12) { 12 } else { hh % 12 };
+        format!("{h}:{mm:02} {}", if hh < 12 { "AM" } else { "PM" })
+    } else {
+        format!("{hh}:{mm:02}")
+    }
+}
+
 pub(crate) fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -121,9 +179,9 @@ pub(crate) fn when_label(time: u64, now: u64) -> String {
 fn label_from(t: (i64, u32, u32, u32, u32), today: (i64, u32, u32, u32, u32), yesterday: (i64, u32, u32, u32, u32)) -> String {
     let (y, m, d, hh, mm) = t;
     if (y, m, d) == (today.0, today.1, today.2) {
-        format!("Today {hh}:{mm:02}")
+        format!("Today {}", clock(hh, mm))
     } else if (y, m, d) == (yesterday.0, yesterday.1, yesterday.2) {
-        format!("Yesterday {hh}:{mm:02}")
+        format!("Yesterday {}", clock(hh, mm))
     } else if y == today.0 {
         format!("{d} {}", MONTHS[(m - 1) as usize])
     } else {
@@ -134,6 +192,17 @@ fn label_from(t: (i64, u32, u32, u32, u32), today: (i64, u32, u32, u32, u32), ye
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn times_follow_the_system_clock() {
+        assert_eq!(clock_as(14, 20, false), "14:20");
+        assert_eq!(clock_as(14, 20, true), "2:20 PM");
+        assert_eq!(clock_as(0, 5, true), "12:05 AM");
+        assert_eq!(clock_as(12, 0, true), "12:00 PM");
+        // en_US says "%r", en_GB "%T", de_DE "%T", the C locale "%H:%M:%S"
+        assert!(twelve_hour_format("%r") && twelve_hour_format("%I:%M:%S %p"));
+        assert!(!twelve_hour_format("%T") && !twelve_hour_format("%H:%M:%S"));
+    }
 
     #[test]
     fn keeps_the_last_500_newest_first() {

@@ -4,6 +4,7 @@
 // toy: the Color Picker's magnifier and value, Text Extractor's selection and
 // toolbar.
 import { Skin, RingGlow } from "common.slint";
+import { RulerOverlay, RulerBar, RulerLabel } from "ruler.slint";
 
 // --- Pixel magnifier: 11x11 pixels shown 10x larger, center pixel outlined ---
 component Magnifier inherits Rectangle {
@@ -235,6 +236,27 @@ export component FreezePickerWindow inherits Window {
     }
     callback region-started();
     callback region-done(length, length, length, length);
+
+    // --- The Screen Ruler (v0.7.4): its overlay and toolbar (ruler/ in Rust) ---
+    in property <bool> ruler-mode: false;
+    // 0 Bounds, 1 Spacing, 2 Horizontal, 3 Vertical
+    in property <int> ruler-tool: 1;
+    in property <color> ruler-line: #fc4c02;
+    in property <[RulerBar]> ruler-bars;
+    in property <[RulerLabel]> ruler-labels;
+    in property <int> ruler-tolerance: 30;
+    in property <bool> ruler-buttons: false;
+    in property <int> ruler-count: 0;
+    in property <string> ruler-toast;
+    callback ruler-tool-picked(int);
+    callback ruler-tolerance-step(int);
+    callback ruler-copy();
+    // Shift-click: keep the box on the screen and draw another
+    callback ruler-keep();
+    // the box being dragged or moved (Bounds); `done` once let go
+    callback ruler-box(length, length, length, length, bool);
+    // dragging a box: Text Extractor's selection, or the ruler's Bounds
+    property <bool> drags: root.text-mode || (root.ruler-mode && root.ruler-tool == 0);
     // "copy", "line" (as one line), "open" (in the app)
     callback tool(string);
 
@@ -286,11 +308,20 @@ export component FreezePickerWindow inherits Window {
                 root.pick-at(self.mouse-x, self.mouse-y);
             }
         }
+        scroll-event(event) => {
+            if root.ruler-mode && !root.ruler-buttons && event.delta-y != 0 {
+                root.ruler-tolerance-step(event.delta-y > 0 ? 1 : -1);
+                return accept;
+            }
+            reject
+        }
         pointer-event(event) => {
             if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
                 root.cancel-pick();
             }
-            if root.text-mode && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+            if root.drags && root.ruler-mode && event.modifiers.shift && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                root.ruler-keep();
+            } else if root.drags && event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
                 self.anchor-x = self.mouse-x;
                 self.anchor-y = self.mouse-y;
                 self.last-x = self.mouse-x;
@@ -301,11 +332,13 @@ export component FreezePickerWindow inherits Window {
                 root.sel-h = 0px;
                 root.selecting = true;
                 root.has-selection = false;
-                root.copy-when-read = false;
-                root.region-started();
+                if root.text-mode {
+                    root.copy-when-read = false;
+                    root.region-started();
+                }
             }
             // Shift held while dragging moves the rectangle instead of resizing it
-            if root.text-mode && root.selecting && event.kind == PointerEventKind.move {
+            if root.drags && root.selecting && event.kind == PointerEventKind.move {
                 if event.modifiers.shift {
                     root.sel-x += self.mouse-x - self.last-x;
                     root.sel-y += self.mouse-y - self.last-y;
@@ -319,14 +352,35 @@ export component FreezePickerWindow inherits Window {
                 }
                 self.last-x = self.mouse-x;
                 self.last-y = self.mouse-y;
+                if root.ruler-mode {
+                    root.ruler-box(root.sel-x, root.sel-y, root.sel-w, root.sel-h, false);
+                }
             }
-            if root.text-mode && root.selecting && event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+            if root.drags && root.selecting && event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
                 root.selecting = false;
                 if root.sel-w >= 4px && root.sel-h >= 4px {
                     root.has-selection = true;
-                    root.region-done(root.sel-x, root.sel-y, root.sel-w, root.sel-h);
+                    if root.text-mode {
+                        root.region-done(root.sel-x, root.sel-y, root.sel-w, root.sel-h);
+                    } else {
+                        root.ruler-box(root.sel-x, root.sel-y, root.sel-w, root.sel-h, true);
+                    }
                 }
             }
+        }
+    }
+
+    // an arrow key: one pixel (ten with Shift). The ruler's box moves in
+    // Bounds, else the pick or measuring point.
+    function arrow(dx: int, dy: int) {
+        if root.ruler-mode && root.ruler-tool == 0 {
+            if root.has-selection {
+                root.sel-x += dx * 1px;
+                root.sel-y += dy * 1px;
+                root.ruler-box(root.sel-x, root.sel-y, root.sel-w, root.sel-h, true);
+            }
+        } else {
+            root.nudge(dx, dy);
         }
     }
 
@@ -356,6 +410,23 @@ export component FreezePickerWindow inherits Window {
             if event.text == Key.Escape {
                 root.cancel-pick();
                 return accept;
+            }
+            if root.ruler-mode {
+                if event.modifiers.control {
+                    if event.text == "1" { root.ruler-tool-picked(0); return accept; }
+                    if event.text == "2" { root.ruler-tool-picked(1); return accept; }
+                    if event.text == "3" { root.ruler-tool-picked(2); return accept; }
+                    if event.text == "4" { root.ruler-tool-picked(3); return accept; }
+                    if event.text == "c" || event.text == "C" { root.ruler-copy(); return accept; }
+                    return reject;
+                }
+                if event.text == Key.Return {
+                    root.ruler-copy();
+                    return accept;
+                }
+                if event.text == "+" || event.text == "=" { root.ruler-tolerance-step(1); return accept; }
+                if event.text == "-" { root.ruler-tolerance-step(-1); return accept; }
+                // the arrows: below (the box in Bounds, else the point)
             }
             if root.text-mode {
                 if event.text == Key.LeftArrow {
@@ -391,20 +462,21 @@ export component FreezePickerWindow inherits Window {
                 }
                 return reject;
             }
+            // one pixel, ten with Shift (the color picker and the ruler alike)
             if event.text == Key.LeftArrow {
-                root.nudge(-1, 0);
+                root.arrow(event.modifiers.shift ? -10 : -1, 0);
                 return accept;
             }
             if event.text == Key.RightArrow {
-                root.nudge(1, 0);
+                root.arrow(event.modifiers.shift ? 10 : 1, 0);
                 return accept;
             }
             if event.text == Key.UpArrow {
-                root.nudge(0, -1);
+                root.arrow(0, event.modifiers.shift ? -10 : -1);
                 return accept;
             }
             if event.text == Key.DownArrow {
-                root.nudge(0, 1);
+                root.arrow(0, event.modifiers.shift ? 10 : 1);
                 return accept;
             }
             if event.text == Key.Return {
@@ -551,5 +623,28 @@ export component FreezePickerWindow inherits Window {
         property <length> cy: Math.floor(root.cursor-y / 1phx) * 1phx;
         x: self.cx + 20px + self.width > root.width ? self.cx - 20px - self.width : self.cx + 20px;
         y: self.cy + 20px + self.height > root.height ? self.cy - 20px - self.height : self.cy + 20px;
+    }
+
+    // --- The Screen Ruler: the lines, boxes and sizes, and the toolbar ---
+    if root.ruler-mode && root.ready : RulerOverlay {
+        width: root.width;
+        height: root.height;
+        tool: root.ruler-tool;
+        line: root.ruler-line;
+        bars: root.ruler-bars;
+        labels: root.ruler-labels;
+        box-on: root.ruler-tool == 0 && (root.selecting || root.has-selection);
+        box-x: root.sel-x;
+        box-y: root.sel-y;
+        box-w: root.sel-w;
+        box-h: root.sel-h;
+        tolerance: root.ruler-tolerance;
+        buttons: root.ruler-buttons;
+        count: root.ruler-count;
+        toast: root.ruler-toast;
+        tool-picked(i) => { root.ruler-tool-picked(i); }
+        tolerance-step(d) => { root.ruler-tolerance-step(d); }
+        copy => { root.ruler-copy(); }
+        close => { root.cancel-pick(); }
     }
 }

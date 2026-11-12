@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Archtoys
-Comment=System-wide color picker
+Comment=Pick colors, copy text from the screen, measure it
 Exec=archtoys
 Icon=archtoys
 Terminal=false

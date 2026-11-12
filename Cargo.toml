@@ -2,7 +2,7 @@
 name = "archtoys"
 version = "0.7.3"
 edition = "2021"
-description = "System-wide color picker for Linux, inspired by Microsoft PowerToys"
+description = "PowerToys-style tools for Linux: color picker, text extractor, screen ruler"
 license = "MIT"
 repository = "https://github.com/Mujtaba1i/Archtoys"
 readme = "README.md"

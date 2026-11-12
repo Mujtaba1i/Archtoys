@@ -57,7 +57,7 @@ impl PortalShortcut {
         if let Some(service) = self.fallback.lock().unwrap().as_ref() {
             return service.change(index, text);
         }
-        Err("this shortcut is managed by your desktop; change it in its settings".into())
+        Err("this shortcut is managed by your desktop. Change it in its settings".into())
     }
 
     pub fn open_settings(&self) {

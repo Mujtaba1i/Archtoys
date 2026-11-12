@@ -144,7 +144,10 @@ impl PointerGrab {
         let locks = [ModMask::from(0u16), ModMask::LOCK, ModMask::M2, ModMask::LOCK | ModMask::M2];
         for key in keys.iter().flatten() {
             for mods in locks {
-                let _ = conn.grab_key(false, root, mods, *key, GrabMode::ASYNC, GrabMode::ASYNC);
+                // with Shift too: Shift and an arrow moves ten pixels (v0.7.4)
+                for shift in [ModMask::from(0u16), ModMask::SHIFT] {
+                    let _ = conn.grab_key(false, root, mods | shift, *key, GrabMode::ASYNC, GrabMode::ASYNC);
+                }
             }
         }
         conn.flush().map_err(|err| format!("flush: {err}"))?;
@@ -165,14 +168,17 @@ impl PointerGrab {
                     3 => input.right = true,
                     _ => {}
                 },
-                Event::KeyPress(key) => match self.keys.iter().position(|k| *k == Some(key.detail)) {
-                    Some(0) => input.dx -= 1,
-                    Some(1) => input.dy -= 1,
-                    Some(2) => input.dx += 1,
-                    Some(3) => input.dy += 1,
-                    Some(_) => input.enter = true,
-                    None => {}
-                },
+                Event::KeyPress(key) => {
+                    let step = if u16::from(key.state) & u16::from(KeyButMask::SHIFT) != 0 { 10 } else { 1 };
+                    match self.keys.iter().position(|k| *k == Some(key.detail)) {
+                        Some(0) => input.dx -= step,
+                        Some(1) => input.dy -= step,
+                        Some(2) => input.dx += step,
+                        Some(3) => input.dy += step,
+                        Some(_) => input.enter = true,
+                        None => {}
+                    }
+                }
                 _ => {}
             }
         }
@@ -489,7 +495,7 @@ pub(super) fn start_freeze(ui_weak: slint::Weak<AppWindow>, history_store: Histo
                 frozen::show(ui_weak, history_store, context, shot, Box::new(move || start(ui2, history2, context)));
             }
             Err(err) => {
-                eprintln!("freeze picker: {err}; using the live picker");
+                eprintln!("freeze picker: {err}, using the live picker");
                 crate::diagnostics::set_picker("live (X11)");
                 start(ui_weak, history_store, context);
             }

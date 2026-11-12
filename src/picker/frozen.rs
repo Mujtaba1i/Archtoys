@@ -93,7 +93,7 @@ impl ColorPick {
 }
 
 impl Toy for ColorPick {
-    fn window_created(&self, window: &FreezePickerWindow) {
+    fn window_created(&self, window: &FreezePickerWindow, _i: usize) {
         window.set_text_mode(false);
     }
 

@@ -107,9 +107,6 @@ class App:
                         XDG_RUNTIME_DIR=runtime, XDG_CURRENT_DESKTOP="",
                         PATH=self.bin_dir + ":" + os.environ["PATH"], ARCHTOYS_HOTKEY_BACKEND="x11")
         self.env.pop("WAYLAND_DISPLAY", None)
-        # its own profile: GitHub's runners set these, and the app would save outside HOME
-        for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
-            self.env.pop(name, None)
         self.env.update(extra_env or {})
         self.log = open(os.path.join(self.home, "app.log"), "w")
         self.proc = subprocess.Popen([BIN, *args], env=self.env, stdout=self.log, stderr=subprocess.STDOUT)
@@ -145,8 +142,8 @@ class App:
         return int(pos[0]), int(pos[1]), int(size[0]), int(size[1])
 
     def click(self, x, y, button=1, wait=0.6):
-        wx, wy, _, _ = self.geometry()
-        xdo("mousemove", wx + x, wy + y)
+        # relative to the window itself: a window manager's title bar doesn't shift it
+        xdo("mousemove", "--window", self.win, x, y)
         time.sleep(0.4)  # rest on it first, like a hand: some buttons react to the hover
         xdo("click", button)
         time.sleep(wait)
@@ -215,24 +212,36 @@ def close_window(win):
     d.close()
 
 
-# Colored squares on the screen to pick from (each a window filled by the X
-# server itself, so it stays painted). Away from the Archtoys window.
+# Colored squares on the screen to pick from, painted into the screen's
+# background (the X server keeps it painted). Not windows of their own: a
+# window manager keeps those above a full-screen window, and the mouse over
+# a square would go to the square, not to the frozen screen. Away from the
+# Archtoys window.
 SWATCHES = {"blue": (0x33, 0x66, 0xCC), "red": (0xE0, 0x40, 0x30), "green": (0x20, 0xA0, 0x60), "yellow": (0xF0, 0xC0, 0x20)}
 SWATCH_AT = {name: (1000 + i * 140, 700) for i, name in enumerate(SWATCHES)}  # top left, 120 x 120
+# For the ruler's tolerance: a 200 x 60 strip of two grays 20 apart (each half
+# 100 wide), on the background (#404850, 64 and 84 away from them).
+# the ruler's toolbar with − and + buttons (frozen screen, centered at the top)
+RULER_MINUS, RULER_PLUS = (893, 46), (1019, 46)
+STRIP_AT, STRIP = (200, 880), ((0x80, 0x80, 0x80), (0x94, 0x94, 0x94))
 
 
 def show_swatches():
     d = display.Display(DISPLAY_NUM)
-    root = d.screen().root
-    root.change_attributes(background_pixel=0x404850)
-    root.clear_area(0, 0, 0, 0)
+    screen = d.screen()
+    background = screen.root.create_pixmap(SCREEN[0], SCREEN[1], screen.root_depth)
+    gc = background.create_gc(foreground=0x404850)
+    background.fill_rectangle(gc, 0, 0, SCREEN[0], SCREEN[1])
     for name, (r, g, b) in SWATCHES.items():
-        x, y = SWATCH_AT[name]
-        w = root.create_window(x, y, 120, 120, 0, d.screen().root_depth, X.InputOutput, X.CopyFromParent,
-                               background_pixel=(r << 16) | (g << 8) | b, override_redirect=True)
-        w.map()
+        gc.change(foreground=(r << 16) | (g << 8) | b)
+        background.fill_rectangle(gc, *SWATCH_AT[name], 120, 120)
+    for half, (r, g, b) in enumerate(STRIP):
+        gc.change(foreground=(r << 16) | (g << 8) | b)
+        background.fill_rectangle(gc, STRIP_AT[0] + half * 100, STRIP_AT[1], 100, 60)
+    screen.root.change_attributes(background_pixmap=background)
+    screen.root.clear_area(0, 0, 0, 0)
     d.flush()
-    return d  # keep the connection: closing it would destroy the squares
+    return d  # keep the connection: closing it would free the background
 
 
 def swatch_center(name):
@@ -288,6 +297,7 @@ AT = {
     "rail_home": (30, 64),
     "rail_picker": (30, 110),
     "rail_text": (30, 156),
+    "rail_ruler": (30, 202),
     "rail_settings": (30, 532),
     # Settings (rail): at the top
     "s_autocopy": (486, 226),
@@ -301,6 +311,9 @@ AT = {
     "s_dark": (402, 251),
     "s_coffee": (467, 407),
     "s_report": (470, 500),
+    # Settings opened from the Screen Ruler (its section first)
+    "s_ruler_cm": (484, 395),
+    "s_ruler_buttons": (480, 236),
 }
 PICKER = {"last_page": 1, "last_color": [45, 92, 118],
           "history": [[45, 92, 118], [224, 64, 48], [32, 160, 96], [240, 192, 32]]}
@@ -587,7 +600,7 @@ def checks():
     have_tesseract = shutil.which("tesseract") is not None
     # the capture goes full screen, which on X11 a window manager does: a small one
     wm = subprocess.Popen(["openbox"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) \
-        if have_tesseract and shutil.which("openbox") else None
+        if shutil.which("openbox") else None
     time.sleep(1)
     app = App({"last_page": 2, "text_enabled": True}) if have_tesseract else None
     words = "Archtoys reads this text"
@@ -623,8 +636,179 @@ def checks():
         return bool(got) and saved, f"clipboard {clipboard()!r}, history saved {saved}"
     if app:
         app.quit()
+
+    ruler_checks(wm)
     if wm:
         wm.terminate()
+
+
+def ruler_checks(wm):
+    """The Screen Ruler on the frozen screen (full screen, so it needs the window manager too)."""
+    app = App({"last_page": 1})  # the sidebar check opens the ruler's page itself
+    history = os.path.join(app.home, ".local", "share", "archtoys", "ruler-history.json")
+
+    def entries():
+        try:
+            with open(history) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return []
+
+    def open_ruler():
+        xdo("key", "--clearmodifiers", "ctrl+super+m")
+        win = wait_for(lambda: xdo("search", "--onlyvisible", "--name", "^Archtoys Picker$").split(), 5)
+        time.sleep(1.0)
+        if win:
+            xdo("windowfocus", "--sync", win[0])
+        return win
+
+    def need_wm():
+        if not wm:
+            raise Skip("openbox isn't installed (the ruler needs a window manager to go full screen)")
+
+    @test("Screen Ruler", "the sidebar's ruler opens its page")
+    def _():
+        app.click(*AT["menu"], wait=1.0)  # pins the icons
+        app.click(*AT["rail_ruler"])
+        app.shot("ruler-page")
+        return bool(wait_for(lambda: app.config().get("last_page") == 3, 3)), f"last_page {app.config().get('last_page')}"
+
+    @test("Screen Ruler", "Ctrl+Super+M, then a click inside a square copies its size (Spacing)")
+    def _():
+        need_wm()
+        if not open_ruler():
+            return False, "the ruler didn't open: " + app.output()[-300:]
+        xdo("mousemove", *swatch_center("blue"))
+        time.sleep(0.8)
+        app.shot("ruler-spacing")
+        xdo("click", 1)
+        got = wait_for(lambda: clipboard().strip() == "120 × 120 px", 4)
+        saved = entries()[:1]
+        ok = bool(got) and saved and saved[0].get("mode") == "Spacing" and saved[0].get("shapes") == [[120, 120]]
+        return ok, f"clipboard {clipboard()!r}, history {saved}"
+
+    @test("Screen Ruler", "Ctrl+3 measures across (Horizontal), Enter copies the width")
+    def _():
+        need_wm()
+        if not open_ruler():
+            return False, "the ruler didn't open"
+        xdo("mousemove", *swatch_center("red"))
+        time.sleep(0.5)
+        xdo("key", "ctrl+3")
+        time.sleep(0.5)
+        xdo("key", "Return")
+        got = wait_for(lambda: clipboard().strip() == "120 px", 4)
+        return bool(got) and entries()[0].get("mode") == "Horizontal", f"clipboard {clipboard()!r}, newest {entries()[:1]}"
+
+    @test("Screen Ruler", "Ctrl+4 measures up and down (Vertical): on an empty screen, exactly its height")
+    def _():
+        need_wm()
+        if not open_ruler():
+            return False, "the ruler didn't open"
+        xdo("mousemove", SCREEN[0] - 20, SCREEN[1] // 2)  # right of the squares: nothing above or below
+        time.sleep(0.5)
+        xdo("key", "ctrl+4")
+        time.sleep(0.5)
+        xdo("key", "Return")
+        want = f"{SCREEN[1]} px"
+        got = wait_for(lambda: clipboard().strip() == want, 4)
+        return bool(got) and entries()[0].get("mode") == "Vertical", f"clipboard {clipboard()!r}, want {want!r}, newest {entries()[:1]}"
+
+    # (each scroll notch is 5, but winit 0.30 counts a fake X11 wheel click
+    # like xdotool's twice: 3 notches down from 30 give 15 or 0, 11 up give
+    # 70 or 110, and the measurements are the same either way)
+    @test("Screen Ruler", "the scroll wheel changes the tolerance: lower splits the strip of two grays, higher reaches the whole screen")
+    def _():
+        need_wm()
+        got = []
+        for scroll, notches, want in ((None, 0, "200 px"), (5, 3, "100 px"), (4, 11, f"{SCREEN[0]} px")):
+            if not open_ruler():
+                return False, "the ruler didn't open"
+            xdo("key", "ctrl+3")
+            xdo("mousemove", STRIP_AT[0] + 50, STRIP_AT[1] + 30)  # the darker half
+            time.sleep(0.5)
+            for _ in range(notches):  # each notch 5 (down: less, up: more)
+                xdo("click", scroll)
+                time.sleep(0.15)
+            time.sleep(0.4)
+            if scroll == 5:
+                app.shot("ruler-tolerance")
+            xdo("key", "Return")
+            got.append((wait_for(lambda: clipboard().strip() == want and want, 4) or clipboard().strip(), want))
+            wait_for(lambda: not xdo("search", "--onlyvisible", "--name", "^Archtoys Picker$"), 4)
+        saved = wait_for(lambda: app.config().get("ruler_tolerance") in (70, 110), 3)
+        return all(g == w for g, w in got) and bool(saved), f"{got}, saved tolerance {app.config().get('ruler_tolerance')}"
+
+    @test("Screen Ruler", "Esc closes it without copying")
+    def _():
+        need_wm()
+        before = len(entries())
+        if not open_ruler():
+            return False, "the ruler didn't open"
+        xdo("mousemove", *swatch_center("green"))
+        time.sleep(0.5)
+        xdo("key", "Escape")
+        closed = wait_for(lambda: not xdo("search", "--onlyvisible", "--name", "^Archtoys Picker$"), 4)
+        return bool(closed) and len(entries()) == before, f"closed {bool(closed)}, history {before} then {len(entries())}"
+
+    @test("Screen Ruler", "Bounds: Shift-click keeps a box, 3 at most, Ctrl+C copies them all")
+    def _():
+        need_wm()
+        if not open_ruler():
+            return False, "the ruler didn't open"
+        xdo("key", "ctrl+1")
+        time.sleep(0.5)
+        for i, (w, h) in enumerate([(100, 50), (80, 40), (60, 30), (40, 20)]):
+            x, y = 200 + i * 150, 400
+            xdo("mousemove", x, y)
+            xdo("mousedown", 1)
+            xdo("mousemove", x + w // 2, y + h // 2)
+            xdo("mousemove", x + w, y + h)
+            xdo("mouseup", 1)
+            time.sleep(0.3)
+            if i < 3:  # keep it (the third doesn't fit: 2 kept + the one drawn)
+                xdo("mousemove", 1500, 950)
+                xdo("keydown", "shift")
+                xdo("click", 1)
+                xdo("keyup", "shift")
+                time.sleep(0.3)
+        app.shot("ruler-bounds")
+        xdo("key", "ctrl+c")
+        want = "100 × 50, 80 × 40, 40 × 20 px"
+        got = wait_for(lambda: clipboard().strip() == want, 4)
+        return bool(got), f"clipboard {clipboard()!r}, want {want!r}"
+
+    @test("Screen Ruler", "Settings: Units cm is saved")
+    def _():
+        app.click(*AT["rail_settings"], wait=1.2)
+        app.shot("ruler-settings")
+        app.click(*AT["s_ruler_cm"])
+        return bool(wait_for(lambda: app.config().get("ruler_units") == 1, 3)), f"ruler_units {app.config().get('ruler_units')}"
+
+    @test("Screen Ruler", "the − and + buttons change the tolerance by 5 (Settings: Change the tolerance with)")
+    def _():
+        need_wm()
+        app.click(*AT["s_ruler_buttons"])
+        if not wait_for(lambda: app.config().get("ruler_buttons") is True, 3):
+            return False, f"ruler_buttons {app.config().get('ruler_buttons')}"
+        before = app.config().get("ruler_tolerance")
+        if not open_ruler():
+            return False, "the ruler didn't open"
+        xdo("key", "ctrl+3")
+        app.shot("ruler-buttons")
+        for _ in range(2):
+            xdo("mousemove", *RULER_PLUS)
+            time.sleep(0.3)
+            xdo("click", 1)
+            time.sleep(0.3)
+        xdo("mousemove", *RULER_MINUS)
+        time.sleep(0.3)
+        xdo("click", 1)
+        time.sleep(0.3)
+        xdo("key", "Escape")
+        after = wait_for(lambda: app.config().get("ruler_tolerance") != before and app.config().get("ruler_tolerance"), 4)
+        return after == before + 5, f"tolerance {before} then {after} (want {before + 5}: +5 +5 -5)"
+    app.quit()
 
 
 def running_copies():

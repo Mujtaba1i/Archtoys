@@ -6,7 +6,7 @@
 pkgname=archtoys-bin
 pkgver=0.2.2
 pkgrel=1
-pkgdesc="System-wide color picker for Linux, inspired by PowerToys (precompiled binary)"
+pkgdesc="PowerToys-style tools for Linux: color picker, text extractor, screen ruler (precompiled binary)"
 arch=('x86_64')
 url="https://github.com/Mujtaba1i/Archtoys"
 license=('MIT')

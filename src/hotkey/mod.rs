@@ -19,6 +19,7 @@ use std::thread;
 
 pub const DEFAULT_HOTKEY_TEXT: &str = "Ctrl+Super+C";
 pub const DEFAULT_TEXT_HOTKEY_TEXT: &str = "Ctrl+Super+T";
+pub const DEFAULT_RULER_HOTKEY_TEXT: &str = "Ctrl+Super+M";
 
 /// One global shortcut: its id (for the desktop), what the desktop shows for
 /// it, the keys wanted, the keys used if those can't be, and what it does.
@@ -218,7 +219,7 @@ fn parse_or_default(text: &str, default: &str) -> (HotKey, String) {
     match parse_hotkey_text(text) {
         Ok(parsed) => parsed,
         Err(err) => {
-            eprintln!("hotkey: {err}; falling back to {default}");
+            eprintln!("hotkey: {err}, falling back to {default}");
             parse_hotkey_text(default).expect("default hotkey text must parse")
         }
     }
@@ -286,7 +287,7 @@ impl HotkeyService {
             let (hotkey, text) = match manager.register(hotkey) {
                 Ok(()) => (hotkey, text),
                 Err(err) => {
-                    eprintln!("hotkey: register failed for `{text}`: {err}; falling back to {}", shortcut.default);
+                    eprintln!("hotkey: register failed for `{text}`: {err}, falling back to {}", shortcut.default);
                     let fallback = parse_hotkey_text(shortcut.default).expect("default hotkey text must parse");
                     if let Err(err) = manager.register(fallback.0) {
                         eprintln!("hotkey: fallback register failed: {err}");
@@ -347,7 +348,7 @@ impl HotkeyService {
             }
             Some(Backend::Portal(shortcut)) => shortcut.change(index, &new_text),
             None => {
-                eprintln!("hotkey: no hotkey backend available; saving only");
+                eprintln!("hotkey: no hotkey backend available, saving only");
                 Ok(new_text)
             }
         }

@@ -105,6 +105,27 @@ impl Layout {
         (ix.clamp(0, img_w as i32 - 1), iy.clamp(0, img_h as i32 - 1))
     }
 
+    /// Monitor `i`'s size in its own screen pixels (2560 x 1440 for a
+    /// 2560 x 1440 monitor, at any scaling).
+    pub(crate) fn pixels(&self, i: usize) -> (u32, u32) {
+        let s = &self.screens[i];
+        let px = |len: f32, k: f32| (len * k / s.step as f32).round().max(0.0) as u32;
+        (px(s.rect.w, self.fit.sx), px(s.rect.h, self.fit.sy))
+    }
+
+    /// Monitor `i`'s part of the screenshot: (left, top, right, bottom), inclusive.
+    pub(crate) fn bounds(&self, i: usize, img_w: u32, img_h: u32) -> (i32, i32, i32, i32) {
+        let s = &self.screens[i];
+        let at = |v: f32, from: f32, k: f32| ((v - from) * k).round() as i32;
+        let (w, h) = (img_w as i32 - 1, img_h as i32 - 1);
+        (
+            at(s.rect.x, self.fit.x, self.fit.sx).clamp(0, w),
+            at(s.rect.y, self.fit.y, self.fit.sy).clamp(0, h),
+            (at(s.rect.x + s.rect.w, self.fit.x, self.fit.sx) - 1).clamp(0, w),
+            (at(s.rect.y + s.rect.h, self.fit.y, self.fit.sy) - 1).clamp(0, h),
+        )
+    }
+
     /// Screenshot pixel → (monitor, logical point in its window). None in a
     /// gap between monitors of different sizes.
     pub(crate) fn place(&self, ix: i32, iy: i32) -> Option<(usize, f32, f32)> {
@@ -144,8 +165,8 @@ impl Layout {
 /// itself (`Session::end`); Esc, a right click or closing a window end it
 /// through `cancelled`.
 pub(crate) trait Toy {
-    /// A window was made for this toy: which overlay it shows.
-    fn window_created(&self, _window: &FreezePickerWindow) {}
+    /// Window number `i` was made for this toy: which overlay it shows.
+    fn window_created(&self, _window: &FreezePickerWindow, _i: usize) {}
     /// The mouse is over this screenshot pixel (once per event-loop turn, and
     /// once the windows are laid out if it was already over one).
     fn pointer(&self, _s: &Rc<Session>, _point: (i32, i32)) {}
@@ -223,6 +244,53 @@ pub(crate) fn enter_active() {
 pub(crate) fn release_window() {
     if let Some(session) = ACTIVE.with(|a| a.borrow_mut().take()) {
         session.hide_all();
+    }
+}
+
+/// How to put the main window back after the frozen screen: a toy that
+/// reads the screen (the Screen Ruler) moves it out of the way first, made
+/// see-through on KDE (it keeps its place), else hidden.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Aside {
+    hidden: bool,
+    faded: bool,
+}
+
+/// Moves the main window out of the way. Returns how to bring it back, and
+/// whether it was on the screen (then the desktop needs a moment before the
+/// screenshot). UI thread only.
+pub(crate) fn step_aside(ui: &AppWindow) -> (Aside, bool) {
+    let visible = ui.window().is_visible() && !ui.window().is_minimized();
+    let faded = visible
+        && crate::kwin::available()
+        && crate::kwin::set_main_window_opacity(0.0)
+            .map_err(|err| eprintln!("frozen screen: couldn't fade the window ({err}), hiding it"))
+            .is_ok();
+    if visible && !faded {
+        crate::ui_state::hide_window(ui);
+    }
+    (Aside { hidden: visible && !faded, faded }, visible)
+}
+
+/// Ends the frozen screen: the windows and screenshot go, the main window
+/// comes back. Safe to call from any thread.
+pub(crate) fn come_back(ui_weak: slint::Weak<AppWindow>, aside: Aside) {
+    let result = slint::invoke_from_event_loop(move || {
+        release_window();
+        if aside.faded {
+            if let Err(err) = crate::kwin::set_main_window_opacity(1.0) {
+                eprintln!("frozen screen: couldn't bring the window back ({err})");
+            }
+        } else if aside.hidden {
+            if let Some(ui) = ui_weak.upgrade() {
+                crate::ui_state::show_window(&ui);
+            }
+        }
+        crate::picker::PICKER_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
+        slint::Timer::single_shot(Duration::from_millis(500), crate::ui_state::return_free_memory);
+    });
+    if result.is_err() {
+        crate::picker::PICKER_ACTIVE.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -373,8 +441,8 @@ impl Session {
         let window = window.map_err(|err| format!("window failed: {err:?}"))?;
         window.global::<crate::Skin>().set_real_shadows(!crate::cpu_drawn());
         window.set_screenshot_image(self.image.clone());
-        self.toy.window_created(&window);
         let i = self.windows.borrow().len();
+        self.toy.window_created(&window, i);
         let weak: Weak<Session> = Rc::downgrade(self);
         {
             let weak = weak.clone();
@@ -573,14 +641,14 @@ impl Session {
                         Err(why) => why.clone(),
                         Ok((rects, _, _)) => format!("they kept moving ({rects:?})"),
                     };
-                    eprintln!("freeze picker: the windows didn't cover the monitors in 3 s: {why}; using the other picker");
+                    eprintln!("freeze picker: the windows didn't cover the monitors in 3 s: {why}, using the other picker");
                     self.give_up();
                 }
                 return;
             };
             let Some(fit) = fit(&rects, self.shot.width, self.shot.height) else {
                 eprintln!(
-                    "freeze picker: screenshot {}x{} doesn't match the monitors {rects:?}; using the other picker",
+                    "freeze picker: screenshot {}x{} doesn't match the monitors {rects:?}, using the other picker",
                     self.shot.width, self.shot.height
                 );
                 self.give_up();
@@ -703,6 +771,11 @@ mod tests {
         // one screen pixel is 1 screenshot pixel on the 200% monitor, 2 on the 100% one
         assert_eq!(layout.screens[0].step, 1);
         assert_eq!(layout.screens[1].step, 2);
+        // each monitor's own size and its part of the screenshot (what the ruler may measure)
+        assert_eq!(layout.pixels(0), (2560, 1440));
+        assert_eq!(layout.pixels(1), (1920, 1080));
+        assert_eq!(layout.bounds(0, 6400, 2160), (0, 0, 2559, 1439));
+        assert_eq!(layout.bounds(1, 6400, 2160), (2560, 0, 6399, 2159));
         // right arrow from the left monitor's last column crosses over
         let edge = layout.pixel(0, 1279.9, 100.0, 6400, 2160);
         assert_eq!(edge, (2559, 200));

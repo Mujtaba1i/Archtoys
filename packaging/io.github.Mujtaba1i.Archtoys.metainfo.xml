@@ -5,7 +5,7 @@
   <id>io.github.Mujtaba1i.Archtoys</id>
   <launchable type="desktop-id">archtoys.desktop</launchable>
   <name>Archtoys</name>
-  <summary>PowerToys-style tools for Linux: pick colors, copy text from the screen</summary>
+  <summary>PowerToys-style tools for Linux: pick colors, copy text, measure the screen</summary>
   <developer id="io.github.mujtaba1i">
     <name>Mujtaba1i</name>
   </developer>
@@ -20,12 +20,17 @@
     <ul>
       <li>Pick any pixel on any monitor, with a magnifier and arrow keys for precision</li>
       <li>See the color's name among about 32,000, and find colors by name</li>
-      <li>Copy it as HEX, RGB, HSL, HSV, OKLCH and more; edit and compare colors</li>
+      <li>Copy it as HEX, RGB, HSL, HSV, OKLCH and more, edit and compare colors</li>
     </ul>
     <p>Text Extractor:</p>
     <ul>
       <li>Drag over any part of the screen and copy the text in it, even from images and videos</li>
       <li>Languages are detected by themselves</li>
+    </ul>
+    <p>Screen Ruler:</p>
+    <ul>
+      <li>Measure a box, the space around a point, a width or a height, in px, cm or inches</li>
+      <li>Keep up to three boxes on the screen and copy their sizes at once</li>
     </ul>
     <p>
       Archtoys works offline. Text Extractor uses Tesseract, which Archtoys installs from
@@ -53,6 +58,8 @@
     <keyword>eyedropper</keyword>
     <keyword>OCR</keyword>
     <keyword>text</keyword>
+    <keyword>ruler</keyword>
+    <keyword>measure</keyword>
     <keyword>PowerToys</keyword>
   </keywords>
   <provides>

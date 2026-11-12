@@ -70,7 +70,7 @@ pub fn show_message(ui: &AppWindow, text: &str) {
 
 /// Shows "Invalid HEX — e.g. #FF46A2" for 3 seconds.
 pub fn show_input_error(ui: &AppWindow, field: ColorField) {
-    show_message(ui, &format!("Invalid {} — e.g. {}", field.label(), field.example()));
+    show_message(ui, &format!("Invalid {}, for example {}", field.label(), field.example()));
 }
 
 pub fn clear_input_error(ui: &AppWindow) {

@@ -12,9 +12,10 @@
 
 mod capture;
 mod engine;
-mod history;
+pub(crate) mod history;
 mod install;
 mod lang;
+pub(crate) use lang::app_data_dir;
 pub(crate) mod page;
 
 use crate::{AppWindow, TextEntry};
@@ -153,7 +154,7 @@ pub(crate) fn check_again(ui: &AppWindow) {
 fn languages_info(ui: &AppWindow) {
     let (codes, bytes) = lang::downloaded();
     let text = if codes.is_empty() {
-        "Your system's languages; others download when they're first needed".to_string()
+        "Your system's languages. Others download when they're first needed".to_string()
     } else {
         let names: Vec<String> = codes.iter().filter(|c| *c != "osd").map(|c| lang::display_name(c)).collect();
         format!("Downloaded: {} · {:.1} MB", names.join(", "), bytes as f64 / 1e6)

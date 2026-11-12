@@ -1,4 +1,5 @@
 // The app's frame (v0.7.0): the bar with the menu, the sidebar and the Home page.
+import { ScrollView } from "std-widgets.slint";
 import { Skin } from "common.slint";
 
 // A button in the bar (the menu).
@@ -145,14 +146,16 @@ component NavItem inherits Rectangle {
 }
 
 // The sidebar: the toys, and Settings at the bottom. Pages: 0 Home,
-// 1 Color Picker, 2 Text Extractor.
+// 1 Color Picker, 2 Text Extractor, 3 Screen Ruler.
 export component Sidebar inherits Rectangle {
     in property <int> page;
+    // the ruler's icon (its teeth follow the last measurement)
+    in property <image> ruler-icon: @image-url("ruler.svg");
     in property <bool> settings-open;
     // only the icons
     in property <bool> compact;
     // the mouse is over it (its buttons take the hover from the area below them)
-    out property <bool> hovered: hover.has-hover || home.hovered || picker.hovered || text.hovered || settings.hovered;
+    out property <bool> hovered: hover.has-hover || home.hovered || picker.hovered || text.hovered || ruler.hovered || settings.hovered;
     callback navigate(int);
     callback open-settings();
     hover := TouchArea { }
@@ -180,6 +183,13 @@ export component Sidebar inherits Rectangle {
             label: "Text Extractor";
             active: root.page == 2 && !root.settings-open;
             clicked => { root.navigate(2); }
+        }
+        ruler := NavItem {
+            compact: root.compact;
+            icon: root.ruler-icon;
+            label: "Screen Ruler";
+            active: root.page == 3 && !root.settings-open;
+            clicked => { root.navigate(3); }
         }
         Rectangle { vertical-stretch: 1; }
         settings := NavItem {
@@ -254,6 +264,9 @@ component RecentCard inherits Rectangle {
     in property <string> title;
     in property <string> detail;
     in property <color> swatch: transparent;
+    // an icon on a tile instead of a swatch (the ruler's)
+    in property <image> icon;
+    in property <color> icon-color;
     callback clicked;
     height: 76px;
     border-radius: 16px;
@@ -273,6 +286,17 @@ component RecentCard inherits Rectangle {
             background: root.swatch;
             border-width: 1px;
             border-color: Skin.border;
+        }
+        if root.icon.width > 0 : Rectangle {
+            width: 48px;
+            border-radius: 12px;
+            background: Skin.surface-hover;
+            Image {
+                source: root.icon;
+                width: 26px;
+                height: 26px;
+                colorize: root.icon-color;
+            }
         }
         VerticalLayout {
             alignment: center;
@@ -307,6 +331,9 @@ component RecentCard inherits Rectangle {
 export component HomePage inherits Rectangle {
     in property <string> picker-hotkey;
     in property <string> text-hotkey;
+    in property <string> ruler-hotkey;
+    in property <image> ruler-icon: @image-url("ruler.svg");
+    in property <color> ruler-line;
     in property <color> last-color;
     // "#2D5C76", and its name
     in property <string> last-color-value;
@@ -314,55 +341,95 @@ export component HomePage inherits Rectangle {
     // the latest extracted text on one line ("" when there is none)
     in property <string> last-text;
     in property <string> last-text-detail;
+    // the latest measurement ("" when there is none) and "Spacing · Today 2:20 PM"
+    in property <string> last-measure;
+    in property <string> last-measure-detail;
     callback open-toy(int);
-    VerticalLayout {
-        padding: 20px;
-        padding-top: 10px;
-        spacing: 14px;
-        alignment: start;
-        Text {
-            text: "YOUR TOYS";
-            color: Skin.text-muted;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-        HorizontalLayout {
+    // each toy card: half the row (the page's padding is 20 px each side, 14 px between)
+    property <length> card-width: (home-scroll.visible-width - 2 * 20px - 14px) / 2;
+    home-scroll := ScrollView {
+        // its width is the window's, not its content's (as in Settings), so
+        // the toy cards can each take exactly half of it
+        content-width: self.visible-width;
+        content-height: home-list.preferred-height;
+        home-list := VerticalLayout {
+            width: home-scroll.visible-width;
+            padding: 20px;
+            padding-top: 10px;
             spacing: 14px;
-            ToyCard {
-                icon: @image-url("pick.svg");
-                title: "Color Picker";
-                subtitle: "Pick, name and copy any pixel";
-                hotkey: root.picker-hotkey;
+            alignment: start;
+            Text {
+                text: "YOUR TOYS";
+                color: Skin.text-muted;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }
+            HorizontalLayout {
+                spacing: 14px;
+                ToyCard {
+                    icon: @image-url("pick.svg");
+                    width: root.card-width;
+                    title: "Color Picker";
+                    subtitle: "Pick, name and copy any pixel";
+                    hotkey: root.picker-hotkey;
+                    clicked => { root.open-toy(1); }
+                }
+                ToyCard {
+                    icon: @image-url("text.svg");
+                    width: root.card-width;
+                    title: "Text Extractor";
+                    subtitle: "Copy text from anywhere on screen";
+                    hotkey: root.text-hotkey;
+                    clicked => { root.open-toy(2); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 14px;
+                ToyCard {
+                    icon: root.ruler-icon;
+                    width: root.card-width;
+                    title: "Screen Ruler";
+                    subtitle: "Measure anything on screen";
+                    hotkey: root.ruler-hotkey;
+                    clicked => { root.open-toy(3); }
+                }
+                Rectangle { }
+            }
+            Text {
+                text: "RECENT";
+                color: Skin.text-muted;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }
+            if root.last-measure != "" : RecentCard {
+                label: "RULER";
+                title: root.last-measure;
+                detail: root.last-measure-detail;
+                icon: @image-url("spacing.svg");
+                icon-color: root.ruler-line;
+                clicked => { root.open-toy(3); }
+            }
+            RecentCard {
+                label: "COLOR";
+                title: root.last-color-value;
+                detail: root.last-color-name;
+                swatch: root.last-color;
                 clicked => { root.open-toy(1); }
             }
-            ToyCard {
-                icon: @image-url("text.svg");
-                title: "Text Extractor";
-                subtitle: "Copy text from anywhere on screen";
-                hotkey: root.text-hotkey;
+            RecentCard {
+                label: "TEXT";
+                title: root.last-text != "" ? root.last-text : "Nothing extracted yet";
+                detail: root.last-text != "" ? root.last-text-detail : "Press " + root.text-hotkey + " and drag over any text";
                 clicked => { root.open-toy(2); }
             }
-        }
-        Text {
-            text: "RECENT";
-            color: Skin.text-muted;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 1px;
-        }
-        RecentCard {
-            label: "COLOR";
-            title: root.last-color-value;
-            detail: root.last-color-name;
-            swatch: root.last-color;
-            clicked => { root.open-toy(1); }
-        }
-        RecentCard {
-            label: "TEXT";
-            title: root.last-text != "" ? root.last-text : "Nothing extracted yet";
-            detail: root.last-text != "" ? root.last-text-detail : "Press " + root.text-hotkey + " and drag over any text";
-            clicked => { root.open-toy(2); }
+            if root.last-measure == "" : RecentCard {
+                label: "RULER";
+                title: "Nothing measured yet";
+                detail: "Press " + root.ruler-hotkey + " and point at anything";
+                clicked => { root.open-toy(3); }
+            }
         }
     }
 }

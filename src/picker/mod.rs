@@ -82,7 +82,7 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
         && was_visible
         && crate::kwin::available()
         && crate::kwin::set_main_window_opacity(0.0)
-            .map_err(|err| eprintln!("picker: couldn't fade the window ({err}); hiding it"))
+            .map_err(|err| eprintln!("picker: couldn't fade the window ({err}), hiding it"))
             .is_ok();
     if ui.get_setting_minimize() && !faded {
         hide_window(ui);
@@ -246,9 +246,21 @@ pub(crate) fn center_rgb(area: &[u8], radius: i32) -> Rgb {
     (area[i], area[i + 1], area[i + 2])
 }
 
+/// How much the magnifier enlarges: each pixel is a 10 x 10 block (110 px for 11 pixels).
+pub(crate) const MAGNIFIER_ZOOM: usize = 10;
+
+/// The area already enlarged, each pixel a whole block: Slint's own scaling
+/// of a tiny image drifts (its blocks came out 11, 10, ... 7 wide), which put
+/// the marker 2 px off the pixel it picks.
 pub(crate) fn magnifier_image(area: &[u8], radius: i32) -> slint::Image {
-    let size = (2 * radius + 1) as u32;
-    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(area, size, size);
+    let size = (2 * radius + 1) as usize;
+    let big = size * MAGNIFIER_ZOOM;
+    let mut buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(big as u32, big as u32);
+    for (i, px) in buffer.make_mut_slice().iter_mut().enumerate() {
+        let (x, y) = ((i % big) / MAGNIFIER_ZOOM, (i / big) / MAGNIFIER_ZOOM);
+        let k = (y * size + x) * 4;
+        *px = slint::Rgba8Pixel { r: area[k], g: area[k + 1], b: area[k + 2], a: area[k + 3] };
+    }
     slint::Image::from_rgba8(buffer)
 }
 
@@ -266,5 +278,19 @@ mod tests {
         // left neighbour of the center is red, top row is outside → black
         assert_eq!(&area[12..16], &[255, 0, 0, 255]);
         assert_eq!(&area[0..4], &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn the_magnifier_is_whole_blocks() {
+        // 3x3: the center pixel white, the rest gray
+        let mut area = vec![80u8; 3 * 3 * 4];
+        area[16..20].copy_from_slice(&[255, 255, 255, 255]);
+        let img = magnifier_image(&area, 1);
+        let buf = img.to_rgba8().unwrap();
+        assert_eq!((buf.width(), buf.height()), (30, 30));
+        let at = |x: usize, y: usize| buf.as_slice()[y * 30 + x].r;
+        // the center block is exactly x 10..19, y 10..19
+        assert_eq!((at(9, 15), at(10, 15), at(19, 15), at(20, 15)), (80, 255, 255, 80));
+        assert_eq!((at(15, 9), at(15, 10), at(15, 19), at(15, 20)), (80, 255, 255, 80));
     }
 }
