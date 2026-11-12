@@ -66,6 +66,18 @@ jobs:
           cargo build --release --locked
           python3 .github/scripts/ocr_accuracy.py target/release/archtoys
 
+      # The app used like a person would (in CI since v0.7.4): a real mouse and
+      # keyboard on a virtual X11 screen pick colors, search, open the editor,
+      # the formats panel, Settings and the sidebar, extract text and open
+      # Report a problem. Each check is verified by what a user gets
+      # (config.json, the clipboard, pixels, files), never by the app reporting
+      # on itself. Every check runs, the run summary lists them, and the step
+      # fails if any failed. (Slint 1.18 cut the end of Settings off: this caught it.)
+      - name: End to end (the app used like a person would)
+        run: |
+          sudo apt-get install -y xclip python3-xlib python3-pil openbox
+          dbus-run-session -- python3 .github/scripts/e2e_test.py target/release/archtoys
+
       # Every library must have a licence an MIT app can use and ship.
       - name: Licences
         run: |

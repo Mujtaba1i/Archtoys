@@ -136,91 +136,115 @@ cold() {
   done
 }
 
-# measure KEY BIN MODE: RUNS warm runs; KEY.<metric> is the median of each
-# metric, except the start (window, startup): the average of the runs
-measure() {
-  local key=$1 bin=$2 mode=$3 r col names=(window startup idle rss pss threads own read peak wakeups)
-  : > "$OUT/$key.runs"
-  for r in $(seq 1 "$RUNS"); do
-    echo "   $key, run $r of $RUNS ($mode, about 10 s)" >&2
-    run_once "$bin" "$mode" >> "$OUT/$key.runs"
-    cp "$OUT/app.log" "$OUT/$key.log"
-  done
-  for col in $(seq 1 10); do
-    awk -v c=$col '{ print $c }' "$OUT/$key.runs" | median > "$OUT/$key.${names[col - 1]}"
-  done
-  for col in 1 2; do
-    awk -v c=$col '{ print $c }' "$OUT/$key.runs" | average > "$OUT/$key.${names[col - 1]}"
-  done
-  du -k "$bin" | cut -f1 > "$OUT/$key.size"
+# in_turns ROUND KEYS...: the keys in this round's order (new, old, then old,
+# new, ...). Every phase takes turns like this: before v0.7.4 the warm runs, the
+# picks and the text reads ran all of one build, then all of the other, and the
+# build measured first always looked 20-30% slower to start (swapping which
+# binary was "new" moved the slowdown with it).
+in_turns() {
+  local round=$1 key out=(); shift
+  if [ $((round % 2)) = 1 ]; then echo "$@"; else for key in "$@"; do out=("$key" "${out[@]}"); done; echo "${out[@]}"; fi
 }
 
-# pick KEY BIN: `archtoys --pick` with no copy running starts in the tray and
+# measure MODE KEYS...: RUNS warm runs of each build, taking turns; KEY.<metric>
+# is the median of each metric, except the start (window, startup): the average
+measure() {
+  local mode=$1 r key col names=(window startup idle rss pss threads own read peak wakeups); shift
+  for key in "$@"; do : > "$OUT/$key.runs"; done
+  for r in $(seq 1 "$RUNS"); do
+    for key in $(in_turns "$r" "$@"); do
+      echo "   $key, run $r of $RUNS ($mode, about 10 s)" >&2
+      run_once "${BIN[$key]}" "$mode" >> "$OUT/$key.runs"
+      cp "$OUT/app.log" "$OUT/$key.log"
+    done
+  done
+  for key in "$@"; do
+    for col in $(seq 1 10); do
+      awk -v c=$col '{ print $c }' "$OUT/$key.runs" | median > "$OUT/$key.${names[col - 1]}"
+    done
+    for col in 1 2; do
+      awk -v c=$col '{ print $c }' "$OUT/$key.runs" | average > "$OUT/$key.${names[col - 1]}"
+    done
+    du -k "${BIN[$key]}" | cut -f1 > "$OUT/$key.size"
+  done
+}
+
+# pick KEYS...: `archtoys --pick` with no copy running starts in the tray and
 # picks: the time until the picker shows (X11: its overlay window), the peak
-# memory, and the memory 1.5 s after Esc closed it. PICKS runs, medians.
+# memory, and the memory 1.5 s after Esc closed it. PICKS runs each, taking
+# turns, medians.
 PICKS=${PICKS:-3}
 pick() {
-  local key=$1 bin=$2 r pid t0 shown i
-  : > "$OUT/$key.picks"
+  local r key bin pid t0 shown i
+  for key in "$@"; do : > "$OUT/$key.picks"; done
   for r in $(seq 1 "$PICKS"); do
-    echo "   $key, pick $r of $PICKS" >&2
-    t0=$(now_ms); shown=-1
-    env -u WAYLAND_DISPLAY "$bin" --pick >"$OUT/app.log" 2>&1 & pid=$!
-    for i in $(seq 1 500); do
-      xdotool search --onlyvisible --name '^Archtoys Picker' >/dev/null 2>&1 && { shown=$(( $(now_ms) - t0 )); break; }
-      kill -0 "$pid" 2>/dev/null || break
-      sleep 0.01
+    for key in $(in_turns "$r" "$@"); do
+      bin=${BIN[$key]}
+      echo "   $key, pick $r of $PICKS" >&2
+      t0=$(now_ms); shown=-1
+      env -u WAYLAND_DISPLAY "$bin" --pick >"$OUT/app.log" 2>&1 & pid=$!
+      for i in $(seq 1 500); do
+        xdotool search --onlyvisible --name '^Archtoys Picker' >/dev/null 2>&1 && { shown=$(( $(now_ms) - t0 )); break; }
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 0.01
+      done
+      sleep 0.5; xdotool key Escape; sleep 1.5
+      echo "$shown $(kb "$pid" VmHWM status || echo -1) $(kb "$pid" VmRSS status || echo -1)" >> "$OUT/$key.picks"
+      kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; sleep 0.5
     done
-    sleep 0.5; xdotool key Escape; sleep 1.5
-    echo "$shown $(kb "$pid" VmHWM status || echo -1) $(kb "$pid" VmRSS status || echo -1)" >> "$OUT/$key.picks"
-    kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; sleep 0.5
   done
-  awk '{ print ($1 == "" ? -1 : $1) }' "$OUT/$key.picks" | median > "$OUT/$key.pick"
-  awk '{ print ($2 == "" ? -1 : $2) }' "$OUT/$key.picks" | median > "$OUT/$key.pick_peak"
-  awk '{ print ($3 == "" ? -1 : $3) }' "$OUT/$key.picks" | median > "$OUT/$key.pick_after"
+  for key in "$@"; do
+    awk '{ print ($1 == "" ? -1 : $1) }' "$OUT/$key.picks" | median > "$OUT/$key.pick"
+    awk '{ print ($2 == "" ? -1 : $2) }' "$OUT/$key.picks" | median > "$OUT/$key.pick_peak"
+    awk '{ print ($3 == "" ? -1 : $3) }' "$OUT/$key.picks" | median > "$OUT/$key.pick_after"
+  done
 }
 
-# text KEY BIN: Text Extractor reading a fixed image (`--extract-file`, the
+# text KEYS...: Text Extractor reading a fixed image (`--extract-file`, the
 # same engine as a capture): the time and the peak memory of the app itself
-# (Tesseract runs as its own program). Needs Tesseract and GNU time; "—" without.
+# (Tesseract runs as its own program), 3 reads each, taking turns. Needs
+# Tesseract and GNU time; "—" without.
 TEXT_IMAGE=${TEXT_IMAGE:-$(dirname "$0")/bench-text.png}
 text() {
-  local key=$1 bin=$2 r t0 ms out
-  : > "$OUT/$key.texts"
+  local r key bin t0 ms out
   if ! command -v tesseract >/dev/null || [ ! -x /usr/bin/time ] || [ ! -f "$TEXT_IMAGE" ]; then
-    echo -1 > "$OUT/$key.text"; echo -1 > "$OUT/$key.text_peak"; return
+    for key in "$@"; do echo -1 > "$OUT/$key.text"; echo -1 > "$OUT/$key.text_peak"; done
+    return
   fi
-  "$bin" --extract-file "$TEXT_IMAGE" >/dev/null 2>&1  # untimed: the first read sets up the language data
-  for r in 1 2 3; do
-    t0=$(now_ms)
-    /usr/bin/time -f "%M" -o "$OUT/time" "$bin" --extract-file "$TEXT_IMAGE" >/dev/null 2>&1
-    ms=$(( $(now_ms) - t0 ))
-    out=$(tail -1 "$OUT/time" 2>/dev/null)
-    echo "$ms ${out:--1}" >> "$OUT/$key.texts"
+  for key in "$@"; do
+    : > "$OUT/$key.texts"
+    "${BIN[$key]}" --extract-file "$TEXT_IMAGE" >/dev/null 2>&1  # untimed: the first read sets up the language data
   done
-  awk '{ print $1 }' "$OUT/$key.texts" | median > "$OUT/$key.text"
-  awk '{ print $2 }' "$OUT/$key.texts" | median > "$OUT/$key.text_peak"
+  for r in 1 2 3; do
+    for key in $(in_turns "$r" "$@"); do
+      bin=${BIN[$key]}
+      t0=$(now_ms)
+      /usr/bin/time -f "%M" -o "$OUT/time" "$bin" --extract-file "$TEXT_IMAGE" >/dev/null 2>&1
+      ms=$(( $(now_ms) - t0 ))
+      out=$(tail -1 "$OUT/time" 2>/dev/null)
+      echo "$ms ${out:--1}" >> "$OUT/$key.texts"
+    done
+  done
+  for key in "$@"; do
+    awk '{ print $1 }' "$OUT/$key.texts" | median > "$OUT/$key.text"
+    awk '{ print $2 }' "$OUT/$key.texts" | median > "$OUT/$key.text_peak"
+  done
 }
 get() { cat "$OUT/$1.$2"; }
 
 HAVE_OLD=0
 if [ -x "$OLD" ] && [ "$(readlink -f "$OLD")" != "$(readlink -f "$NEW")" ]; then HAVE_OLD=1; fi
-declare -A BIN=([new]="$NEW" [old]="$OLD")
+declare -A BIN=([new]="$NEW" [old]="$OLD" [new-wl]="$NEW" [old-wl]="$OLD")
 KEYS=(new); [ "$HAVE_OLD" = 1 ] && KEYS=(new old)
 warm_system
 cold "${KEYS[@]}"
-for key in "${KEYS[@]}"; do
-  measure "$key" "${BIN[$key]}" x11
-  pick "$key" "${BIN[$key]}"
-  text "$key" "${BIN[$key]}"
-done
+measure x11 "${KEYS[@]}"
+pick "${KEYS[@]}"
+text "${KEYS[@]}"
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-  measure new-wl "$NEW" wayland
-  [ "$HAVE_OLD" = 1 ] && measure old-wl "$OLD" wayland
+  if [ "$HAVE_OLD" = 1 ]; then measure wayland new-wl old-wl; else measure wayland new-wl; fi
 fi
 
-# --- the report ---------------------------------------------------------------
-# formatters; "—" for values that couldn't be measured (-1)
 mb() { awk -v v="$1" 'BEGIN { if (v < 0) print "—"; else printf "%.1f MB", v / 1024 }'; }
 ms() { [ "$1" -lt 0 ] && echo "—" || echo "$1 ms"; }
 cpu() { [ "$1" -lt 0 ] && echo "—" || echo "$1 ms"; }

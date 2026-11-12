@@ -30,8 +30,16 @@ if [ $code -eq 0 ]; then
   exit 0
 fi
 
-lines="$( (if [ -n "$keep" ]; then grep -E "$keep" "$out"; else cat "$out"; fi) | sed 's/\x1b\[[0-9;]*m//g' | head -60)"
-[ -n "$lines" ] || lines="$(sed 's/\x1b\[[0-9;]*m//g' "$out" | tail -30)"
+clean="$(sed 's/\x1b\[[0-9;]*m//g' "$out")"
+kept="$(if [ -n "$keep" ]; then printf '%s\n' "$clean" | grep -E "$keep"; else printf '%s\n' "$clean"; fi)"
+# errors first, so a long list of warnings can't push them out of the 60 lines
+# (a block is an error/warning line and the lines under it)
+lines="$(printf '%s\n' "$kept" | awk '
+  /^(error|warning)/ { n++; err[n] = /^error/ }
+  { block[n] = block[n] $0 "\n" }
+  END { for (i = 0; i <= n; i++) if (err[i]) printf "%s", block[i]
+        for (i = 0; i <= n; i++) if (!err[i]) printf "%s", block[i] }' | head -60)"
+[ -n "$lines" ] || lines="$(printf '%s\n' "$clean" | tail -30)"
 mark="❌"; level=error
 if [ $warn = 1 ]; then mark="⚠️"; level=warning; fi
 {
@@ -40,7 +48,14 @@ if [ $warn = 1 ]; then mark="⚠️"; level=warning; fi
   printf '<details><summary>What it found</summary>\n\n```\n%s\n```\n</details>\n\n' "${lines//\`\`\`/\'\'\'}"
   printf '| | Check | What it checks |\n|---|---|---|\n'   # the next rows go in a fresh table
 } >> "$summary"
-first="$(printf '%s\n' "$lines" | grep -m1 -v '^[[:space:]]*$' | cut -c1-200)"
+# the headline: the first real error and where it is (cargo's "-->", cargo deny's "┌─"),
+# not whatever line came first (that was a warning's place, or a "│")
+first="$(printf '%s\n' "$clean" | awk '
+  /^error/ && !/^error: could not compile/ && !/^error: aborting/ && h == "" { h = $0; at = NR; next }
+  h != "" && NR <= at + 3 && /(-->|┌─)/ { sub(/.*(-->|┌─) */, ""); sub(/^.*\/Archtoys\/Archtoys\//, ""); print h " (" $0 ")"; found = 1; exit }
+  END { if (h != "" && !found) print h }')"
+[ -n "$first" ] || first="$(printf '%s\n' "$lines" | grep -m1 -v '^[[:space:]]*$')"
+first="$(printf '%s' "$first" | cut -c1-200)"
 echo "::$level title=$title::$first. $fix"
 [ $warn = 1 ] && exit 0
 exit 1
