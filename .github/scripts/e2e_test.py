@@ -107,6 +107,9 @@ class App:
                         XDG_RUNTIME_DIR=runtime, XDG_CURRENT_DESKTOP="",
                         PATH=self.bin_dir + ":" + os.environ["PATH"], ARCHTOYS_HOTKEY_BACKEND="x11")
         self.env.pop("WAYLAND_DISPLAY", None)
+        # its own profile: GitHub's runners set these, and the app would save outside HOME
+        for name in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+            self.env.pop(name, None)
         self.env.update(extra_env or {})
         self.log = open(os.path.join(self.home, "app.log"), "w")
         self.proc = subprocess.Popen([BIN, *args], env=self.env, stdout=self.log, stderr=subprocess.STDOUT)
