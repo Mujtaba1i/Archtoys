@@ -14,8 +14,15 @@ updates:
     allow:
       - dependency-type: all
     groups:
+      # a new major version can need code changes: it comes as its own pull
+      # request, so it never holds back the others
       rust-libraries:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # zbus 6 removed zbus::blocking, which Archtoys uses: moving to it is planned work
+      - dependency-name: "zbus"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "Bump"
 
