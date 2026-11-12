@@ -28,7 +28,7 @@ ksni = { version = "0.3.3", default-features = false, features = ["blocking", "a
 # the same version Slint uses, so it is compiled once
 image = { version = "0.25", default-features = false, features = ["png"] }
 x11rb = { version = "0.14.0", features = ["randr"] }
-zbus = "5.13.2"
+zbus = "6.2.1"
 # which language a text is in (Text Extractor); pure Rust, MIT
 whatlang = "0.18"
 
