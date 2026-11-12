@@ -118,7 +118,10 @@ start() {
   fi
   HOME="$(mktemp -d)"
   export HOME DISPLAY=:99
-  Xvfb :99 -screen 0 1280x1024x24 >/tmp/xvfb.log 2>&1 &
+  # -noreset: an X server resets when its last client leaves and refuses
+  # connections meanwhile; the app started right after the last one closed
+  # sometimes hit that ("Failed to open connection to X server", v0.7.4)
+  Xvfb :99 -screen 0 1280x1024x24 -noreset >/tmp/xvfb.log 2>&1 &
   local xvfb=$!
   local x
   for x in $(seq 1 40); do

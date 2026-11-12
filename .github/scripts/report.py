@@ -270,6 +270,8 @@ def gh(*args, check=True):
 
 
 TS = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ")
+# a log's colors (newer gh refuses to print them without --allow-escape-sequences)
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 def run_gh(*args):
@@ -290,7 +292,7 @@ def fetch_log(repo, job_id, tries=3, wait=10):
     for attempt in range(tries):
         if attempt:
             time.sleep(wait)
-        r = run_gh("api", f"repos/{repo}/actions/jobs/{job_id}/logs")
+        r = run_gh("api", "--allow-escape-sequences", f"repos/{repo}/actions/jobs/{job_id}/logs")
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout, ""
         why = (r.stderr or "").strip().splitlines()[-1:] or ["GitHub returned an empty log"]
@@ -306,7 +308,7 @@ def log_excerpt(repo, job_id, tries=3, wait=10):
     if not text:
         return "", (f"(Archtoys couldn't fetch this job's log: {why}. "
                     "The link above opens the full log on GitHub.)")
-    lines = [TS.sub("", l) for l in text.splitlines()]
+    lines = [TS.sub("", ANSI.sub("", l)) for l in text.splitlines()]
     errors = [l for l in lines if "##[error]" in l or l.startswith("::error") or "error:" in l.lower()][:15]
     clean = lambda ls: "\n".join(l.replace("```", "'''") for l in ls)  # noqa: E731
     return clean(errors), clean(lines[-60:])

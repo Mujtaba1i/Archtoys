@@ -124,6 +124,12 @@ class LogExcerpt(unittest.TestCase):
         self.assertEqual(errors, "::error::CI failed")
         self.assertNotIn("Wait for CI\t", tail)
 
+    def test_the_log_comes_without_its_colors(self):
+        self.answers = [(0, "2026-11-12T17:22:32.1Z \x1b[36;1mstep\x1b[0m\n2026-11-12T17:22:33.1Z \x1b[31m##[error]boom\x1b[0m\n", "")]
+        errors, tail = report.log_excerpt("o/r", 5)
+        self.assertEqual(errors, "##[error]boom")
+        self.assertNotIn("\x1b", tail)
+
     def test_no_log_says_why_instead_of_an_empty_box(self):
         errors, tail = report.log_excerpt("o/r", 5)
         self.assertEqual(errors, "")
