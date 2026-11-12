@@ -1,45 +1,43 @@
-//! Freeze-frame picker: one screenshot, shown fullscreen in our own windows,
+//! The frozen screen: one screenshot, shown fullscreen in our own windows,
 //! one per monitor. Inside our own window we may read the mouse position,
-//! even on Wayland, so we can show the same live preview and magnifier as on X11.
+//! even on Wayland, so a toy can show a live preview on it. Every toy that
+//! works on the screen uses it: the Color Picker (`picker/frozen.rs`) and
+//! Text Extractor's capture (`ocr/capture.rs`). This part only lays the
+//! windows out over the monitors and tells the toy what happens (the `Toy`
+//! trait); what that means is up to the toy.
 //!
 //! The screenshot shows every monitor (their bounding box, scaled by one
 //! factor). Each window shows its own monitor's part: the monitor's position
 //! comes from winit, its size from the fullscreen window on it. If that
-//! doesn't add up to the screenshot, the other picker is used.
+//! doesn't add up to the screenshot, the toy's fallback is used.
 //!
 //! The screenshot file is deleted as soon as it has been loaded into memory,
-//! and the image is freed when the pick ends.
+//! and the image is freed when the frozen screen ends.
 
-use super::{
-    center_rgb, crop_rgba, end_text_capture, finish_picker, magnifier_image, preview_text, show_hover, PickOutcome, PickerContext,
-    TextRestore, MAGNIFIER_RADIUS,
-};
-use crate::color::Rgb;
-use crate::config::HistoryStore;
-use crate::{AppWindow, FreezePickerWindow, TextBox};
+use crate::{AppWindow, FreezePickerWindow};
 use slint::winit_030::winit::monitor::MonitorHandle;
 use slint::winit_030::winit::window::{Fullscreen, WindowAttributes};
 use slint::winit_030::WinitWindowAccessor;
-use slint::{Color, ComponentHandle, ModelRc, SharedPixelBuffer, VecModel};
+use slint::{ComponentHandle, SharedPixelBuffer};
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 pub(crate) struct Screenshot {
-    rgba: Vec<u8>,
-    width: u32,
-    height: u32,
+    pub(crate) rgba: Vec<u8>,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 /// A monitor's place in the desktop layout, in the layout's own units:
 /// logical pixels on Wayland, physical pixels on X11.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Rect {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+pub(crate) struct Rect {
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) w: f32,
+    pub(crate) h: f32,
 }
 
 impl Rect {
@@ -75,15 +73,15 @@ fn fit(rects: &[Rect], img_w: u32, img_h: u32) -> Option<Fit> {
 
 /// One monitor: its window, its place, layout units per logical pixel of the
 /// window, and how many screenshot pixels one of its screen pixels is.
-struct Screen {
-    rect: Rect,
-    unit: f32,
-    step: i32,
+pub(crate) struct Screen {
+    pub(crate) rect: Rect,
+    pub(crate) unit: f32,
+    pub(crate) step: i32,
 }
 
-struct Layout {
+pub(crate) struct Layout {
     fit: Fit,
-    screens: Vec<Screen>,
+    pub(crate) screens: Vec<Screen>,
 }
 
 impl Layout {
@@ -98,7 +96,7 @@ impl Layout {
     }
 
     /// A point in monitor `i`'s window (logical pixels) → screenshot pixel.
-    fn pixel(&self, i: usize, x: f32, y: f32, img_w: u32, img_h: u32) -> (i32, i32) {
+    pub(crate) fn pixel(&self, i: usize, x: f32, y: f32, img_w: u32, img_h: u32) -> (i32, i32) {
         let s = &self.screens[i];
         let gx = s.rect.x + x * s.unit;
         let gy = s.rect.y + y * s.unit;
@@ -109,7 +107,7 @@ impl Layout {
 
     /// Screenshot pixel → (monitor, logical point in its window). None in a
     /// gap between monitors of different sizes.
-    fn place(&self, ix: i32, iy: i32) -> Option<(usize, f32, f32)> {
+    pub(crate) fn place(&self, ix: i32, iy: i32) -> Option<(usize, f32, f32)> {
         let gx = self.fit.x + (ix as f32 + 0.5) / self.fit.sx;
         let gy = self.fit.y + (iy as f32 + 0.5) / self.fit.sy;
         let i = self.screens.iter().position(|s| s.rect.contains(gx, gy))?;
@@ -119,7 +117,7 @@ impl Layout {
 
     /// Screenshot pixel → a point in monitor `i`'s window, even outside it
     /// (a word box that crosses the monitor's edge).
-    fn to_window(&self, i: usize, ix: f32, iy: f32) -> (f32, f32) {
+    pub(crate) fn to_window(&self, i: usize, ix: f32, iy: f32) -> (f32, f32) {
         let s = &self.screens[i];
         let gx = self.fit.x + ix / self.fit.sx;
         let gy = self.fit.y + iy / self.fit.sy;
@@ -128,7 +126,7 @@ impl Layout {
 
     /// The pixel one screen pixel away in the direction (dx, dy), or None at
     /// the outer edge of the desktop.
-    fn nudge(&self, (ix, iy): (i32, i32), dx: i32, dy: i32, img_w: u32, img_h: u32) -> Option<(i32, i32)> {
+    pub(crate) fn nudge(&self, (ix, iy): (i32, i32), dx: i32, dy: i32, img_w: u32, img_h: u32) -> Option<(i32, i32)> {
         let (i, _, _) = self.place(ix, iy)?;
         let step = self.screens[i].step;
         let (nx, ny) = (ix + dx * step, iy + dy * step);
@@ -139,37 +137,48 @@ impl Layout {
     }
 }
 
-/// What the frozen screen is for.
-pub(crate) enum Purpose {
-    /// Picking a color (the Color Picker).
-    Color { history_store: HistoryStore, context: PickerContext },
-    /// Selecting text (Text Extractor), and how to put the main window back.
-    Text(TextRestore),
+/// A toy on the frozen screen: what it is told, and how it answers. Each
+/// window only sends what its overlay uses (the color picker's mouse moves,
+/// clicks, arrow keys and Enter, or Text Extractor's selection and toolbar),
+/// so a toy leaves the others as they are. A toy ends the frozen screen
+/// itself (`Session::end`); Esc, a right click or closing a window end it
+/// through `cancelled`.
+pub(crate) trait Toy {
+    /// A window was made for this toy: which overlay it shows.
+    fn window_created(&self, _window: &FreezePickerWindow) {}
+    /// The mouse is over this screenshot pixel (once per event-loop turn, and
+    /// once the windows are laid out if it was already over one).
+    fn pointer(&self, _s: &Rc<Session>, _point: (i32, i32)) {}
+    /// A click at this point of window `i` (logical pixels).
+    fn click(&self, _s: &Rc<Session>, _i: usize, _x: f32, _y: f32) {}
+    /// An arrow key: one screen pixel in that direction.
+    fn nudge(&self, _s: &Rc<Session>, _dx: i32, _dy: i32) {}
+    /// Enter.
+    fn enter(&self, _s: &Rc<Session>) {}
+    /// Text Extractor: a new selection started (or the old one moved).
+    fn region_started(&self, _s: &Rc<Session>) {}
+    /// Text Extractor: the selection in window `i` is done.
+    fn region_done(&self, _s: &Rc<Session>, _i: usize, _x: f32, _y: f32, _w: f32, _h: f32) {}
+    /// Text Extractor: a toolbar button ("copy", "line", "open").
+    fn tool(&self, _s: &Rc<Session>, _action: &str) {}
+    /// Esc, a right click or a closed window ended it (exactly once).
+    fn cancelled(&self, s: &Rc<Session>);
+    /// The screenshot couldn't be used: the windows are gone, and the
+    /// fallback runs next. Undo what the toy changed.
+    fn gave_up(&self, _s: &Rc<Session>) {}
+    /// The windows have been up for 150 ms (and it hasn't ended).
+    fn shown(&self, _s: &Rc<Session>) {}
 }
 
-/// Text Extractor's capture: the last reading (with the text's height in
-/// screen pixels), and a counter so a reading of an older selection (the user
-/// dragged again meanwhile) is dropped.
-#[derive(Default)]
-struct TextCapture {
-    generation: u64,
-    reading: Option<(crate::ocr::Reading, u32)>,
-}
-
-/// One running freeze pick (or text capture).
-struct Session {
-    shot: Screenshot,
+/// One running frozen screen.
+pub(crate) struct Session {
+    pub(crate) shot: Screenshot,
     image: slint::Image,
-    ui_weak: slint::Weak<AppWindow>,
-    purpose: Purpose,
-    text: RefCell<TextCapture>,
+    pub(crate) ui_weak: slint::Weak<AppWindow>,
+    toy: Rc<dyn Toy>,
     /// The windows, with the monitor each was put on (none: just one window).
-    windows: RefCell<Vec<(FreezePickerWindow, Option<MonitorHandle>)>>,
-    layout: RefCell<Option<Layout>>,
-    /// The pick point, in screenshot pixels.
-    point: Cell<Option<(i32, i32)>>,
-    /// The window showing the preview card.
-    shown_on: Cell<Option<usize>>,
+    pub(crate) windows: RefCell<Vec<(FreezePickerWindow, Option<MonitorHandle>)>>,
+    pub(crate) layout: RefCell<Option<Layout>>,
     /// The newest mouse position (window, x, y), not handled yet.
     latest: Cell<Option<(usize, f32, f32)>>,
     /// Where the mouse was before the windows were laid out: the desktop
@@ -177,8 +186,6 @@ struct Session {
     /// before the layout. Shown once laid out, so the magnifier is there at once.
     early: Cell<Option<(usize, f32, f32)>>,
     done: Cell<bool>,
-    /// "Open" ended the text capture: the main window comes to the front
-    open_app: Cell<bool>,
     fallback: RefCell<Option<Box<dyn FnOnce()>>>,
 }
 
@@ -186,48 +193,34 @@ thread_local! {
     static ACTIVE: RefCell<Option<Rc<Session>>> = const { RefCell::new(None) };
 }
 
-fn active() -> Option<Rc<Session>> {
+/// The running frozen screen, if any. UI thread only.
+pub(crate) fn active() -> Option<Rc<Session>> {
     ACTIVE.with(|a| a.borrow().clone())
 }
 
-/// Cancels the freeze pick, if one is running. UI thread only.
+/// Cancels the frozen screen, if one is running. UI thread only.
 pub(crate) fn cancel_active() {
     if let Some(session) = active() {
-        session.finish(PickOutcome::Cancelled);
+        session.cancel();
     }
 }
 
 /// Arrow keys pressed in the main window. UI thread only.
 pub(crate) fn nudge_active(dx: i32, dy: i32) {
     if let Some(session) = active() {
-        session.nudge(dx, dy);
+        session.toy.clone().nudge(&session, dx, dy);
     }
 }
 
 /// Enter pressed in the main window. UI thread only.
-pub(crate) fn pick_active_point() {
+pub(crate) fn enter_active() {
     if let Some(session) = active() {
-        session.pick_point();
+        session.toy.clone().enter(&session);
     }
 }
 
-/// Puts the main window above the freeze window, without moving it, so the
-/// user sees the live values while picking ("Minimize on Pick" off).
-fn raise_main_window(ui: &AppWindow) {
-    ui.set_keep_on_top(true); // X11: the freeze window is always-on-top too
-    ui.set_picking(true);
-    ui.window().with_winit_window(|window| window.focus_window());
-    ui.invoke_focus_pick_scope();
-}
-
-/// Undoes `raise_main_window`. UI thread only.
-pub(super) fn end_main_window_raise(ui: &AppWindow) {
-    ui.set_keep_on_top(false);
-    ui.set_picking(false);
-}
-
-/// Hides and drops the freeze windows and the screenshot. UI thread only.
-pub(super) fn release_window() {
+/// Hides and drops the windows and the screenshot. UI thread only.
+pub(crate) fn release_window() {
     if let Some(session) = ACTIVE.with(|a| a.borrow_mut().take()) {
         session.hide_all();
     }
@@ -311,142 +304,22 @@ fn is_wayland(w: &FreezePickerWindow) -> bool {
 }
 
 impl Session {
-    /// Ends picking (or the text capture) exactly once.
-    fn finish(&self, outcome: PickOutcome) {
-        if !self.done.replace(true) {
-            match &self.purpose {
-                Purpose::Color { history_store, context } => finish_picker(self.ui_weak.clone(), history_store.clone(), *context, outcome),
-                Purpose::Text(restore) => end_text_capture(self.ui_weak.clone(), TextRestore { raise: self.open_app.get(), ..*restore }),
-            }
-        }
+    /// Ends the frozen screen: true the first time only, so the toy finishes
+    /// (and puts the main window back) exactly once.
+    pub(crate) fn end(&self) -> bool {
+        !self.done.replace(true)
     }
 
-    // --- Text Extractor's capture ---
-
-    /// A new selection started (or the old one moved): forget what was read.
-    fn region_started(&self) {
-        self.text.borrow_mut().generation += 1;
-        self.text.borrow_mut().reading = None;
-        for (window, _) in self.windows.borrow().iter() {
-            window.set_words(ModelRc::default());
-            window.set_tools(false);
-            window.set_busy(false);
-        }
+    /// Not ended yet.
+    pub(crate) fn running(&self) -> bool {
+        !self.done.get()
     }
 
-    /// The selection is done: read the text in it (on a background thread).
-    fn region_done(self: &Rc<Self>, i: usize, x: f32, y: f32, w: f32, h: f32) {
-        let Some(((x0, y0), (x1, y1))) = self.pixel(i, x, y).zip(self.pixel(i, x + w, y + h)) else { return };
-        let (cw, ch) = ((x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32);
-        // the selected pixels, as RGBA
-        let mut crop = vec![0u8; (cw * ch * 4) as usize];
-        for row in 0..ch {
-            let src = (((y0 as u32 + row) * self.shot.width + x0 as u32) * 4) as usize;
-            let dst = (row * cw * 4) as usize;
-            crop[dst..dst + (cw * 4) as usize].copy_from_slice(&self.shot.rgba[src..src + (cw * 4) as usize]);
+    /// Esc, a right click or a closed window.
+    fn cancel(self: &Rc<Self>) {
+        if self.end() {
+            self.toy.clone().cancelled(self);
         }
-        let generation = {
-            let mut text = self.text.borrow_mut();
-            text.generation += 1;
-            text.generation
-        };
-        if let Some((window, _)) = self.windows.borrow().get(i) {
-            window.set_busy_text("Reading…".into());
-            window.set_busy(true);
-        }
-        let keep_lines = self.ui_weak.upgrade().is_some_and(|ui| ui.get_setting_text_keep_lines());
-        let window_weak = self.windows.borrow().get(i).map(|(w, _)| w.as_weak());
-        let (tx, rx) = std::sync::mpsc::channel::<Result<crate::ocr::Reading, String>>();
-        std::thread::spawn(move || {
-            let status = |text: String| {
-                if let Some(w) = window_weak.clone() {
-                    let _ = w.upgrade_in_event_loop(move |w| w.set_busy_text(text.into()));
-                }
-            };
-            let _ = tx.send(crate::ocr::recognize(&crop, cw, ch, keep_lines, &status));
-            let _ = slint::invoke_from_event_loop(move || {
-                // the session still running (the generation drops a stale reading)
-                let (Some(session), Ok(result)) = (active(), rx.recv()) else { return };
-                session.reading_done(i, generation, (x0, y0), result);
-            });
-        });
-    }
-
-    /// The text was read (UI thread).
-    fn reading_done(&self, i: usize, generation: u64, origin: (i32, i32), result: Result<crate::ocr::Reading, String>) {
-        if self.done.get() || self.text.borrow().generation != generation {
-            return; // a newer selection, or the capture ended
-        }
-        let Some(ui) = self.ui_weak.upgrade() else { return };
-        let windows = self.windows.borrow();
-        let Some((window, _)) = windows.get(i) else { return };
-        let reading = match result {
-            Ok(reading) if !reading.text.trim().is_empty() => reading,
-            Ok(_) => {
-                window.set_busy_text("No text found here. Drag again, or Esc".into());
-                return;
-            }
-            Err(err) => {
-                eprintln!("text capture: {err}");
-                window.set_busy_text(format!("Couldn't read it: {err}").into());
-                return;
-            }
-        };
-        window.set_busy(false);
-
-        // outline the words, in the window's coordinates
-        let layout = self.layout.borrow();
-        if let Some(layout) = layout.as_ref() {
-            let boxes: Vec<TextBox> = reading
-                .boxes
-                .iter()
-                .map(|&(bx, by, bw, bh)| {
-                    let (wx, wy) = layout.to_window(i, origin.0 as f32 + bx, origin.1 as f32 + by);
-                    let (wx2, wy2) = layout.to_window(i, origin.0 as f32 + bx + bw, origin.1 as f32 + by + bh);
-                    TextBox { x: wx, y: wy, w: wx2 - wx, h: wy2 - wy }
-                })
-                .collect();
-            window.set_words(ModelRc::new(VecModel::from(boxes)));
-        }
-        // the text's height on screen (the screenshot can have more pixels than the screen)
-        let step = layout.as_ref().and_then(|l| l.screens.get(i)).map(|s| s.step).unwrap_or(1).max(1) as f32;
-        drop(layout);
-        let size_px = (reading.size / step).round() as u32;
-
-        // Only what is copied or opened goes to the history: a selection that
-        // is dragged again, moved or cancelled is forgotten.
-        if ui.get_setting_text_tools() {
-            window.set_tools_info(format!("{} · {}% sure", reading.language, reading.sure).into());
-            window.set_tools(true);
-            self.text.borrow_mut().reading = Some((reading, size_px));
-        } else {
-            // copy and close at once
-            crate::ocr::copy(&reading.text);
-            crate::ocr::add_reading(&ui, &reading, size_px);
-            drop(windows);
-            self.finish(PickOutcome::Cancelled);
-        }
-    }
-
-    /// A toolbar button: "copy", "line" (as one line) or "open" (in the app).
-    fn tool(&self, action: &str) {
-        let Some((reading, size_px)) = self.text.borrow().reading.clone() else { return };
-        if let Some(ui) = self.ui_weak.upgrade() {
-            crate::ocr::add_reading(&ui, &reading, size_px);
-        }
-        match action {
-            "copy" => crate::ocr::copy(&reading.text),
-            "line" => crate::ocr::copy(&reading.one_line),
-            _ => {
-                if let Some(ui) = self.ui_weak.upgrade() {
-                    ui.invoke_go(2);
-                    ui.set_text_detail(0);
-                }
-                // shown and brought to the front once the capture has ended
-                self.open_app.set(true);
-            }
-        }
-        self.finish(PickOutcome::Cancelled);
     }
 
     fn hide_all(&self) {
@@ -455,61 +328,22 @@ impl Session {
         }
     }
 
-    /// The screenshot can't be used: hide everything and use the other picker.
-    fn give_up(&self) {
+    /// The screenshot can't be used: hide everything and use the fallback.
+    fn give_up(self: &Rc<Self>) {
         self.done.set(true);
         release_window();
         self.hide_all();
-        if let Purpose::Text(restore) = &self.purpose {
-            end_text_capture(self.ui_weak.clone(), *restore);
-        }
+        self.toy.clone().gave_up(self);
         if let Some(fallback) = self.fallback.borrow_mut().take() {
             fallback();
         }
     }
 
-    fn rgb_at(&self, (ix, iy): (i32, i32)) -> (Vec<u8>, Rgb) {
-        let area = crop_rgba(&self.shot.rgba, self.shot.width, self.shot.height, ix, iy, MAGNIFIER_RADIUS);
-        let rgb = center_rgb(&area, MAGNIFIER_RADIUS);
-        (area, rgb)
-    }
-
-    fn pixel(&self, i: usize, x: f32, y: f32) -> Option<(i32, i32)> {
+    /// A point in window `i` (logical pixels) → screenshot pixel, once laid out.
+    pub(crate) fn pixel(&self, i: usize, x: f32, y: f32) -> Option<(i32, i32)> {
         let layout = self.layout.borrow();
         let layout = layout.as_ref()?;
         Some(layout.pixel(i, x, y, self.shot.width, self.shot.height))
-    }
-
-    /// Shows the preview at the pick point, on the monitor it is on.
-    fn show_point(&self, marker: bool) {
-        // a text capture has no color preview: showing one put the color under
-        // the mouse on the Color Picker's card, and nothing put it back
-        if matches!(self.purpose, Purpose::Text(_)) {
-            return;
-        }
-        let Some(point) = self.point.get() else { return };
-        let Some((i, x, y)) = self.layout.borrow().as_ref().and_then(|l| l.place(point.0, point.1)) else {
-            return;
-        };
-        let (area, rgb) = self.rgb_at(point);
-        let windows = self.windows.borrow();
-        if let Some(old) = self.shown_on.replace(Some(i)).filter(|&old| old != i) {
-            if let Some((w, _)) = windows.get(old) {
-                w.set_preview_hex("".into());
-                w.set_marker(false);
-            }
-        }
-        let Some((w, _)) = windows.get(i) else { return };
-        w.set_cursor_x(x);
-        w.set_cursor_y(y);
-        w.set_marker(marker);
-        w.set_magnifier(magnifier_image(&area, MAGNIFIER_RADIUS));
-        w.set_preview_color(Color::from_rgb_u8(rgb.0, rgb.1, rgb.2));
-        w.set_preview_hex(preview_text(rgb));
-        drop(windows);
-        if let Some(ui) = self.ui_weak.upgrade() {
-            show_hover(&ui, rgb);
-        }
     }
 
     /// A mouse move reports x and y separately, and moves come in bursts.
@@ -524,36 +358,11 @@ impl Session {
             let Some(session) = weak.upgrade() else { return };
             let Some((i, x, y)) = session.latest.take() else { return };
             if let Some(point) = session.pixel(i, x, y) {
-                session.point.set(Some(point));
-                session.show_point(false);
+                session.toy.clone().pointer(&session, point);
             } else {
                 session.early.set(Some((i, x, y)));
             }
         });
-    }
-
-    fn nudge(&self, dx: i32, dy: i32) {
-        let (w, h) = (self.shot.width, self.shot.height);
-        let moved = {
-            let layout = self.layout.borrow();
-            let Some(layout) = layout.as_ref() else { return };
-            // no point yet (the mouse hasn't moved): start in the middle of the first monitor
-            let start = self.point.get().unwrap_or_else(|| {
-                let r = layout.screens[0].rect;
-                let (x, y) = ((r.w / layout.screens[0].unit) / 2.0, (r.h / layout.screens[0].unit) / 2.0);
-                layout.pixel(0, x, y, w, h)
-            });
-            layout.nudge(start, dx, dy, w, h).or(Some(start))
-        };
-        self.point.set(moved);
-        self.show_point(true);
-    }
-
-    fn pick_point(&self) {
-        if let Some(point) = self.point.get() {
-            let (_, rgb) = self.rgb_at(point);
-            self.finish(PickOutcome::Picked(rgb));
-        }
     }
 
     /// Creates, wires and shows window number `i`.
@@ -564,14 +373,14 @@ impl Session {
         let window = window.map_err(|err| format!("window failed: {err:?}"))?;
         window.global::<crate::Skin>().set_real_shadows(!crate::cpu_drawn());
         window.set_screenshot_image(self.image.clone());
-        window.set_text_mode(matches!(self.purpose, Purpose::Text(_)));
+        self.toy.window_created(&window);
         let i = self.windows.borrow().len();
         let weak: Weak<Session> = Rc::downgrade(self);
         {
             let weak = weak.clone();
             window.on_region_started(move || {
                 if let Some(s) = weak.upgrade() {
-                    s.region_started();
+                    s.toy.clone().region_started(&s);
                 }
             });
         }
@@ -579,7 +388,7 @@ impl Session {
             let weak = weak.clone();
             window.on_region_done(move |x, y, w, h| {
                 if let Some(s) = weak.upgrade() {
-                    s.region_done(i, x, y, w, h);
+                    s.toy.clone().region_done(&s, i, x, y, w, h);
                 }
             });
         }
@@ -587,7 +396,7 @@ impl Session {
             let weak = weak.clone();
             window.on_tool(move |action| {
                 if let Some(s) = weak.upgrade() {
-                    s.tool(&action);
+                    s.toy.clone().tool(&s, &action);
                 }
             });
         }
@@ -602,10 +411,8 @@ impl Session {
         {
             let weak = weak.clone();
             window.on_pick_at(move |x, y| {
-                let Some(s) = weak.upgrade() else { return };
-                if let Some(point) = s.pixel(i, x, y) {
-                    let (_, rgb) = s.rgb_at(point);
-                    s.finish(PickOutcome::Picked(rgb));
+                if let Some(s) = weak.upgrade() {
+                    s.toy.clone().click(&s, i, x, y);
                 }
             });
         }
@@ -613,7 +420,7 @@ impl Session {
             let weak = weak.clone();
             window.on_cancel_pick(move || {
                 if let Some(s) = weak.upgrade() {
-                    s.finish(PickOutcome::Cancelled);
+                    s.cancel();
                 }
             });
         }
@@ -621,7 +428,7 @@ impl Session {
             let weak = weak.clone();
             window.on_nudge(move |dx, dy| {
                 if let Some(s) = weak.upgrade() {
-                    s.nudge(dx, dy);
+                    s.toy.clone().nudge(&s, dx, dy);
                 }
             });
         }
@@ -629,13 +436,13 @@ impl Session {
             let weak = weak.clone();
             window.on_pick_point(move || {
                 if let Some(s) = weak.upgrade() {
-                    s.pick_point();
+                    s.toy.clone().enter(&s);
                 }
             });
         }
         window.window().on_close_requested(move || {
             if let Some(s) = weak.upgrade() {
-                s.finish(PickOutcome::Cancelled);
+                s.cancel();
             }
             slint::CloseRequestResponse::HideWindow
         });
@@ -803,53 +610,26 @@ impl Session {
                 .find_map(|(i, (w, _))| w.get_hovered().then(|| (i, w.get_hover_x(), w.get_hover_y())));
             let early = self.early.take();
             if let Some(point) = under_mouse.or(early).and_then(|(i, x, y)| self.pixel(i, x, y)) {
-                self.point.set(Some(point));
-                self.show_point(false);
+                self.toy.clone().pointer(&self, point);
             }
         });
     }
 }
 
-/// Shows the freeze windows for picking a color. UI thread only. `fallback`
-/// runs instead if the screenshot cannot be used.
-pub(crate) fn show(
-    ui_weak: slint::Weak<AppWindow>,
-    history_store: HistoryStore,
-    context: PickerContext,
-    shot: Screenshot,
-    fallback: Box<dyn FnOnce()>,
-) {
-    show_for(ui_weak, Purpose::Color { history_store, context }, shot, fallback);
-}
-
-/// Shows the freeze windows for selecting text (Text Extractor). UI thread only.
-pub(crate) fn show_text(ui_weak: slint::Weak<AppWindow>, shot: Screenshot, restore: TextRestore) {
-    let weak = ui_weak.clone();
-    let fallback = Box::new(move || {
-        if let Some(ui) = weak.upgrade() {
-            crate::ui_state::show_message(&ui, "Text Extractor couldn't line the screenshot up with your screens");
-        }
-    });
-    show_for(ui_weak, Purpose::Text(restore), shot, fallback);
-}
-
-fn show_for(ui_weak: slint::Weak<AppWindow>, purpose: Purpose, shot: Screenshot, fallback: Box<dyn FnOnce()>) {
-    let text_mode = matches!(purpose, Purpose::Text(_));
+/// Shows the frozen screen for `toy`. UI thread only. `fallback` runs instead
+/// if the screenshot cannot be used.
+pub(crate) fn show(ui_weak: slint::Weak<AppWindow>, toy: Rc<dyn Toy>, shot: Screenshot, fallback: Box<dyn FnOnce()>) {
     let buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(&shot.rgba, shot.width, shot.height);
     let session = Rc::new(Session {
         shot,
         image: slint::Image::from_rgba8(buffer),
-        ui_weak: ui_weak.clone(),
-        purpose,
-        text: RefCell::new(TextCapture::default()),
+        ui_weak,
+        toy,
         windows: RefCell::new(vec![]),
         layout: RefCell::new(None),
-        point: Cell::new(None),
-        shown_on: Cell::new(None),
         latest: Cell::new(None),
         early: Cell::new(None),
         done: Cell::new(false),
-        open_app: Cell::new(false),
         fallback: RefCell::new(Some(fallback)),
     });
     if let Err(err) = session.add_window(None) {
@@ -874,17 +654,9 @@ fn show_for(ui_weak: slint::Weak<AppWindow>, purpose: Purpose, shot: Screenshot,
         session.clone().lay_out(0, None);
     }
 
-    // If the main window is open (and not minimized), bring it above the
-    // freeze windows once they are up, so it isn't hidden behind the screenshot.
-    // (Not for text: the window was hidden so the text behind it can be read.)
     slint::Timer::single_shot(Duration::from_millis(150), move || {
-        if session.done.get() || text_mode {
-            return;
-        }
-        if let Some(ui) = ui_weak.upgrade() {
-            if ui.window().is_visible() && !ui.window().is_minimized() {
-                raise_main_window(&ui);
-            }
+        if !session.done.get() {
+            session.toy.clone().shown(&session);
         }
     });
 }

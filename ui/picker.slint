@@ -1,0 +1,1433 @@
+// The Color Picker's page (v0.7.4: moved out of app.slint): the color card,
+// the format boxes, the shades and the history, color search, the color
+// editor and the formats panel. What they show and change belongs to
+// AppWindow, which binds it in.
+import { ScrollView } from "std-widgets.slint";
+import { FieldRow, FormatOption, SearchCard, ShadeCell, Skin, RingGlow, RoundGradient, HeaderButton, CopyIcon, PillButton, ActionButton, Switch, SectionLabel, IconButton } from "common.slint";
+
+// --- A search result: a block of color with its name in a dark oval. A dark
+// oval with light text reads on any color, in both themes. ---
+export component SearchCardView inherits Rectangle {
+    in property <SearchCard> card;
+    in property <bool> highlighted;
+    callback hover-changed(bool);
+    callback clicked;
+
+    border-radius: 8px;
+    background: root.card.color;
+    accessible-role: button;
+    accessible-label: root.card.name;
+    accessible-action-default => { root.clicked(); }
+
+    if root.highlighted : Rectangle {
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: 10px;
+        border-width: 2px;
+        border-color: Skin.accent;
+    }
+
+    // The value shows only on the highlighted card, so the grid stays calm.
+    if root.highlighted : Rectangle {
+        y: 6px;
+        height: 20px;
+        width: min(parent.width - 8px, value-measure.preferred-width + 14px);
+        x: (parent.width - self.width) / 2;
+        border-radius: 10px;
+        background: #000000b0;
+        Text {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.card.value;
+            color: #ffffff;
+            font-size: 11px;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    value-measure := Text { text: root.card.value; font-size: 11px; visible: false; }
+
+    // Long names are cut with "…" (the grid shows the highlighted one in full).
+    Rectangle {
+        x: 4px;
+        width: parent.width - 8px;
+        height: 22px;
+        y: parent.height - self.height - 5px;
+        border-radius: 11px;
+        background: #1b1c20e8;
+        Text {
+            x: 6px;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.card.name;
+            color: #ffffff;
+            font-size: 11px;
+            overflow: elide;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+        changed has-hover => { root.hover-changed(self.has-hover); }
+    }
+}
+
+// A color in the history row.
+export component ColorBubble inherits Rectangle {
+    in property <color> bubble-color;
+    callback clicked;
+
+    width: 24px;
+    height: 24px;
+    border-radius: 12px;
+    background: bubble-color;
+    border-width: 1px;
+    // so a color close to the background still shows
+    border-color: Skin.pick(#ffffff30, #00000020);
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+// The big color card: the first format, which is also what Auto Copy copies.
+// Clicking the value's text edits it; the rest of the card doesn't.
+export component ColorCard inherits Rectangle {
+    in property <color> card-color;
+    // text color: dark or white, whichever reads on `color`
+    in property <color> ink;
+    in property <string> name;
+    in property <string> label;
+    in property <string> value;
+    // The app bumps `rev` on every update. A text field the user has typed
+    // into no longer follows bindings, so we copy `value` into it ourselves.
+    in property <int> rev;
+    in property <bool> gradient;
+    // While searching, a click anywhere on the card closes the search.
+    in property <bool> closes;
+
+    callback edited(string);
+    callback accepted(string);
+    callback blurred(string);
+    callback copy;
+    callback close;
+
+    init => { input.text = root.value; }
+    changed rev => { input.text = root.value; }
+
+    // the color and text color glide to a new color instead of jumping
+    property <color> shown: root.card-color;
+    // false while the app starts: the saved color shows at once
+    in property <bool> animated: true;
+    animate shown { duration: root.animated ? 220ms : 0ms; easing: ease-out; }
+    property <color> shown-ink: root.ink;
+    animate shown-ink { duration: root.animated ? 220ms : 0ms; easing: ease-out; }
+
+    border-radius: 22px;
+    // The gradient starts behind the text, so the text color still fits.
+    property <color> sheen: root.shown.mix(Skin.pick(#000000, #ffffff), 0.5);
+    property <brush> sheen-fill: @linear-gradient(45deg, root.shown 0%, root.shown 35%, self.sheen 100%);
+    // The CPU draws each pair of stops as its own strip, with rounded edges, so
+    // at some sizes a 1 px gap shows between them (a dark line across the
+    // card). There the card is filled with the color and RoundGradient draws
+    // one strip on top (two stops): a gap only shows that same color.
+    property <brush> sheen-strip: @linear-gradient(45deg, root.shown 35%, self.sheen 100%);
+    background: !root.gradient || !Skin.real-shadows ? root.shown : self.sheen-fill;
+    drop-shadow-blur: 28px;
+    drop-shadow-offset-y: 10px;
+    drop-shadow-color: Skin.real-shadows ? root.shown.transparentize(0.7 - 0.1 * Skin.dark-t) : transparent;
+    RingGlow {
+        width: root.width;
+        height: root.height;
+        glow: root.shown.transparentize(0.7 - 0.1 * Skin.dark-t);
+        blur: 28px;
+        radius: root.border-radius;
+        offset-y: 10px;
+        cover: root.background;
+    }
+    if root.gradient && !Skin.real-shadows : RoundGradient {
+        width: root.width;
+        height: root.height;
+        fill: root.sheen-strip;
+        radius: root.border-radius;
+    }
+
+    focus-release := FocusScope {
+        width: 1px;
+        height: 1px;
+    }
+
+    VerticalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-bottom: 16px;
+        alignment: end;
+
+        if root.name != "" : Text {
+            text: root.name;
+            color: root.shown-ink;
+            opacity: 0.9;
+            font-size: 14px;
+            overflow: elide;
+        }
+        Text {
+            text: root.label;
+            color: root.shown-ink;
+            opacity: 0.75;
+            font-size: 11px;
+            letter-spacing: 1px;
+        }
+        HorizontalLayout {
+            alignment: start;
+            input := TextInput {
+                min-width: 60px;
+                max-width: root.width - 40px;
+                color: root.shown-ink;
+                // smaller when a long value (OKLCH, CMYK) doesn't fit
+                font-size: big-measure.preferred-width > root.width - 80px ? 28px : 38px;
+                font-weight: 600;
+                single-line: true;
+                selection-background-color: root.shown-ink.transparentize(0.7);
+                selection-foreground-color: root.shown-ink;
+                accessible-label: root.label;
+                edited => { root.edited(self.text); }
+                accepted => {
+                    root.accepted(self.text);
+                    focus-release.focus();
+                }
+                changed has-focus => {
+                    if !self.has-focus {
+                        root.blurred(self.text);
+                    }
+                }
+            }
+        }
+    }
+    big-measure := Text {
+        visible: false;
+        text: input.text;
+        font-size: 38px;
+        font-weight: 600;
+    }
+
+    CopyIcon {
+        x: parent.width - self.width - 12px;
+        y: 12px;
+        tint: root.shown-ink;
+        clicked => { root.copy(); }
+    }
+
+    if root.closes : TouchArea { clicked => { root.close(); } }
+}
+
+// One format box (formats 2..n): type into it to change the color.
+export component FormatBox inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <int> rev; // see ColorCard
+
+    callback edited(string);
+    callback accepted(string);
+    callback blurred(string);
+    callback copy;
+
+    init => { input.text = root.value; }
+    changed rev => { input.text = root.value; }
+
+    height: 54px;
+    border-radius: 14px;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: input.has-focus ? Skin.accent : Skin.border;
+    animate border-color { duration: 150ms; }
+
+    // a click anywhere on the box (the label too) puts the cursor in it
+    TouchArea {
+        mouse-cursor: text;
+        clicked => { input.focus(); }
+    }
+
+    focus-release := FocusScope {
+        width: 1px;
+        height: 1px;
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 8px;
+        spacing: 4px;
+        VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.label;
+                color: Skin.text-muted;
+                font-size: 11px;
+                letter-spacing: 0.6px;
+            }
+            input := TextInput {
+                color: Skin.text-main;
+                font-size: 15px;
+                single-line: true;
+                accessible-label: root.label;
+                edited => { root.edited(self.text); }
+                accepted => {
+                    root.accepted(self.text);
+                    focus-release.focus();
+                }
+                changed has-focus => {
+                    if !self.has-focus {
+                        root.blurred(self.text);
+                    }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            CopyIcon { clicked => { root.copy(); } }
+        }
+    }
+}
+
+// One shade: its name (when names are on), the format, and its value.
+export component ShadeTile inherits Rectangle {
+    in property <ShadeCell> cell;
+    in property <string> label;
+    callback clicked;
+    // the pen on the selected color: opens the color editor
+    callback edit;
+    callback pen-hover(bool);
+
+    in property <bool> animated: true; // see ColorCard
+    // the round ends of the strip: the first tile's left corners, the last one's
+    // right (the strip clips too, but rounded clipping needs OpenGL)
+    in property <length> left-radius;
+    in property <length> right-radius;
+    background: root.cell.color;
+    animate background { duration: root.animated ? 220ms : 0ms; easing: ease-out; }
+    border-top-left-radius: root.left-radius;
+    border-bottom-left-radius: root.left-radius;
+    border-top-right-radius: root.right-radius;
+    border-bottom-right-radius: root.right-radius;
+    accessible-role: button;
+    accessible-label: root.cell.current ? root.cell.value + " (the selected color)" : root.cell.value;
+    accessible-action-default => { touch.clicked(); }
+
+    // hover: a soft tint over the whole tile
+    Rectangle {
+        border-top-left-radius: root.left-radius;
+        border-bottom-left-radius: root.left-radius;
+        border-top-right-radius: root.right-radius;
+        border-bottom-right-radius: root.right-radius;
+        background: root.cell.ink.transparentize(touch.pressed ? 0.8 : touch.has-hover ? 0.88 : 1);
+        animate background { duration: 150ms; }
+    }
+
+    // the selected color itself: a check mark instead of being clickable
+    Image {
+        x: parent.width - self.width - 8px;
+        y: 8px;
+        width: 14px;
+        height: 14px;
+        source: @image-url("check.svg");
+        colorize: root.cell.ink;
+        opacity: root.cell.current ? 0.85 : 0;
+        animate opacity { duration: 150ms; }
+    }
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 1px;
+        alignment: end;
+        if root.cell.name != "" : Text {
+            text: root.cell.name;
+            color: root.cell.ink;
+            font-size: 10.5px;
+            overflow: elide;
+        }
+        Text {
+            text: root.label;
+            color: root.cell.ink;
+            opacity: 0.7;
+            font-size: 9px;
+            letter-spacing: 0.6px;
+        }
+        Text {
+            text: root.cell.value;
+            color: root.cell.ink;
+            // smaller when the value doesn't fit the tile
+            font-size: measure.preferred-width > root.width - 16px ? 9px : 11px;
+            overflow: elide;
+        }
+    }
+    measure := Text {
+        visible: false;
+        text: root.cell.value;
+        font-size: 11px;
+    }
+
+    touch := TouchArea {
+        enabled: !root.cell.current;
+        clicked => { root.clicked(); }
+    }
+
+    // the selected color: a pen opens the color editor
+    if root.cell.current : Rectangle {
+        x: 6px;
+        y: 6px;
+        width: 26px;
+        height: 26px;
+        border-radius: 13px;
+        background: root.cell.ink.transparentize(pen-touch.pressed ? 0.7 : pen-touch.has-hover ? 0.78 : 0.86);
+        animate background { duration: 120ms; }
+        accessible-role: button;
+        accessible-label: "Edit or compare this color";
+        accessible-action-default => { root.edit(); }
+        Image {
+            source: @image-url("pen.svg");
+            width: 14px;
+            height: 14px;
+            colorize: root.cell.ink;
+        }
+        pen-touch := TouchArea {
+            clicked => { root.edit(); }
+            changed has-hover => { root.pen-hover(self.has-hover); }
+        }
+    }
+}
+
+export component FormatsPanel inherits Rectangle {
+    callback format-moved(string, int);
+    in property <[FormatOption]> format-options;
+    callback format-toggled(string, bool);
+    in-out property <bool> formats-open;
+    in-out property <float> formats-t;
+    in-out property <length> pad;
+    in-out property <length> picker-top;
+
+    width: 100%;
+    height: 100%;
+    background: #00000050;
+    opacity: root.formats-t;
+    TouchArea { clicked => { root.formats-open = false; } }
+
+    // beside the panel, not in it: the panel clips what is inside
+    RingGlow {
+        x: formats-panel.x;
+        y: formats-panel.y;
+        width: formats-panel.width;
+        height: formats-panel.height;
+        glow: #00000050;
+        blur: 16px;
+        radius: 16px;
+    }
+    formats-panel := Rectangle {
+        x: parent.width - self.width - root.pad;
+        y: root.picker-top + 48px - (1 - root.formats-t) * 10px;
+        width: 260px;
+        height: Math.min(parent.height - 84px, formats-list.preferred-height);
+        background: Skin.surface;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Skin.border;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: Skin.real-shadows ? #00000050 : transparent;
+        clip: true;
+
+        TouchArea { }
+
+        ScrollView {
+            content-width: self.visible-width;
+            content-height: formats-list.preferred-height;
+
+            formats-list := VerticalLayout {
+                width: parent.visible-width;
+                padding: 16px;
+                spacing: 8px;
+
+                Text {
+                    text: "Customize formats";
+                    font-weight: 700;
+                    color: Skin.text-main;
+                    font-size: 15px;
+                }
+                Text {
+                    text: "The top one is on the color card, and is what Auto copy copies.";
+                    color: Skin.text-muted;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                }
+                Rectangle { height: 1px; background: Skin.border; }
+
+                for option[i] in root.format-options : HorizontalLayout {
+                    spacing: 6px;
+                    Switch {
+                        label: option.label;
+                        checked: option.enabled;
+                        toggled(on) => { root.format-toggled(option.key, on); }
+                    }
+                    Text {
+                        text: option.label;
+                        color: option.enabled ? Skin.text-main : Skin.text-muted;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    IconButton {
+                        icon: @image-url("chevron-up.svg");
+                        label: "Move " + option.label + " up";
+                        enabled: i > 0;
+                        clicked => { root.format-moved(option.key, -1); }
+                    }
+                    IconButton {
+                        icon: @image-url("chevron-down.svg");
+                        label: "Move " + option.label + " down";
+                        enabled: i < root.format-options.length - 1;
+                        clicked => { root.format-moved(option.key, 1); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component ColorEditor inherits Rectangle {
+    in property <FieldRow> card;
+    in property <color> card-ink;
+    in property <string> card-name;
+    in-out property <length> card-w;
+    in-out property <float> compare-t;
+    in property <color> current-color;
+    callback editor-cancel();
+    callback editor-close();
+    in property <color> editor-color;
+    in property <color> editor-compare-color;
+    in property <color> editor-compare-ink;
+    in property <string> editor-compare-name;
+    callback editor-compare-toggled();
+    in property <string> editor-compare-value;
+    callback editor-copy(string);
+    callback editor-field-accepted(string, string);
+    callback editor-field-edited(string, string);
+    in property <[FieldRow]> editor-fields;
+    in property <float> editor-h;
+    callback editor-hue(float);
+    in property <color> editor-hue-color;
+    in property <color> editor-ink;
+    in property <string> editor-name;
+    in-out property <bool> editor-open;
+    callback editor-pick();
+    in property <string> editor-ratio;
+    in property <float> editor-s;
+    callback editor-sv(float, float);
+    in-out property <float> editor-t;
+    callback editor-use();
+    in property <color> editor-use-color;
+    in property <color> editor-use-ink;
+    in property <string> editor-use-label;
+    in property <float> editor-v;
+    in property <string> editor-value;
+    in-out property <length> pad;
+    in-out property <length> picker-top;
+    in-out property <bool> setting-editor-compare;
+    in-out property <length> toy-h;
+    in-out property <length> toy-w;
+
+    // the panel takes the keyboard (app.slint, when it opens and after a pick)
+    public function focus-keys() {
+        editor-keys.focus();
+    }
+
+    // visible from the first moment, so its keyboard handler can take focus
+    visible: root.editor-open || root.editor-t > 0.01;
+
+    Rectangle {
+        background: #000000;
+        opacity: 0.45 * root.editor-t;
+    }
+    TouchArea { clicked => { root.editor-close(); } }
+
+    Rectangle {
+        x: root.pad;
+        y: root.picker-top + 40px + 14px;
+        width: root.card-w;
+        height: 150px;
+        border-radius: 22px;
+        clip: true;
+        opacity: root.editor-t;
+        background: root.setting-editor-compare ? root.current-color : root.editor-color;
+        animate background { duration: 200ms; easing: ease-out; }
+
+        TouchArea { } // a click on the card doesn't close the panel
+
+        VerticalLayout {
+            x: 0;
+            width: parent.width * (1 - 0.5 * root.compare-t);
+            padding-left: 20px;
+            padding-right: 12px;
+            padding-bottom: 16px;
+            alignment: end;
+            // split: SELECTED, name, value (like the compare half);
+            // whole: name, format, value (like the main card)
+            if root.setting-editor-compare : Text {
+                text: "SELECTED";
+                color: root.card-ink;
+                opacity: 0.75;
+                font-size: 11px;
+                letter-spacing: 1px;
+            }
+            if (root.setting-editor-compare ? root.card-name : root.editor-name) != "" : Text {
+                text: root.setting-editor-compare ? root.card-name : root.editor-name;
+                color: root.setting-editor-compare ? root.card-ink : root.editor-ink;
+                opacity: 0.9;
+                font-size: root.setting-editor-compare ? 13px : 14px;
+                overflow: elide;
+            }
+            if !root.setting-editor-compare : Text {
+                text: root.card.label;
+                color: root.editor-ink;
+                opacity: 0.75;
+                font-size: 11px;
+                letter-spacing: 1px;
+            }
+            Text {
+                text: root.setting-editor-compare ? root.card.value : root.editor-value;
+                color: root.setting-editor-compare ? root.card-ink : root.editor-ink;
+                font-size: root.setting-editor-compare ? 24px : 38px;
+                font-weight: 600;
+                overflow: elide;
+            }
+        }
+
+        // the second color: grows in from the right edge, its text fading in
+        right-half := Rectangle {
+            x: parent.width - self.width;
+            width: parent.width / 2 * root.compare-t;
+            visible: root.compare-t > 0.001;
+            background: root.editor-compare-color;
+            // the card's round corners (rounded clipping needs OpenGL)
+            border-top-right-radius: Math.min(22px, self.width / 2);
+            border-bottom-right-radius: Math.min(22px, self.width / 2);
+            clip: true;
+            VerticalLayout {
+                x: parent.width - self.width;
+                width: root.card-w / 2;
+                padding-left: 12px;
+                padding-right: 16px;
+                padding-top: 12px;
+                padding-bottom: 14px;
+                opacity: root.compare-t;
+                HorizontalLayout {
+                    alignment: end;
+                    Rectangle {
+                        height: 30px;
+                        width: pick-row.preferred-width;
+                        border-radius: 15px;
+                        border-width: 1px;
+                        border-color: root.editor-compare-ink.transparentize(0.65);
+                        background: root.editor-compare-ink.transparentize(pick-touch.has-hover ? 0.78 : 0.88);
+                        accessible-role: button;
+                        accessible-label: "Pick a color to compare";
+                        accessible-action-default => { root.editor-pick(); }
+                        pick-row := HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 6px;
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    source: @image-url("pick.svg");
+                                    width: 14px;
+                                    height: 14px;
+                                    colorize: root.editor-compare-ink;
+                                }
+                            }
+                            Text {
+                                text: "Pick";
+                                color: root.editor-compare-ink;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                            }
+                        }
+                        pick-touch := TouchArea { clicked => { root.editor-pick(); } }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text {
+                    text: "COMPARE";
+                    color: root.editor-compare-ink;
+                    opacity: 0.75;
+                    font-size: 11px;
+                    letter-spacing: 1px;
+                    horizontal-alignment: right;
+                }
+                if root.editor-compare-name != "" : Text {
+                    text: root.editor-compare-name;
+                    color: root.editor-compare-ink;
+                    opacity: 0.9;
+                    font-size: 13px;
+                    overflow: elide;
+                    horizontal-alignment: right;
+                }
+                Text {
+                    text: root.editor-compare-value;
+                    color: root.editor-compare-ink;
+                    font-size: 24px;
+                    font-weight: 600;
+                    overflow: elide;
+                    horizontal-alignment: right;
+                }
+            }
+        }
+
+        // the contrast ratio, on the seam
+        Rectangle {
+            visible: root.compare-t > 0.01;
+            opacity: root.compare-t;
+            x: right-half.x - self.width / 2;
+            y: 12px;
+            width: ratio-text.preferred-width + 24px;
+            height: 26px;
+            border-radius: 13px;
+            background: #141418;
+            ratio-text := Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.editor-ratio;
+                color: #f2f3f6;
+                font-size: 13px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // the panel
+    Rectangle {
+        property <length> h: Math.min(440px, Math.max(330px, root.toy-h - 198px));
+        x: 0;
+        y: root.toy-h - self.h * root.editor-t;
+        width: root.toy-w;
+        height: self.h;
+        background: Skin.surface;
+        border-top-left-radius: 22px;
+        border-top-right-radius: 22px;
+        border-width: 1px;
+        border-color: Skin.border;
+        drop-shadow-blur: 32px;
+        drop-shadow-offset-y: -12px;
+        drop-shadow-color: Skin.real-shadows ? #00000070 : transparent;
+        RingGlow {
+            width: parent.width;
+            height: parent.height;
+            glow: #00000070;
+            blur: 32px;
+            radius: 22px;
+            offset-y: -12px;
+            cover: Skin.surface;
+            cover-border: Skin.border;
+            cover-border-width: 1px;
+        }
+
+        TouchArea { } // clicks inside don't close it
+
+        // Esc: like clicking outside (closes, keeps the edit). Enter: Use.
+        // In a format field the first Enter takes the typed value; the
+        // field then gives the keyboard back here, so the next one is Use.
+        editor-keys := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.editor-close();
+                    return accept;
+                }
+                if event.text == Key.Return {
+                    root.editor-use();
+                    return accept;
+                }
+                reject
+            }
+
+            VerticalLayout {
+                padding-left: root.pad;
+                padding-right: root.pad;
+                padding-top: 8px;
+                padding-bottom: root.pad;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 36px;
+                        height: 4px;
+                        border-radius: 2px;
+                        background: Skin.border;
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 36px;
+                    spacing: 8px;
+                    Text {
+                        text: "Edit color";
+                        color: Skin.text-main;
+                        font-size: 15px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 32px;
+                            width: compare-row.preferred-width;
+                            border-radius: 9px;
+                            background: root.setting-editor-compare ? root.editor-compare-color : Skin.track;
+                            animate background { duration: 150ms; }
+                            border-width: 1px;
+                            border-color: root.setting-editor-compare ? root.editor-compare-ink.transparentize(0.75) : Skin.border;
+                            accessible-role: checkbox;
+                            accessible-checked: root.setting-editor-compare;
+                            accessible-label: "Compare";
+                            accessible-action-default => { root.editor-compare-toggled(); }
+                            compare-row := HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 14px;
+                                spacing: 7px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Image {
+                                        source: @image-url("compare.svg");
+                                        width: 18px;
+                                        height: 18px;
+                                        colorize: root.setting-editor-compare ? root.editor-compare-ink : Skin.text-main;
+                                    }
+                                }
+                                Text {
+                                    text: "Compare";
+                                    color: root.setting-editor-compare ? root.editor-compare-ink : Skin.text-main;
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            TouchArea { clicked => { root.editor-compare-toggled(); } }
+                        }
+                    }
+                    HeaderButton {
+                        icon: @image-url("close.svg");
+                        label: "Close (Esc)";
+                        clicked => { root.editor-close(); }
+                    }
+                }
+
+                // saturation (left to right) and brightness (bottom to top)
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 90px;
+                    border-radius: 12px;
+                    background: @linear-gradient(90deg, #ffffff 0%, root.editor-hue-color 100%);
+                    accessible-role: slider;
+                    accessible-label: "Saturation and brightness";
+                    Rectangle {
+                        border-radius: 12px;
+                        background: @linear-gradient(180deg, #00000000 0%, #000000 100%);
+                    }
+                    // the round corners when drawn on the CPU (it draws gradients
+                    // square): the panel's color over the gradient's corners
+                    if !Skin.real-shadows : Rectangle {
+                        clip: true;
+                        Rectangle {
+                            x: -6px;
+                            y: -6px;
+                            width: parent.width + 12px;
+                            height: parent.height + 12px;
+                            border-radius: 18px;
+                            border-width: 6px;
+                            border-color: Skin.surface;
+                        }
+                    }
+                    Rectangle {
+                        x: root.editor-s * parent.width - 9px;
+                        y: (1 - root.editor-v) * parent.height - 9px;
+                        width: 18px;
+                        height: 18px;
+                        border-radius: 9px;
+                        border-width: 2px;
+                        border-color: #ffffff;
+                        background: root.editor-use-color;
+                        drop-shadow-blur: 3px;
+                        drop-shadow-color: Skin.real-shadows ? #00000090 : transparent;
+                        RingGlow {
+                            width: parent.width;
+                            height: parent.height;
+                            glow: #00000090;
+                            blur: 3px;
+                            radius: parent.border-radius;
+                            cover: parent.background;
+                            cover-border: parent.border-color;
+                            cover-border-width: parent.border-width;
+                        }
+                    }
+                    TouchArea {
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down {
+                                root.editor-sv(Math.max(0, Math.min(1, self.mouse-x / self.width)), Math.max(0, Math.min(1, 1 - self.mouse-y / self.height)));
+                            }
+                        }
+                        moved => {
+                            root.editor-sv(Math.max(0, Math.min(1, self.mouse-x / self.width)), Math.max(0, Math.min(1, 1 - self.mouse-y / self.height)));
+                        }
+                    }
+                }
+
+                // hue
+                Rectangle {
+                    height: 14px;
+                    border-radius: 7px;
+                    background: @linear-gradient(90deg, #ff0000 0%, #ffff00 16.67%, #00ff00 33.33%, #00ffff 50%, #0000ff 66.67%, #ff00ff 83.33%, #ff0000 100%);
+                    accessible-role: slider;
+                    accessible-label: "Hue";
+                    // the round corners when drawn on the CPU (it draws gradients
+                    // square): the panel's color over the gradient's corners
+                    if !Skin.real-shadows : Rectangle {
+                        clip: true;
+                        Rectangle {
+                            x: -4px;
+                            y: -4px;
+                            width: parent.width + 8px;
+                            height: parent.height + 8px;
+                            border-radius: 11px;
+                            border-width: 4px;
+                            border-color: Skin.surface;
+                        }
+                    }
+                    Rectangle {
+                        x: root.editor-h / 360 * parent.width - 10px;
+                        y: -3px;
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 10px;
+                        border-width: 3px;
+                        border-color: #ffffff;
+                        background: root.editor-hue-color;
+                        drop-shadow-blur: 3px;
+                        drop-shadow-color: Skin.real-shadows ? #00000090 : transparent;
+                        RingGlow {
+                            width: parent.width;
+                            height: parent.height;
+                            glow: #00000090;
+                            blur: 3px;
+                            radius: parent.border-radius;
+                            cover: parent.background;
+                            cover-border: parent.border-color;
+                            cover-border-width: parent.border-width;
+                        }
+                    }
+                    TouchArea {
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down {
+                                root.editor-hue(Math.max(0, Math.min(1, self.mouse-x / self.width)) * 360);
+                            }
+                        }
+                        moved => {
+                            root.editor-hue(Math.max(0, Math.min(1, self.mouse-x / self.width)) * 360);
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    // the same width: both start from 0 and share the row
+                    for row in root.editor-fields : FormatBox {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        preferred-width: 0px;
+                        label: row.label;
+                        value: row.value;
+                        rev: row.rev;
+                        copy => { root.editor-copy(row.key); }
+                        edited(text) => { root.editor-field-edited(row.key, text); }
+                        accepted(text) => { root.editor-field-accepted(row.key, text); }
+                        blurred(text) => { }
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 36px;
+                    spacing: 10px;
+                    // the same width: both start from 0 and share the row
+                    PillButton {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        preferred-width: 0px;
+                        height: 36px;
+                        text: "Cancel";
+                        clicked => { root.editor-cancel(); }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        preferred-width: 0px;
+                        border-radius: 10px;
+                        background: root.editor-use-color;
+                        border-width: 1px;
+                        border-color: root.editor-use-ink.transparentize(0.8);
+                        accessible-role: button;
+                        accessible-label: root.editor-use-label;
+                        accessible-action-default => { root.editor-use(); }
+                        Text {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            height: parent.height;
+                            text: root.editor-use-label;
+                            color: root.editor-use-ink;
+                            font-size: 13px;
+                            font-weight: 600;
+                            overflow: elide;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        TouchArea { clicked => { root.editor-use(); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component SearchBar inherits Rectangle {
+    // how wide it is when open (app.slint works it out from the buttons)
+    in property <length> full;
+    callback apply-search(int);
+    callback close-search();
+    callback move-highlight(int);
+    callback search-changed(string);
+    in-out property <int> search-highlight;
+    in-out property <bool> search-open;
+    in-out property <float> search-t;
+    in-out property <length> toy-x;
+    in-out property <length> toy-y;
+
+    // open-search (app.slint) starts with an empty, focused field
+    public function clear-input() {
+        search-input.text = "";
+    }
+    public function focus-input() {
+        search-input.focus();
+    }
+
+    // from the start of the history row to the end of the search button,
+    // whatever the window's width
+    // (the history row starts 6px, the header's spacing, after Pick)
+    border-radius: self.height / 2;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: Skin.accent;
+    drop-shadow-blur: 6px;
+    drop-shadow-color: Skin.real-shadows ? Skin.accent.transparentize(0.6) : transparent;
+    clip: true;
+
+    TouchArea { } // clicks on the bar don't close it
+
+    // Full width from the first moment, so typing works while the bar is
+    // still growing; the growing bar only reveals it.
+    HorizontalLayout {
+        x: 0;
+        width: parent.full;
+        padding-left: 12px;
+        padding-right: 14px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("search.svg");
+                width: 16px;
+                height: 16px;
+                colorize: Skin.text-muted;
+            }
+        }
+
+        FocusScope {
+            horizontal-stretch: 1;
+            // Before the text field sees them: arrows move through the
+            // grid, Esc closes. Left/Right only once a card is chosen.
+            capture-key-pressed(event) => {
+                if event.text == Key.Escape
+                    || (event.modifiers.control && (event.text == "f" || event.text == "F")) {
+                    root.close-search();
+                    return accept;
+                }
+                if event.text == Key.DownArrow {
+                    root.move-highlight(5);
+                    return accept;
+                }
+                if event.text == Key.UpArrow {
+                    root.move-highlight(-5);
+                    return accept;
+                }
+                if root.search-highlight >= 0 && event.text == Key.RightArrow {
+                    root.move-highlight(1);
+                    return accept;
+                }
+                if root.search-highlight >= 0 && event.text == Key.LeftArrow {
+                    root.move-highlight(-1);
+                    return accept;
+                }
+                reject
+            }
+
+            search-input := TextInput {
+                width: 100%;
+                height: 100%;
+                color: Skin.text-main;
+                font-size: 15px;
+                single-line: true;
+                vertical-alignment: center;
+                accessible-label: "Search colors";
+                edited => {
+                    root.search-highlight = -1;
+                    root.search-changed(self.text);
+                }
+                accepted => {
+                    root.apply-search(root.search-highlight >= 0 ? root.search-highlight : 0);
+                }
+            }
+            if search-input.text == "" : Text {
+                width: 100%;
+                height: 100%;
+                text: "Search colors";
+                color: Skin.text-muted;
+                font-size: 15px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+export component ColorPickerPage inherits Rectangle {
+    callback apply-search(int);
+    in property <FieldRow> card;
+    in property <color> card-ink;
+    in property <string> card-name;
+    callback close-search();
+    callback copy-value(string);
+    in property <color> current-color;
+    callback editor-open-requested();
+    in property <[FieldRow]> fields;
+    in-out property <bool> formats-open;
+    callback history-clicked(int);
+    in property <[color]> history-model;
+    callback open-search();
+    in-out property <length> pad;
+    in-out property <int> page;
+    in-out property <bool> pen-hint;
+    in-out property <bool> pen-hover;
+    callback pick-color();
+    in-out property <length> picker-top;
+    in property <int> search-generation;
+    in-out property <int> search-highlight;
+    callback search-hovered(int);
+    in-out property <bool> search-keyboard;
+    callback search-load-more();
+    in property <string> search-note;
+    in-out property <bool> search-open;
+    in property <[SearchCard]> search-results;
+    in property <string> search-summary;
+    in-out property <float> search-t;
+    in-out property <bool> setting-card-gradient;
+    in-out property <bool> setting-formats-button;
+    in-out property <float> settings-t;
+    callback shade-clicked(float);
+    in property <[ShadeCell]> shades;
+    in-out property <bool> started;
+    callback value-accepted(string, string);
+    callback value-blurred(string, string);
+    callback value-edited(string, string);
+
+    // where its buttons are, for the search bar that grows out of them (app.slint)
+    out property <length> pick-button-x: pick-button.absolute-position.x;
+    out property <length> pick-button-y: pick-button.absolute-position.y;
+    out property <length> pick-button-w: pick-button.width;
+    out property <length> pick-button-h: pick-button.height;
+    out property <length> search-button-x: search-button.absolute-position.x;
+    out property <length> search-button-w: search-button.width;
+
+    // the page back at its top (app.slint: the editor or search opens)
+    public function scroll-to-top() {
+        body.content-y = 0;
+    }
+
+  visible: root.page == 1 && root.settings-t < 0.99;
+  opacity: 1 - root.settings-t;
+  VerticalLayout {
+    padding-top: root.picker-top;
+    spacing: 14px;
+
+    // Header: Pick, history, search, formats
+    HorizontalLayout {
+        height: 40px;
+        padding-left: root.pad;
+        padding-right: root.pad;
+        spacing: 6px;
+
+        pick-button := ActionButton {
+            icon: @image-url("pick.svg");
+            text: "Pick";
+            label: "Pick a color from the screen";
+            clicked => { root.pick-color(); }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+            // fades out under the search bar, so no dot peeks out
+            opacity: 1 - root.search-t;
+            Flickable {
+                x: 10px;
+                width: parent.width - 10px;
+                content-width: root.history-model.length * 32px;
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    for col[i] in root.history-model : VerticalLayout {
+                        alignment: center;
+                        ColorBubble {
+                            bubble-color: col;
+                            clicked => { root.history-clicked(i); }
+                        }
+                    }
+                }
+            }
+        }
+
+        search-button := HeaderButton {
+            icon: @image-url("search.svg");
+            label: "Search colors (Ctrl+F)";
+            y: 2px;
+            clicked => { root.open-search(); }
+        }
+
+        if root.setting-formats-button : HeaderButton {
+            icon: @image-url("sliders.svg");
+            label: "Customize formats";
+            active: root.formats-open;
+            y: 2px;
+            clicked => {
+                root.close-search();
+                root.formats-open = !root.formats-open;
+            }
+        }
+
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+
+        // --- The picker: the color card, the format boxes, the shades.
+        // While searching, the card slides to the bottom and the
+        // results open above it.
+        body := ScrollView {
+            opacity: 1 - root.settings-t;
+            visible: root.settings-t < 0.99;
+            property <length> card-h: 150px;
+            property <length> box-h: 54px;
+            property <length> box-gap: 10px;
+            property <length> inner-w: self.visible-width - 2 * root.pad;
+            property <int> box-rows: Math.ceil(root.fields.length / 2);
+            property <length> boxes-y: self.card-h + 14px;
+            property <length> shades-y: self.boxes-y + (self.box-rows == 0 ? 0px : self.box-rows * (self.box-h + self.box-gap) + 8px);
+            property <length> content-h: self.shades-y + 24px + 92px + root.pad;
+            content-width: self.visible-width;
+            content-height: root.search-open ? self.visible-height : Math.max(self.content-h, self.visible-height);
+
+            // the search results, above the card
+            if root.search-t > 0.01 : Rectangle {
+                x: root.pad;
+                y: 0;
+                width: body.inner-w;
+                height: body.visible-height - body.card-h - root.pad - 16px;
+                opacity: root.search-t;
+
+                TouchArea { } // clicks between the cards don't close it
+
+                VerticalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: root.search-results.length == 0
+                            ? (root.search-note != "" ? root.search-note : "Type a color name, a word like sky, or a code like #FF46A2")
+                            : (root.search-note != "" ? root.search-note : "Results") + " · " + root.search-summary;
+                        color: Skin.text-muted;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+
+                    grid := Flickable {
+                        vertical-stretch: 1;
+                        property <length> gap: 8px;
+                        property <length> edge: 4px; // room for the highlight outline
+                        property <length> card-w: (self.width - 2 * self.edge - 4 * self.gap) / 5;
+                        property <length> card-h: self.card-w * 0.9;
+                        property <int> generation: root.search-generation;
+                        property <int> highlight: root.search-highlight;
+                        content-height: Math.ceil(root.search-results.length / 5) * (self.card-h + self.gap) + 2 * self.edge;
+
+                        changed generation => { self.content-y = 0; }
+                        changed content-y => {
+                            if -self.content-y + self.height > self.content-height - 2 * (self.card-h + self.gap) {
+                                root.search-load-more();
+                            }
+                        }
+                        // The arrow keys move the highlight: keep it in view.
+                        changed highlight => {
+                            if root.search-keyboard && self.highlight >= 0 {
+                                if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) < -self.content-y {
+                                    self.content-y = -Math.floor(self.highlight / 5) * (self.card-h + self.gap);
+                                } else if self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h + self.edge > -self.content-y + self.height {
+                                    self.content-y = -(2 * self.edge + Math.floor(self.highlight / 5) * (self.card-h + self.gap) + self.card-h - self.height);
+                                }
+                            }
+                        }
+
+                        for result[i] in root.search-results : SearchCardView {
+                            x: grid.edge + Math.mod(i, 5) * (grid.card-w + grid.gap);
+                            y: grid.edge + Math.floor(i / 5) * (grid.card-h + grid.gap);
+                            width: grid.card-w;
+                            height: grid.card-h;
+                            card: result;
+                            highlighted: root.search-highlight == i;
+                            hover-changed(on) => {
+                                root.search-keyboard = false;
+                                if on {
+                                    root.search-highlight = i;
+                                    root.search-hovered(i);
+                                } else if root.search-highlight == i {
+                                    root.search-highlight = -1;
+                                    root.search-hovered(-1);
+                                }
+                            }
+                            clicked => { root.apply-search(i); }
+                        }
+
+                        // The highlighted card's full name, drawn over its neighbours.
+                        if root.search-highlight >= 0 && root.search-highlight < root.search-results.length : Rectangle {
+                            property <length> card-x: grid.edge + Math.mod(root.search-highlight, 5) * (grid.card-w + grid.gap);
+                            width: Math.min(grid.width - 2 * grid.edge, Math.max(grid.card-w - 8px, full-name.preferred-width + 16px));
+                            height: 22px;
+                            x: Math.max(grid.edge, Math.min(self.card-x + (grid.card-w - self.width) / 2, grid.width - grid.edge - self.width));
+                            y: grid.edge + Math.floor(root.search-highlight / 5) * (grid.card-h + grid.gap) + grid.card-h - self.height - 5px;
+                            border-radius: 11px;
+                            background: #1b1c20;
+                            full-name := Text {
+                                x: 8px;
+                                width: parent.width - 16px;
+                                height: parent.height;
+                                text: root.search-results[root.search-highlight].name;
+                                color: #ffffff;
+                                font-size: 11px;
+                                overflow: elide;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // formats 2..n, two per row
+            for row[i] in root.fields : FormatBox {
+                x: root.pad + Math.mod(i, 2) * (self.width + body.box-gap);
+                y: body.boxes-y + Math.floor(i / 2) * (body.box-h + body.box-gap);
+                width: (body.inner-w - body.box-gap) / 2;
+                opacity: 1 - root.search-t;
+                visible: root.search-t < 0.99;
+                label: row.label;
+                value: row.value;
+                rev: row.rev;
+                copy => { root.copy-value(row.key); }
+                edited(text) => { root.value-edited(row.key, text); }
+                accepted(text) => { root.value-accepted(row.key, text); }
+                blurred(text) => { root.value-blurred(row.key, text); }
+            }
+
+            SectionLabel {
+                x: root.pad;
+                y: body.shades-y;
+                opacity: 1 - root.search-t;
+                visible: root.search-t < 0.99;
+                text: "SHADES";
+            }
+            Rectangle {
+                x: root.pad;
+                y: body.shades-y + 24px;
+                width: body.inner-w;
+                height: 92px;
+                border-radius: 16px;
+                clip: true;
+                opacity: 1 - root.search-t;
+                visible: root.search-t < 0.99;
+                for cell[i] in root.shades : ShadeTile {
+                    animated: root.started;
+                    left-radius: i == 0 ? 16px : 0px;
+                    right-radius: i == root.shades.length - 1 ? 16px : 0px;
+                    // edges on whole pixels, so neighbours meet exactly: on
+                    // half pixels the CPU drawing could leave a dark 1px gap
+                    // (and OpenGL a faint seam)
+                    x: Math.round(i * parent.width / 5 / 1phx) * 1phx;
+                    width: Math.round((i + 1) * parent.width / 5 / 1phx) * 1phx - self.x;
+                    height: parent.height;
+                    cell: cell;
+                    label: root.card.label;
+                    clicked => { root.shade-clicked(cell.factor); }
+                    edit => { root.editor-open-requested(); }
+                    pen-hover(on) => { root.pen-hover = on; }
+                }
+            }
+            if root.pen-hint && root.search-t < 0.01 : Rectangle {
+                x: root.pad + body.inner-w / 2 - self.width / 2;
+                y: body.shades-y + 24px - self.height - 6px;
+                width: hint-text.preferred-width + 24px;
+                height: 28px;
+                border-radius: 10px;
+                background: #2c2f37;
+                hint-text := Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "Edit or compare this color";
+                    color: #f2f3f6;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            ColorCard {
+                animated: root.started;
+                x: root.pad;
+                y: root.search-t * (body.visible-height - body.card-h - root.pad);
+                width: body.inner-w;
+                height: body.card-h;
+                card-color: root.current-color;
+                ink: root.card-ink;
+                name: root.card-name;
+                label: root.card.label;
+                value: root.card.value;
+                rev: root.card.rev;
+                gradient: root.setting-card-gradient;
+                closes: root.search-open;
+                close => { root.close-search(); }
+                copy => { root.copy-value(root.card.key); }
+                edited(text) => { root.value-edited(root.card.key, text); }
+                accepted(text) => { root.value-accepted(root.card.key, text); }
+                blurred(text) => { root.value-blurred(root.card.key, text); }
+            }
+        }
+    }
+  }
+}

@@ -132,7 +132,7 @@ pub type Monitor = ((i32, i32), (u32, u32), f64);
 /// "1: 3440x1440 at 100%": each screen once. The windowing library can list a
 /// screen twice (KDE Wayland), so screens at the same place and size count once.
 pub fn screens_line(monitors: Vec<Monitor>) -> String {
-    let list = crate::picker::one_per_place(monitors, |(place, size, _)| (*place, *size));
+    let list = crate::freeze::one_per_place(monitors, |(place, size, _)| (*place, *size));
     let shown: Vec<String> = list.iter().map(|(_, (w, h), scale)| format!("{w}x{h} at {:.0}%", scale * 100.0)).collect();
     format!("{}: {}", shown.len(), shown.join(", "))
 }

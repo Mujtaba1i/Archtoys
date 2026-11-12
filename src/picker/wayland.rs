@@ -5,7 +5,7 @@
 //! 2. If that is not possible: KDE's own color picker (KWin), then the
 //!    portal's PickColor. These only return the final color, no preview.
 
-use super::{finish_picker, freeze, PickOutcome, PickerContext};
+use super::{finish_picker, frozen, PickOutcome, PickerContext};
 use crate::color::Rgb;
 use crate::config::HistoryStore;
 use crate::portal::{self, Outcome};
@@ -23,7 +23,7 @@ pub(super) fn start(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore
         }
 
         let shot = match take_screenshot() {
-            Ok(Some(path)) => freeze::load_png(&path),
+            Ok(Some(path)) => crate::freeze::load_png(&path),
             Ok(None) => Err("screenshot was declined".to_string()),
             Err(err) => Err(err),
         };
@@ -32,7 +32,7 @@ pub(super) fn start(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore
             Ok(shot) => {
                 let _ = slint::invoke_from_event_loop(move || {
                     let (ui2, history2) = (ui_weak.clone(), history_store.clone());
-                    freeze::show(ui_weak, history_store, context, shot, Box::new(move || start_legacy(ui2, history2, context)));
+                    frozen::show(ui_weak, history_store, context, shot, Box::new(move || start_legacy(ui2, history2, context)));
                 });
             }
             Err(err) => {

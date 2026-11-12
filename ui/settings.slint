@@ -1,0 +1,407 @@
+// Settings and About (v0.7.4: moved out of app.slint): the App's settings and
+// those of the toy they were opened from (opened from Home: every toy's).
+// Everything it shows and changes belongs to AppWindow, bound below.
+import { ScrollView, AboutSlint } from "std-widgets.slint";
+import { Skin, HeaderButton, PillButton, Switch, Segmented, SettingCard, SectionLabel } from "common.slint";
+
+export component SettingsPage inherits ScrollView {
+    in-out property <bool> about-open;
+    in property <string> app-version;
+    callback buy-coffee();
+    callback clear-history();
+    in-out property <bool> formats-open;
+    in-out property <string> hotkey-display;
+    in-out property <bool> hotkey-system-managed;
+    in-out property <int> hotkey-target;
+    callback open-hotkey-settings();
+    callback open-licenses();
+    callback open-link(string);
+    in-out property <length> pad;
+    in-out property <length> picker-top;
+    callback report-problem();
+    in-out property <bool> setting-autocopy;
+    in-out property <bool> setting-autostart;
+    in-out property <bool> setting-card-gradient;
+    in-out property <bool> setting-editor-cancel-forgets;
+    in-out property <bool> setting-editor-keep;
+    in-out property <bool> setting-editor-reset;
+    in-out property <bool> setting-formats-button;
+    in-out property <string> setting-hotkey;
+    in-out property <bool> setting-hotkey-recording;
+    in-out property <bool> setting-minimize;
+    in-out property <bool> setting-minimize-tray;
+    in-out property <bool> setting-show-name;
+    in-out property <string> setting-text-hotkey;
+    in-out property <bool> setting-text-keep-lines;
+    in-out property <bool> setting-text-stay-minimized;
+    in-out property <bool> setting-text-tools;
+    callback settings-changed();
+    in-out property <int> settings-scope;
+    in-out property <float> settings-t;
+    callback text-clear();
+    callback text-delete-languages();
+    in property <string> text-engine-info;
+    in-out property <string> text-hotkey-display;
+    in property <string> text-languages-info;
+    in property <int> text-state;
+    callback text-turn-on();
+    in property <int> text-update;
+    // app.slint's function and the hotkey recorder (outside this page)
+    callback close-settings();
+    callback focus-hotkey-recorder();
+
+    content-width: self.visible-width;
+    content-height: settings-list.preferred-height;
+
+    settings-list := VerticalLayout {
+        width: parent.visible-width;
+        padding-left: root.pad;
+        padding-right: root.pad;
+        padding-top: root.picker-top;
+        padding-bottom: root.pad;
+        spacing: 10px;
+
+        HorizontalLayout {
+            spacing: 6px;
+            HeaderButton {
+                icon: @image-url("chevron-left.svg");
+                label: "Back";
+                clicked => {
+                    if root.about-open {
+                        root.about-open = false;
+                        root.content-y = 0;
+                    } else {
+                        root.close-settings();
+                    }
+                }
+            }
+            Text {
+                text: root.about-open ? "About Archtoys" : "Settings";
+                color: Skin.text-main;
+                font-size: 22px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+
+        if !root.about-open && root.settings-scope != 2 : VerticalLayout {
+            spacing: 10px;
+            SectionLabel { text: "COLOR PICKER"; }
+
+            SettingCard {
+                title: "Hotkey";
+                subtitle: root.hotkey-system-managed ? "Your desktop manages it. Click to change it in System Settings."
+                    : root.setting-hotkey-recording && root.hotkey-target == 0 ? "Press the new keys, or Esc to cancel"
+                    : "Click to record a new one";
+                PillButton {
+                    text: root.hotkey-system-managed ? (root.hotkey-display == "" ? "Not set" : root.hotkey-display)
+                        : root.setting-hotkey-recording && root.hotkey-target == 0 ? "Press keys…" : root.setting-hotkey;
+                    highlighted: root.setting-hotkey-recording && root.hotkey-target == 0;
+                    clicked => {
+                        if root.hotkey-system-managed {
+                            root.open-hotkey-settings();
+                        } else {
+                            root.hotkey-target = 0;
+                            root.setting-hotkey-recording = true;
+                            root.focus-hotkey-recorder();
+                        }
+                    }
+                }
+            }
+            SettingCard {
+                title: "Auto copy";
+                subtitle: "Copy the first format as soon as you pick";
+                Switch {
+                    label: "Auto copy";
+                    checked: root.setting-autocopy;
+                    toggled(on) => { root.setting-autocopy = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Minimize on pick";
+                subtitle: "Hide the window while you pick";
+                Switch {
+                    label: "Minimize on pick";
+                    checked: root.setting-minimize;
+                    toggled(on) => { root.setting-minimize = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Show color name";
+                subtitle: "On the color card and the shades";
+                Switch {
+                    label: "Show color name";
+                    checked: root.setting-show-name;
+                    toggled(on) => { root.setting-show-name = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Color card style";
+                subtitle: "Solid shows the exact color. Gradient adds a sheen.";
+                Segmented {
+                    options: ["Solid", "Gradient"];
+                    selected: root.setting-card-gradient ? 1 : 0;
+                    picked(i) => { root.setting-card-gradient = i == 1; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Formats button";
+                subtitle: "Show the formats button in the header";
+                Switch {
+                    label: "Formats button";
+                    checked: root.setting-formats-button;
+                    toggled(on) => { root.setting-formats-button = on; root.settings-changed(); }
+                }
+            }
+            if !root.setting-formats-button : SettingCard {
+                title: "Formats";
+                subtitle: "Choose the formats and their order";
+                PillButton {
+                    text: "Customize";
+                    clicked => { root.formats-open = true; }
+                }
+            }
+            SettingCard {
+                title: "History";
+                subtitle: "The last 500 colors. Clear keeps only the current one.";
+                PillButton {
+                    text: "Clear";
+                    clicked => { root.clear-history(); }
+                }
+            }
+
+            SectionLabel { text: "COLOR EDITOR"; }
+
+            SettingCard {
+                title: "Cancel forgets the edit";
+                subtitle: "Off: Cancel keeps it, like clicking outside";
+                Switch {
+                    label: "Cancel forgets the edit";
+                    checked: root.setting-editor-cancel-forgets;
+                    toggled(on) => { root.setting-editor-cancel-forgets = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Keep the edit after a restart";
+                subtitle: "Reopen the editor where you left it";
+                Switch {
+                    label: "Keep the edit after a restart";
+                    checked: root.setting-editor-keep;
+                    toggled(on) => { root.setting-editor-keep = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Start fresh when the color changes";
+                subtitle: "A new pick, a history color or a search result resets the edit";
+                Switch {
+                    label: "Start fresh when the color changes";
+                    checked: root.setting-editor-reset;
+                    toggled(on) => { root.setting-editor-reset = on; root.settings-changed(); }
+                }
+            }
+        }
+
+        if !root.about-open && root.settings-scope != 1 : VerticalLayout {
+            spacing: 10px;
+            SectionLabel { text: "TEXT EXTRACTOR"; }
+
+            SettingCard {
+                title: "Hotkey";
+                subtitle: root.hotkey-system-managed ? "Your desktop manages it. Click to change it in System Settings."
+                    : root.setting-hotkey-recording && root.hotkey-target == 1 ? "Press the new keys, or Esc to cancel"
+                    : "Starts a capture from anywhere";
+                PillButton {
+                    text: root.hotkey-system-managed ? (root.text-hotkey-display == "" ? "Not set" : root.text-hotkey-display)
+                        : root.setting-hotkey-recording && root.hotkey-target == 1 ? "Press keys…" : root.setting-text-hotkey;
+                    highlighted: root.setting-hotkey-recording && root.hotkey-target == 1;
+                    clicked => {
+                        if root.hotkey-system-managed {
+                            root.open-hotkey-settings();
+                        } else {
+                            root.hotkey-target = 1;
+                            root.setting-hotkey-recording = true;
+                            root.focus-hotkey-recorder();
+                        }
+                    }
+                }
+            }
+            SettingCard {
+                title: "After selecting text";
+                subtitle: root.setting-text-tools ? "Copy, Copy as one line or Open, on the selection (Enter copies)"
+                    : "The text is copied and the capture closes";
+                Segmented {
+                    options: ["Show tools", "Copy and close"];
+                    selected: root.setting-text-tools ? 0 : 1;
+                    picked(i) => { root.setting-text-tools = i == 0; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Stay minimized";
+                subtitle: "Minimize Archtoys for a capture, and keep it minimized afterwards";
+                Switch {
+                    label: "Stay minimized";
+                    checked: root.setting-text-stay-minimized;
+                    toggled(on) => { root.setting-text-stay-minimized = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Line breaks";
+                subtitle: "Keep them for code and lists, join them for paragraphs";
+                Segmented {
+                    options: ["Keep", "Join"];
+                    selected: root.setting-text-keep-lines ? 0 : 1;
+                    picked(i) => { root.setting-text-keep-lines = i == 0; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Engine";
+                subtitle: root.text-state != 2 ? root.text-engine-info
+                    : root.text-engine-info + (root.text-update == 0 ? " · checking for updates…"
+                        : root.text-update == 1 ? " · up to date"
+                        : root.text-update == 2 ? " · an update is available" : "");
+                // installed: "Update" only when there is one (or it couldn't tell)
+                if root.text-state != 2 || root.text-update >= 2 : PillButton {
+                    text: root.text-state == 2 ? "Update" : "Turn on";
+                    highlighted: root.text-state == 2 && root.text-update == 2;
+                    clicked => { root.text-turn-on(); }
+                }
+            }
+            SettingCard {
+                title: "Languages";
+                subtitle: root.text-languages-info;
+                PillButton {
+                    text: "Delete";
+                    clicked => { root.text-delete-languages(); }
+                }
+            }
+            SettingCard {
+                title: "History";
+                subtitle: "Text only, the last 500";
+                PillButton {
+                    text: "Clear";
+                    clicked => { root.text-clear(); }
+                }
+            }
+        }
+
+        if !root.about-open : VerticalLayout {
+            spacing: 10px;
+            SectionLabel { text: "APP"; }
+
+            SettingCard {
+                title: "Start on login";
+                subtitle: "Launch Archtoys in the tray";
+                Switch {
+                    label: "Start on login";
+                    checked: root.setting-autostart;
+                    toggled(on) => { root.setting-autostart = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Minimize to tray on close";
+                subtitle: "Keep running in the tray when you close the window";
+                Switch {
+                    label: "Minimize to tray on close";
+                    checked: root.setting-minimize-tray;
+                    toggled(on) => { root.setting-minimize-tray = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Theme";
+                Segmented {
+                    options: ["Light", "Dark", "System"];
+                    selected: Skin.theme;
+                    picked(i) => { Skin.theme = i; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "About Archtoys";
+                subtitle: "Version, credits and licences";
+                PillButton {
+                    text: "Open";
+                    clicked => {
+                        root.about-open = true;
+                        root.content-y = 0;
+                    }
+                }
+            }
+            SettingCard {
+                title: "Buy me a coffee";
+                subtitle: "If Archtoys saves you time, a one-time tip helps keep it going";
+                PillButton {
+                    text: "Support";
+                    clicked => { root.buy-coffee(); }
+                }
+            }
+            SettingCard {
+                title: "Report a problem";
+                subtitle: "Opens a GitHub issue with the app and system details filled in";
+                PillButton {
+                    text: "Report";
+                    danger: true;
+                    clicked => { root.report-problem(); }
+                }
+            }
+        }
+
+        // --- About: version, credits, licences ---
+        if root.about-open : VerticalLayout {
+            spacing: 10px;
+            Text {
+                text: "Archtoys " + root.app-version;
+                color: Skin.text-main;
+                font-size: 17px;
+                font-weight: 700;
+            }
+            Text {
+                text: "MIT License © 2026 Mujtaba1i. Inspired by Microsoft PowerToys; not affiliated with or endorsed by Microsoft.";
+                color: Skin.text-muted;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+            SectionLabel { text: "MADE WITH"; }
+            Rectangle {
+                border-radius: 14px;
+                background: Skin.surface;
+                border-width: 1px;
+                border-color: Skin.border;
+                HorizontalLayout {
+                    padding: 12px;
+                    alignment: center;
+                    AboutSlint { }
+                }
+            }
+            SectionLabel { text: "CREDITS"; }
+            SettingCard {
+                title: "Tesseract OCR";
+                subtitle: "Reads the text · Apache-2.0 · installed from your system's packages";
+                PillButton { text: "Website"; clicked => { root.open-link("https://github.com/tesseract-ocr/tesseract"); } }
+            }
+            SettingCard {
+                title: "Tesseract language data";
+                subtitle: "Downloaded when a language is first needed · Apache-2.0";
+                PillButton { text: "Website"; clicked => { root.open-link("https://github.com/tesseract-ocr/tessdata_fast"); } }
+            }
+            SettingCard {
+                title: "whatlang";
+                subtitle: "Tells which language a text is in · MIT";
+                PillButton { text: "Website"; clicked => { root.open-link("https://github.com/greyblake/whatlang-rs"); } }
+            }
+            SettingCard {
+                title: "Color names by David Aerne";
+                subtitle: "The 32,000 color names (meodai/color-names) · MIT";
+                PillButton { text: "Website"; clicked => { root.open-link("https://github.com/meodai/color-names"); } }
+            }
+            SettingCard {
+                title: "Slint";
+                subtitle: "The user interface toolkit · Royalty-free license 2.0";
+                PillButton { text: "Website"; clicked => { root.open-link("https://slint.dev"); } }
+            }
+            SettingCard {
+                title: "Open-source licences";
+                subtitle: "Every library Archtoys is built from, with its licence";
+                PillButton { text: "Show"; clicked => { root.open-licenses(); } }
+            }
+        }
+    }
+}

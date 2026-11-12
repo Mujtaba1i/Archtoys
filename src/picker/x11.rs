@@ -8,7 +8,7 @@
 //! Enter picks; only those keys are taken from other apps while picking.
 
 use super::{
-    center_rgb, finish_picker, freeze, magnifier_image, preview_text, show_hover, PickOutcome, PickerContext, MAGNIFIER_RADIUS,
+    center_rgb, finish_picker, frozen, magnifier_image, preview_text, show_hover, PickOutcome, PickerContext, MAGNIFIER_RADIUS,
     PICKER_CANCELLED,
 };
 use crate::config::HistoryStore;
@@ -482,11 +482,11 @@ pub(super) fn start_freeze(ui_weak: slint::Weak<AppWindow>, history_store: Histo
         if hid_window {
             thread::sleep(Duration::from_millis(250));
         }
-        let shot = capture_screen_to_png().and_then(|path| freeze::load_png(&path));
+        let shot = capture_screen_to_png().and_then(|path| crate::freeze::load_png(&path));
         let _ = slint::invoke_from_event_loop(move || match shot {
             Ok(shot) => {
                 let (ui2, history2) = (ui_weak.clone(), history_store.clone());
-                freeze::show(ui_weak, history_store, context, shot, Box::new(move || start(ui2, history2, context)));
+                frozen::show(ui_weak, history_store, context, shot, Box::new(move || start(ui2, history2, context)));
             }
             Err(err) => {
                 eprintln!("freeze picker: {err}; using the live picker");

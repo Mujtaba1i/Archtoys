@@ -5,15 +5,17 @@
 //! * `lang`: finds the language by itself and downloads its data when needed.
 //! * `history`: the last 500 texts, saved until cleared.
 //!
-//! The capture itself is the Color Picker's frozen screen in text mode
-//! (`picker::start_text_capture`); this module reads the selected area and
-//! keeps the result. Nothing here runs at startup: with Text Extractor off,
+//! * `capture`: the frozen screen in text mode, where the user drags over text.
+//!
+//! This module reads the selected area and keeps the result. Nothing here runs at startup: with Text Extractor off,
 //! the app costs what v0.6.2 cost.
 
+mod capture;
 mod engine;
 mod history;
 mod install;
 mod lang;
+pub(crate) mod page;
 
 use crate::{AppWindow, TextEntry};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -236,7 +238,7 @@ pub(crate) fn start_capture(ui: &AppWindow) {
         return;
     }
     ensure_history(ui);
-    crate::picker::start_text_capture(ui);
+    capture::start(ui);
 }
 
 /// What Tesseract read in a capture.

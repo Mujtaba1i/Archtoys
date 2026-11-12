@@ -2,14 +2,15 @@
 //!
 //! * **X11**: live. We read only the few pixels under the cursor (`x11.rs`).
 //! * **Wayland**: "freeze frame". We take one screenshot through the portal,
-//!   show it fullscreen, and the user picks from it (`freeze.rs`). If that is
-//!   not possible we fall back to KDE's / the portal's own picker (`wayland.rs`).
+//!   show it fullscreen, and the user picks from it (`frozen.rs`, on the
+//!   shared frozen screen in `freeze.rs`). If that is not possible we fall
+//!   back to KDE's / the portal's own picker (`wayland.rs`).
 //!
 //! While hovering, the main window shows the hovered color. Esc (or right
 //! click) puts back the color that was shown before picking started.
 
-mod freeze;
-pub(crate) use freeze::{one_per_place, window_attributes};
+mod frozen;
+pub(crate) mod page;
 mod wayland;
 mod x11;
 
@@ -121,113 +122,40 @@ pub fn start_picker(ui: &AppWindow, history_store: HistoryStore, source: PickerS
     }
 }
 
-/// How to put the main window back after a text capture: it is hidden (or
-/// made see-through on KDE) during the capture, so the text behind it can be read.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TextRestore {
-    hidden: bool,
-    faded: bool,
-    /// "Open" was clicked: bring the window to the front too
-    raise: bool,
+/// On Wayland (else X11, or unknown: treated as X11).
+pub(crate) fn on_wayland() -> bool {
+    detect_session_type() == SessionType::Wayland
 }
 
-/// Text Extractor's capture: one screenshot, shown frozen on every monitor,
-/// where the user drags a rectangle over text. UI thread only.
-pub fn start_text_capture(ui: &AppWindow) {
-    if PICKER_ACTIVE.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
-        return; // a pick or a capture is already running
-    }
-    diagnostics::set_picker("text capture");
-    let visible = ui.window().is_visible() && !ui.window().is_minimized();
-    // "Stay minimized": out of the way now, and nothing to bring back afterwards
-    let minimize = visible && ui.get_setting_text_stay_minimized();
-    if minimize {
-        ui.window().set_minimized(true);
-    }
-    let faded = visible
-        && !minimize
-        && crate::kwin::available()
-        && crate::kwin::set_main_window_opacity(0.0)
-            .map_err(|err| eprintln!("text capture: couldn't fade the window ({err}); hiding it"))
-            .is_ok();
-    if visible && !faded && !minimize {
-        hide_window(ui);
-    }
-    let restore = TextRestore { hidden: visible && !faded && !minimize, faded, raise: false };
-    let ui_weak = ui.as_weak();
-    let session = detect_session_type();
-    std::thread::spawn(move || {
-        if visible {
-            // give the desktop a moment to take the window off the screen
-            std::thread::sleep(std::time::Duration::from_millis(250));
+/// One screenshot of every monitor, for the frozen screen (Text Extractor's
+/// capture). Blocking: call it off the UI thread.
+pub(crate) fn take_screenshot(wayland: bool) -> Result<crate::freeze::Screenshot, String> {
+    if wayland {
+        match wayland::take_screenshot() {
+            Ok(Some(path)) => crate::freeze::load_png(&path),
+            Ok(None) => Err("the screenshot was declined".to_string()),
+            Err(err) => Err(err),
         }
-        let shot = match session {
-            SessionType::Wayland => match wayland::take_screenshot() {
-                Ok(Some(path)) => freeze::load_png(&path),
-                Ok(None) => Err("the screenshot was declined".to_string()),
-                Err(err) => Err(err),
-            },
-            _ => x11::capture_screen_to_png().and_then(|path| freeze::load_png(&path)),
-        };
-        let _ = slint::invoke_from_event_loop(move || match shot {
-            Ok(shot) => freeze::show_text(ui_weak, shot, restore),
-            Err(err) => {
-                eprintln!("text capture: {err}");
-                if let Some(ui) = ui_weak.upgrade() {
-                    crate::ui_state::show_message(&ui, "Text Extractor couldn't take a screenshot");
-                }
-                end_text_capture(ui_weak, restore);
-            }
-        });
-    });
-}
-
-/// Ends a text capture: the windows and screenshot go, the main window comes
-/// back. Safe to call from any thread.
-pub(crate) fn end_text_capture(ui_weak: slint::Weak<AppWindow>, restore: TextRestore) {
-    let result = slint::invoke_from_event_loop(move || {
-        freeze::release_window();
-        // Open on KDE's Wayland: KWin brings it forward (the app can't); it
-        // also undoes the fade, and un-minimizes it after "Stay minimized"
-        let kwin_raise = restore.raise && crate::kwin::available();
-        if restore.faded || kwin_raise {
-            let result = if kwin_raise { crate::kwin::raise_main_window() } else { crate::kwin::set_main_window_opacity(1.0) };
-            if let Err(err) = result {
-                eprintln!("text capture: couldn't bring the window back ({err})");
-            }
-        } else if restore.hidden {
-            if let Some(ui) = ui_weak.upgrade() {
-                show_window(&ui);
-            }
-        }
-        PICKER_ACTIVE.store(false, Ordering::SeqCst);
-        if restore.raise {
-            if let Some(ui) = ui_weak.upgrade() {
-                crate::bring_to_front(&ui);
-            }
-        }
-        slint::Timer::single_shot(std::time::Duration::from_millis(500), crate::ui_state::return_free_memory);
-    });
-    if result.is_err() {
-        PICKER_ACTIVE.store(false, Ordering::SeqCst);
+    } else {
+        x11::capture_screen_to_png().and_then(|path| crate::freeze::load_png(&path))
     }
 }
 
 /// Cancels the current pick (Esc pressed in the main window).
 pub fn cancel_picker() {
     PICKER_CANCELLED.store(true, Ordering::SeqCst); // X11 live picker
-    freeze::cancel_active(); // freeze frame
+    crate::freeze::cancel_active(); // freeze frame
 }
 
 /// Arrow keys in the main window during a freeze-frame pick: moves the pick
 /// point by one pixel. (The X11 live picker gets its keys from the X server.)
 pub fn nudge_picker(dx: i32, dy: i32) {
-    freeze::nudge_active(dx, dy);
+    crate::freeze::nudge_active(dx, dy);
 }
 
 /// Enter in the main window during a freeze-frame pick: picks the point.
 pub fn pick_point() {
-    freeze::pick_active_point();
+    crate::freeze::enter_active();
 }
 
 /// The value next to the pick cursor: the first format, without its wrapper.
@@ -246,9 +174,9 @@ pub(crate) fn show_hover(ui: &AppWindow, rgb: Rgb) {
 pub(crate) fn finish_picker(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore, context: PickerContext, outcome: PickOutcome) {
     let result = slint::invoke_from_event_loop(move || {
         x11::release_windows();
-        freeze::release_window();
+        crate::freeze::release_window();
         if let Some(ui) = ui_weak.upgrade() {
-            freeze::end_main_window_raise(&ui);
+            frozen::end_main_window_raise(&ui);
             let selected = match outcome {
                 PickOutcome::Picked(rgb) if context.to_editor => {
                     crate::editor::end_pick(&ui, Some(rgb));
