@@ -159,6 +159,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 - NEW TOY! Screen Ruler: measure anything on screen
 - README changes plus conduct and a contributing guide
 - CI: the end-to-end test keeps each app in its own profile
+- CI: the release works with the newer checkout step
 
 * Tue Nov 10 2026 Mujtaba1i <mujtaba1i@github> - 0.7.3-1
 - Tests: the appimage package check closes the app not the launcher
