@@ -12,6 +12,8 @@ export struct RulerBar {
     w: length,
     h: length,
     faint: bool,
+    // the light fill inside a box (its part on another screen)
+    fill: bool,
 }
 
 // A size in a dark pill. `x` is its left edge, or its center when `centered`.
@@ -132,7 +134,7 @@ export component RulerOverlay inherits Rectangle {
         y: bar.y;
         width: bar.w;
         height: bar.h;
-        background: bar.faint ? root.line.with-alpha(0.45) : root.line;
+        background: bar.fill ? root.line.with-alpha(0.08) : bar.faint ? root.line.with-alpha(0.45) : root.line;
     }
     if root.box-on : Rectangle {
         x: root.box-x;
@@ -269,7 +271,7 @@ export component RulerPreview inherits Rectangle {
         y: bar.y * root.k;
         width: Math.max(bar.w * root.k, 1px);
         height: Math.max(bar.h * root.k, 1px);
-        background: bar.faint ? root.line.with-alpha(0.45) : root.line;
+        background: bar.fill ? root.line.with-alpha(0.08) : bar.faint ? root.line.with-alpha(0.45) : root.line;
     }
     for label in root.labels : SizePill {
         x: label.centered ? label.x * root.k - self.width / 2 : Math.min(label.x * root.k, root.width - 6px) - self.width;

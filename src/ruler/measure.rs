@@ -183,7 +183,7 @@ impl State {
                     let (x1, y1) = layout.to_window(j, shape.x1 as f32, shape.y1 as f32);
                     let faint = logic::style(n, kept.len() + 1) == logic::Style::Faint;
                     for d in logic::dashes(x0, y0, x1 - x0, y1 - y0, 2.0, 6.0, 4.0) {
-                        bars.push(RulerBar { x: d.x, y: d.y, w: d.w, h: d.h, faint });
+                        bars.push(RulerBar { x: d.x, y: d.y, w: d.w, h: d.h, faint, fill: false });
                     }
                     if shape.i == j {
                         let text = logic::text(mode, shape.size, self.unit, self.mm(s, j)) + " · kept";
@@ -194,10 +194,12 @@ impl State {
                 if let Some(shape) = current.filter(|c| c.i != j && self.cross) {
                     let (x0, y0) = layout.to_window(j, shape.x0 as f32, shape.y0 as f32);
                     let (x1, y1) = layout.to_window(j, shape.x1 as f32, shape.y1 as f32);
+                    // the light fill the box has on its own screen, then its outline
+                    bars.push(RulerBar { x: x0, y: y0, w: x1 - x0, h: y1 - y0, faint: false, fill: true });
                     for (x, y, w, h) in
                         [(x0, y0, x1 - x0, 2.0), (x0, y1 - 2.0, x1 - x0, 2.0), (x0, y0, 2.0, y1 - y0), (x1 - 2.0, y0, 2.0, y1 - y0)]
                     {
-                        bars.push(RulerBar { x, y, w, h, faint: false });
+                        bars.push(RulerBar { x, y, w, h, faint: false, fill: false });
                     }
                 }
                 // its size by the bottom-right corner, on the screen that corner is on (across screens, maybe not its own)
@@ -213,16 +215,16 @@ impl State {
                 if mode != Mode::Vertical {
                     let (x1, y) = layout.to_window(j, l as f32, py);
                     let (x2, _) = layout.to_window(j, (r + 1) as f32, py);
-                    bars.push(RulerBar { x: x1, y: y - 1.0, w: x2 - x1, h: 2.0, faint: false });
-                    bars.push(RulerBar { x: x1 - 1.0, y: y - 8.0, w: 2.0, h: 16.0, faint: false });
-                    bars.push(RulerBar { x: x2 - 1.0, y: y - 8.0, w: 2.0, h: 16.0, faint: false });
+                    bars.push(RulerBar { x: x1, y: y - 1.0, w: x2 - x1, h: 2.0, faint: false, fill: false });
+                    bars.push(RulerBar { x: x1 - 1.0, y: y - 8.0, w: 2.0, h: 16.0, faint: false, fill: false });
+                    bars.push(RulerBar { x: x2 - 1.0, y: y - 8.0, w: 2.0, h: 16.0, faint: false, fill: false });
                 }
                 if mode != Mode::Horizontal {
                     let (x, y1) = layout.to_window(j, px, t as f32);
                     let (_, y2) = layout.to_window(j, px, (b + 1) as f32);
-                    bars.push(RulerBar { x: x - 1.0, y: y1, w: 2.0, h: y2 - y1, faint: false });
-                    bars.push(RulerBar { x: x - 8.0, y: y1 - 1.0, w: 16.0, h: 2.0, faint: false });
-                    bars.push(RulerBar { x: x - 8.0, y: y2 - 1.0, w: 16.0, h: 2.0, faint: false });
+                    bars.push(RulerBar { x: x - 1.0, y: y1, w: 2.0, h: y2 - y1, faint: false, fill: false });
+                    bars.push(RulerBar { x: x - 8.0, y: y1 - 1.0, w: 16.0, h: 2.0, faint: false, fill: false });
+                    bars.push(RulerBar { x: x - 8.0, y: y2 - 1.0, w: 16.0, h: 2.0, faint: false, fill: false });
                 }
                 if reach.i == j {
                     let (cx, cy) = layout.to_window(j, px, py);
