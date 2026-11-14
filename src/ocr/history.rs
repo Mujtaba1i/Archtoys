@@ -21,6 +21,42 @@ pub(crate) struct Entry {
     pub words: u32,
     /// seconds since 1970 (UTC)
     pub time: u64,
+    /// a font entry (Find font, v0.7.5): what was found
+    pub font: Option<FontFind>,
+}
+
+/// A font entry's search and answer. The selection's picture is a file in
+/// the cache (`picture`, "" once Saved pictures is deleted): only font
+/// entries keep one, so the search can run again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct FontFind {
+    pub picture: String,
+    /// each word's box in the picture and its text (Search again compares them again)
+    pub boxes: Vec<(f32, f32, f32, f32)>,
+    pub words: Vec<String>,
+    /// surest first; empty while it searches or when nothing matched
+    pub guesses: Vec<FontGuess>,
+    /// the search ended (with or without an answer)
+    pub done: bool,
+    pub text_color: [u8; 3],
+    pub background: [u8; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct FontGuess {
+    pub family: String,
+    pub bold: bool,
+    pub sure: u8,
+    /// the font file it was drawn from (to draw the name and the sample again)
+    pub file: String,
+    pub local: bool,
+    pub designer: String,
+    /// 0 OFL, 1 Apache, 2 UFL (Google Fonts)
+    pub licence: u8,
+    /// 0 sans serif, 1 serif, 2 display, 3 handwriting, 4 monospace, 9 unknown (a local font)
+    pub category: u8,
 }
 
 fn path() -> PathBuf {

@@ -32,6 +32,9 @@ CASES = [
     ("Russian", "Russian", "Съешь же ещё этих мягких французских булок, да выпей чаю.", "DejaVu-Sans"),
     ("Arabic", "Arabic", "يقرأ مستخرج النصوص أي نص على الشاشة حتى في الصور والفيديو", "Noto Sans Arabic"),
     ("Arabic short", "Arabic", "هذا نص عربي قصير", "Noto Sans Arabic"),
+    # short lines: named French as English, and English as Turkish, before v0.7.5
+    ("French short", "French", "Mot de passe oublié ?", "DejaVu-Sans"),
+    ("English short", "English", "Network connection lost", "DejaVu-Sans"),
 ]
 # the cases that must pass the gate, and the ones that only warn below it
 GATED = ("English",)

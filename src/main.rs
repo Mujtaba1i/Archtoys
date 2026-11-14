@@ -7,6 +7,7 @@ mod color;
 mod config;
 mod diagnostics;
 mod editor;
+mod fontfind;
 mod formats;
 mod freeze;
 mod hotkey;
@@ -166,6 +167,16 @@ fn main() -> Result<(), slint::PlatformError> {
         };
         std::process::exit(code);
     }
+    if let Some(i) = args.iter().position(|a| a == "--find-font") {
+        let code = match args.get(i + 1) {
+            Some(path) => fontfind::run_on_file(path),
+            None => {
+                eprintln!("usage: archtoys --find-font IMAGE.png");
+                2
+            }
+        };
+        std::process::exit(code);
+    }
     if args.iter().any(|a| a == "--version" || a == "-v") {
         println!("archtoys {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
@@ -269,6 +280,12 @@ fn main() -> Result<(), slint::PlatformError> {
         });
         let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
         ruler::install(&ui, &history_store, move || {
+            if let Some(ui) = save_ui.upgrade() {
+                persist_config(&ui, &save_history);
+            }
+        });
+        let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
+        fontfind::page::wire(&ui, &history_store, move || {
             if let Some(ui) = save_ui.upgrade() {
                 persist_config(&ui, &save_history);
             }

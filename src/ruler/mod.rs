@@ -18,6 +18,7 @@ mod screen_size;
 use crate::color::Rgb;
 use crate::config::HistoryStore;
 use crate::{AppWindow, RulerBar, RulerEntry, RulerFrame, RulerLabel};
+pub(crate) use logic::is_bright;
 use logic::{Mode, Size, Unit};
 use serde::{Deserialize, Serialize};
 use slint::{Color, ComponentHandle, ModelRc, VecModel};
@@ -268,7 +269,7 @@ fn refresh(ui: &AppWindow) {
         let (mut bars, mut frames, mut labels) = (vec![], vec![], vec![]);
         for shape in &preview {
             let faint = shape.style == logic::Style::Faint;
-            bars.extend(shape.bars.iter().map(|b| RulerBar { x: b.x, y: b.y, w: b.w, h: b.h, faint }));
+            bars.extend(shape.bars.iter().map(|b| RulerBar { x: b.x, y: b.y, w: b.w, h: b.h, faint, fill: false }));
             if let Some(f) = shape.frame {
                 if shape.style == logic::Style::Solid {
                     frames.push(RulerFrame { x: f.x, y: f.y, w: f.w, h: f.h, solid: true });
@@ -279,6 +280,7 @@ fn refresh(ui: &AppWindow) {
                         w: b.w,
                         h: b.h,
                         faint,
+                        fill: false,
                     }));
                 }
             }

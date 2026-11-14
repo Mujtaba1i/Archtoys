@@ -32,7 +32,7 @@ component Magnifier inherits Rectangle {
         height: parent.height + 6px;
         border-radius: root.border-radius + 3px;
         border-width: 3px;
-        border-color: #1f1f1fe6;
+        border-color: Skin.pick(#1f1f1fe6, #ffffffeb);
     }
     // outline of the pixel that will be picked
     Rectangle {
@@ -65,7 +65,7 @@ component PreviewCard inherits Rectangle {
     height: 158px;
     border-radius: 8px;
     // drawn on the CPU, the glow's cover paints it (once: it's see-through)
-    background: Skin.real-shadows ? #1f1f1fe6 : transparent;
+    background: Skin.real-shadows ? Skin.pick(#1f1f1fe6, #ffffffeb) : transparent;
     border-width: 1px;
     border-color: Skin.real-shadows ? #00000030 : transparent;
     drop-shadow-blur: 10px;
@@ -76,7 +76,7 @@ component PreviewCard inherits Rectangle {
         glow: #00000060;
         blur: 10px;
         radius: root.border-radius;
-        cover: #1f1f1fe6;
+        cover: Skin.pick(#1f1f1fe6, #ffffffeb);
         cover-border: #00000030;
         cover-border-width: root.border-width;
     }
@@ -96,11 +96,11 @@ component PreviewCard inherits Rectangle {
                 border-radius: 4px;
                 background: root.preview-color;
                 border-width: 1px;
-                border-color: #ffffff40;
+                border-color: Skin.pick(#ffffff40, #00000026);
             }
             value := Text {
                 text: root.preview-hex;
-                color: #ffffff;
+                color: Skin.text-main;
                 font-size: 13px;
                 font-weight: 600;
                 vertical-alignment: center;
@@ -166,23 +166,38 @@ export struct TextBox {
 component CaptureButton inherits Rectangle {
     in property <string> text;
     in property <bool> primary;
+    in property <bool> enabled: true;
+    // a small mark before the text ("Aa" for Find font), in a serif
+    in property <string> mark;
+    out property <bool> hovered: touch.has-hover;
     callback clicked;
     height: 38px;
-    width: label.preferred-width + 30px;
+    width: row.preferred-width + 30px;
     border-radius: 10px;
-    background: root.primary ? (touch.has-hover ? #2a9be0 : #1e8ccf) : (touch.has-hover ? #2c2f37 : #1d1f25);
+    background: root.primary ? (touch.has-hover ? #2a9be0 : #1e8ccf) : (touch.has-hover && root.enabled ? Skin.surface-hover : Skin.surface);
     accessible-role: button;
     accessible-label: root.text;
     accessible-action-default => { root.clicked(); }
-    label := Text {
-        text: root.text;
-        color: #f2f3f6;
-        font-size: 15px;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    row := HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        if root.mark != "" : Text {
+            text: root.mark;
+            color: root.primary ? #ffffff : root.enabled ? Skin.text-main : Skin.pick(#6b7080, #9aa0aa);
+            font-size: 17px;
+            font-weight: 700;
+            font-family: "Noto Serif";
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.text;
+            color: root.primary ? #ffffff : root.enabled ? Skin.text-main : Skin.pick(#6b7080, #9aa0aa);
+            font-size: 15px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
     }
-    touch := TouchArea { clicked => { root.clicked(); } }
+    touch := TouchArea { clicked => { if root.enabled { root.clicked(); } } }
 }
 
 export component FreezePickerWindow inherits Window {
@@ -213,6 +228,11 @@ export component FreezePickerWindow inherits Window {
     // reading the text (Tesseract is running)
     in property <bool> busy: false;
     in property <string> busy-text: "Reading…";
+    // Find font (v0.7.5): offered when the reading is sure enough, else why not
+    in property <bool> font-ok: true;
+    in property <string> font-why;
+    // a short message after the reading ("Downloading better French data…"), "" for none
+    in property <string> text-note;
     // the words found, outlined
     in property <[TextBox]> words;
     // the toolbar under the selection
@@ -537,18 +557,36 @@ export component FreezePickerWindow inherits Window {
 
         // under the selection, or above it near the bottom of the screen
         property <length> bar-y: root.sel-y + root.sel-h + 10px + 52px > root.height ? root.sel-y - 10px - 52px : root.sel-y + root.sel-h + 10px;
+        // the note, at the bottom of the screen for a few seconds
+        if root.text-note != "" : Rectangle {
+            x: (root.width - self.width) / 2;
+            y: root.height - self.height - 36px;
+            width: note-label.preferred-width + 32px;
+            height: 40px;
+            border-radius: 12px;
+            background: Skin.surface;
+            border-width: 1px;
+            border-color: Skin.border;
+            note-label := Text {
+                text: root.text-note;
+                color: Skin.text-main;
+                font-size: 14px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
         if root.has-selection && root.busy : Rectangle {
             x: Math.max(8px, Math.min(root.sel-x, root.width - self.width - 8px));
             y: text-overlay.bar-y;
             width: busy-label.preferred-width + 32px;
             height: 42px;
             border-radius: 12px;
-            background: #1d1f25;
+            background: Skin.surface;
             border-width: 1px;
-            border-color: #2c2f37;
+            border-color: Skin.border;
             busy-label := Text {
                 text: root.busy-text;
-                color: #f2f3f6;
+                color: Skin.text-main;
                 font-size: 15px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -560,9 +598,9 @@ export component FreezePickerWindow inherits Window {
             width: bar.preferred-width;
             height: 52px;
             border-radius: 14px;
-            background: #1d1f25;
+            background: Skin.surface;
             border-width: 1px;
-            border-color: #2c2f37;
+            border-color: Skin.border;
             bar := HorizontalLayout {
                 padding: 7px;
                 padding-right: 14px;
@@ -570,10 +608,32 @@ export component FreezePickerWindow inherits Window {
                 CaptureButton { text: "Copy"; primary: true; clicked => { root.tool("copy"); } }
                 CaptureButton { text: "Copy as one line"; clicked => { root.tool("line"); } }
                 CaptureButton { text: "Open"; clicked => { root.tool("open"); } }
+                find-font := CaptureButton { mark: "Aa"; text: "Find font"; enabled: root.font-ok; clicked => { root.tool("font"); } }
                 Text {
                     text: root.tools-info;
-                    color: #a3a7b3;
+                    color: Skin.text-muted;
                     font-size: 14px;
+                    vertical-alignment: center;
+                }
+            }
+            // why Find font is grayed out, in a bubble above it (changing the
+            // toolbar's text would move the button away from the mouse)
+            if find-font.hovered && !root.font-ok : Rectangle {
+                width: why.preferred-width + 24px;
+                height: 34px;
+                x: bar.x + find-font.x + (find-font.width - self.width) / 2;
+                y: -self.height - 8px;
+                border-radius: 10px;
+                background: Skin.surface;
+                border-width: 1px;
+                border-color: Skin.border;
+                drop-shadow-blur: 12px;
+                drop-shadow-color: #00000040;
+                why := Text {
+                    text: root.font-why;
+                    color: Skin.text-main;
+                    font-size: 13px;
+                    horizontal-alignment: center;
                     vertical-alignment: center;
                 }
             }
@@ -584,10 +644,10 @@ export component FreezePickerWindow inherits Window {
             width: hint.preferred-width + 36px;
             height: 42px;
             border-radius: 21px;
-            background: #111216d9;
+            background: Skin.pick(#111216d9, #ffffffe6);
             hint := Text {
                 text: "Drag over the text · Shift moves the box · Esc cancels";
-                color: #f2f3f6;
+                color: Skin.text-main;
                 font-size: 15px;
                 horizontal-alignment: center;
                 vertical-alignment: center;

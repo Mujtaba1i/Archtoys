@@ -221,7 +221,37 @@ pub(crate) fn gray(rgba: &[u8], width: u32, height: u32) -> image::GrayImage {
             px.0[0] = 255 - px.0[0];
         }
     }
+    stretch(&mut gray);
     gray
+}
+
+/// Faint text (gray on gray, a dimmed label) stretched to dark on white: the
+/// darkest 1% becomes black, the lightest 1% white. Without it the white
+/// margin around the image was whiter than its background, and Tesseract's
+/// black-or-white split took the whole background for ink (v0.7.5: faint
+/// English came back as Thai). Crisp text is left as it is.
+fn stretch(gray: &mut image::GrayImage) {
+    let mut hist = [0usize; 256];
+    for p in gray.pixels() {
+        hist[p.0[0] as usize] += 1;
+    }
+    let total: usize = hist.iter().sum();
+    let at = |share: f32| {
+        let goal = (total as f32 * share) as usize;
+        let mut seen = 0;
+        hist.iter().position(|&n| {
+            seen += n;
+            seen > goal
+        })
+    };
+    let (Some(lo), Some(hi)) = (at(0.01), at(0.99)) else { return };
+    let (lo, hi) = (lo as f32, hi as f32);
+    if hi - lo < 8.0 || (lo < 16.0 && hi > 239.0) {
+        return; // blank, or already dark on white
+    }
+    for p in gray.pixels_mut() {
+        p.0[0] = ((p.0[0] as f32 - lo) * 255.0 / (hi - lo)).round().clamp(0.0, 255.0) as u8;
+    }
 }
 
 /// The white margin around the image Tesseract reads (it misses text touching the edge).
@@ -360,6 +390,28 @@ mod tests {
         ]));
         assert_eq!(text_from_words(&words, true), "设置 and ダウン นี่คือ");
         assert_eq!(text_from_words(&words, false), "设置 and ダウン นี่คือ");
+    }
+
+    #[test]
+    fn faint_text_is_stretched_to_dark_on_white() {
+        // a light gray line on a mid-gray background (the background is most of it)
+        let mut rgba = vec![];
+        for i in 0..400 {
+            let v = if (150..250).contains(&i) { 136 } else { 102 };
+            rgba.extend([v, v, v, 255]);
+        }
+        let g = gray(&rgba, 40, 10); // flipped (dark overall), then stretched
+        assert_eq!(g.get_pixel(0, 0).0[0], 255); // the background: white
+        assert_eq!(g.get_pixel(10, 4).0[0], 0); // the text: black
+                                                // crisp black on white stays as it is
+        let crisp: Vec<u8> = (0..400)
+            .flat_map(|i| {
+                let v = if i % 7 == 0 { 0 } else { 255 };
+                [v, v, v, 255]
+            })
+            .collect();
+        let c = gray(&crisp, 40, 10);
+        assert_eq!((c.get_pixel(0, 0).0[0], c.get_pixel(1, 0).0[0]), (0, 255));
     }
 
     #[test]

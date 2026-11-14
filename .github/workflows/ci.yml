@@ -66,6 +66,15 @@ jobs:
           cargo build --release --locked
           python3 .github/scripts/ocr_accuracy.py target/release/archtoys
 
+      # The font finder (v0.7.5): lines drawn the way GTK apps draw text, in
+      # fonts the runner has, Regular and Bold, found by the app (`archtoys
+      # --find-font`, no download). The run summary shows first / top 3 /
+      # the weight and the time. It only warns (below 50% in the top 3): the
+      # font finder is a best guess by design, and the app says so.
+      - name: Font finder accuracy (warns only)
+        continue-on-error: true
+        run: python3 .github/scripts/font_accuracy.py target/release/archtoys
+
       # The app used like a person would (in CI since v0.7.4): a real mouse and
       # keyboard on a virtual X11 screen pick colors, search, open the editor,
       # the formats panel, Settings and the sidebar, extract text and open

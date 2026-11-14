@@ -17,6 +17,66 @@ export struct TextEntry {
     words: int,
     // "Today 9:41", "Yesterday", "3 Nov"
     when: string,
+    // a font entry (Find font, v0.7.5), and the font found ("Georgia Bold", "Finding the font…")
+    font: bool,
+    font-name: string,
+}
+
+// The font finder (v0.7.5): its state, set from Rust (fontfind/page.rs).
+// Text Extractor's page and Settings both read it.
+export global FontFinder {
+    // 0 the first time (ask), 1 searching, 2 the answer, 3 nothing matched
+    in property <int> state;
+    in property <image> picture;
+    in property <bool> picture-gone;
+    // searching
+    in property <image> comparing-image;
+    in property <string> comparing;
+    in property <float> progress: -1;
+    in property <string> count;
+    in property <string> download;
+    in property <string> left;
+    in property <string> best;
+    // the answer
+    in property <image> name-image;
+    in property <string> name;
+    in property <int> sure;
+    in property <string> size;
+    in property <string> pt;
+    in property <string> weight;
+    in property <string> style;
+    in property <color> text-color;
+    in property <string> text-hex;
+    in property <color> bg-color;
+    in property <string> bg-hex;
+    in property <string> contrast;
+    in property <[string]> guesses;
+    in property <int> chosen;
+    in property <image> guess-image;
+    in property <string> credit;
+    in property <string> why;
+    // its accent (blue unless...), as a fill under white text
+    in property <color> accent: #2f8fdd;
+    // the accent for text and lines, readable on each theme (Rust lifts or deepens it)
+    in property <color> ink-on-dark: #6fb3ea;
+    in property <color> ink-on-light: #1f6fae;
+    out property <color> ink: Skin.pick(self.ink-on-dark, self.ink-on-light);
+    // Settings: may it download fonts, and was it asked yet (the first-time card)
+    in-out property <bool> online;
+    in-out property <bool> asked;
+    in property <string> fonts-info;
+    in property <string> pictures-info;
+    // an entry was opened on the page (its index, -1 for none)
+    callback opened(int);
+    callback allow(bool);
+    callback stop();
+    callback search-again();
+    callback choose(int);
+    callback sample(string);
+    callback copy-name();
+    callback delete-fonts();
+    callback delete-pictures();
+    callback online-changed(bool);
 }
 
 component Card inherits Rectangle {
@@ -24,6 +84,85 @@ component Card inherits Rectangle {
     background: Skin.surface;
     border-width: 1px;
     border-color: Skin.border;
+}
+
+// A picture of text on paper (the selection, a candidate font's drawing).
+component PaperBox inherits Rectangle {
+    in property <image> source;
+    in property <bool> outlined;
+    in property <string> empty-text;
+    height: 76px;
+    border-radius: 10px;
+    background: #fdfdfb;
+    border-width: root.outlined ? 2px : 0px;
+    border-color: FontFinder.ink;
+    clip: true;
+    if root.source.width > 0 : Image {
+        x: 14px;
+        y: 8px;
+        width: parent.width - 28px;
+        height: parent.height - 16px;
+        source: root.source;
+        image-fit: contain;
+        horizontal-alignment: left;
+    }
+    if root.source.width == 0 : Text {
+        text: root.empty-text;
+        color: #5d6270;
+        font-size: 14px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// A bar in the font finder's accent.
+component AccentBar inherits Rectangle {
+    in property <float> fraction;
+    height: 8px;
+    border-radius: 4px;
+    background: Skin.track;
+    clip: true;
+    Rectangle {
+        property <float> phase: Math.mod(animation-tick() / 1ms, 1400) / 1400;
+        x: root.fraction >= 0 ? 0px : (self.phase * 1.4 - 0.4) * parent.width;
+        width: root.fraction >= 0 ? parent.width * Math.min(1, root.fraction) : parent.width * 0.4;
+        border-radius: 4px;
+        background: FontFinder.ink;
+    }
+}
+
+// The first-time card's two answers: the same size, the chosen way filled.
+component ChoiceButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    callback clicked;
+    height: 40px;
+    width: label.preferred-width + 36px;
+    border-radius: 12px;
+    background: root.primary ? (touch.has-hover ? FontFinder.accent.brighter(0.15) : FontFinder.accent) : (touch.has-hover ? Skin.surface-hover : Skin.bg-color);
+    border-width: root.primary ? 0px : 1px;
+    border-color: Skin.border;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    label := Text {
+        text: root.text;
+        color: root.primary ? #ffffff : Skin.text-main;
+        font-size: 15px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// One point of the first-time card.
+component Point inherits HorizontalLayout {
+    in property <string> number;
+    in property <string> text;
+    spacing: 10px;
+    Text { text: root.number; color: FontFinder.ink; font-size: 15px; font-weight: 700; width: 14px; }
+    Text { text: root.text; color: Skin.text-main; font-size: 14px; wrap: word-wrap; horizontal-stretch: 1; }
 }
 
 // The toy's icon, big, at the top of a centered page.
@@ -99,6 +238,245 @@ component Progress inherits Rectangle {
     }
 }
 
+// A font entry's font part: the first-time question, the search, the answer.
+component FontPanel inherits VerticalLayout {
+    spacing: 12px;
+    SectionTitle { text: FontFinder.state == 1 ? "FONT · SEARCHING" : "FONT"; }
+
+    // the first time: what it does, and whether it may download fonts
+    if FontFinder.state == 0 : Card {
+        height: ask.preferred-height;
+        ask := VerticalLayout {
+            padding: 20px;
+            spacing: 14px;
+            HorizontalLayout {
+                spacing: 14px;
+                Rectangle {
+                    width: 52px;
+                    height: 52px;
+                    border-radius: 14px;
+                    background: FontFinder.accent;
+                    Text { text: "Aa"; color: #ffffff; font-size: 24px; font-weight: 700; font-family: "Noto Serif"; }
+                }
+                Text {
+                    text: "Find the font online?";
+                    color: Skin.text-main;
+                    font-size: 21px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                    horizontal-stretch: 1;
+                }
+            }
+            Text {
+                text: "To name the font, Archtoys draws the text it read in fonts that could match and compares them with your selection. It always compares with the fonts on your computer first.";
+                color: Skin.text-muted;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+            Point { number: "1"; text: "Turning this on lets it download fonts from the Google Fonts collection while it searches: about 10 MB once for its list, then usually 2 to 8 MB of fonts the first times, less after."; }
+            Point { number: "2"; text: "Downloaded fonts stay in Archtoys' cache, so later searches are faster. You can delete them in Settings."; }
+            Point { number: "3"; text: "Only font files are downloaded. Your selection and its text never leave your computer."; }
+            Point { number: "4"; text: "A font entry keeps a picture of your selection in Archtoys' cache, so it can be searched again. Delete the pictures any time in Settings › Font finder › Saved pictures, the fonts found stay."; }
+            // the user asked for this to be said plainly, the first time
+            Rectangle {
+                border-radius: 12px;
+                background: Skin.pick(#262931, #f0f2f5);
+                height: note.preferred-height;
+                note := VerticalLayout {
+                    padding: 14px;
+                    spacing: 4px;
+                    Text { text: "A best guess, not a sure answer"; color: Skin.text-main; font-size: 14px; font-weight: 700; }
+                    Text {
+                        text: "It won't always be right, and its percentages are how alike the drawings look, not a promise. Your screen's scaling, its font smoothing and hinting, the text's size, bold or styled text and how much text you select can all make it better or worse. Use it knowing that.";
+                        color: Skin.text-muted;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 10px;
+                ChoiceButton { text: "Use only local fonts"; clicked => { FontFinder.allow(false); } }
+                ChoiceButton { text: "Turn on"; primary: true; clicked => { FontFinder.allow(true); } }
+            }
+        }
+    }
+
+    // searching: the selection, the font being compared, the progress
+    if FontFinder.state == 1 : Card {
+        height: searching.preferred-height;
+        searching := VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            SectionTitle { text: "YOUR SELECTION"; }
+            PaperBox { source: FontFinder.picture; empty-text: "Picture deleted"; }
+            Text { text: "Comparing: " + FontFinder.comparing; color: FontFinder.ink; font-size: 13px; font-weight: 700; overflow: elide; }
+            PaperBox { source: FontFinder.comparing-image; }
+            AccentBar { fraction: FontFinder.progress; }
+            HorizontalLayout {
+                Text { text: FontFinder.count; color: Skin.text-muted; font-size: 13px; font-family: "monospace"; horizontal-stretch: 1; }
+                Text { text: FontFinder.download; color: Skin.text-muted; font-size: 13px; font-family: "monospace"; horizontal-stretch: 1; horizontal-alignment: center; }
+                Text { text: FontFinder.left; color: Skin.text-muted; font-size: 13px; font-family: "monospace"; horizontal-stretch: 1; horizontal-alignment: right; }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: FontFinder.best == "" ? "" : "Best so far: " + FontFinder.best;
+                    color: Skin.text-main;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                PillButton { text: "Stop"; clicked => { FontFinder.stop(); } }
+            }
+        }
+    }
+
+    // the answer
+    if FontFinder.state == 2 : Card {
+        height: answer.preferred-height;
+        answer := VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+            SectionTitle { text: "LOOKS LIKE"; }
+            HorizontalLayout {
+                spacing: 10px;
+                Rectangle {
+                    height: 46px;
+                    horizontal-stretch: 1;
+                    if FontFinder.name-image.width > 0 : Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: FontFinder.name-image;
+                        image-fit: contain;
+                        horizontal-alignment: left;
+                        colorize: Skin.text-main;
+                    }
+                    if FontFinder.name-image.width == 0 : Text {
+                        text: FontFinder.name;
+                        color: Skin.text-main;
+                        font-size: 28px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: FontFinder.sure + "% sure";
+                    color: FontFinder.ink;
+                    font-size: 22px;
+                    font-weight: 700;
+                    vertical-alignment: bottom;
+                }
+            }
+            AccentBar { fraction: FontFinder.sure / 100; }
+            HorizontalLayout {
+                spacing: 8px;
+                Fact { label: "SIZE"; value: FontFinder.size; }
+                Fact { label: "IN PT"; value: FontFinder.pt; }
+                Fact { label: "WEIGHT"; value: FontFinder.weight; }
+                Fact { label: "STYLE"; value: FontFinder.style; }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle { width: 22px; height: 22px; border-radius: 5px; background: FontFinder.text-color; border-width: 1px; border-color: Skin.border; }
+                Text { text: "Text " + FontFinder.text-hex; color: Skin.text-main; font-size: 13px; vertical-alignment: center; }
+                Rectangle { width: 6px; }
+                Rectangle { width: 22px; height: 22px; border-radius: 5px; background: FontFinder.bg-color; border-width: 1px; border-color: Skin.border; }
+                Text { text: "Background " + FontFinder.bg-hex; color: Skin.text-main; font-size: 13px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: "Contrast " + FontFinder.contrast; color: Skin.text-muted; font-size: 13px; vertical-alignment: center; }
+            }
+            SectionTitle { text: "GUESSES · CLICK TO TRY ONE"; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                for guess[i] in FontFinder.guesses : Rectangle {
+                    height: 34px;
+                    width: chip.preferred-width + 24px;
+                    border-radius: 10px;
+                    background: i == FontFinder.chosen ? FontFinder.accent : (chip-touch.has-hover ? Skin.surface-hover : Skin.bg-color);
+                    border-width: i == FontFinder.chosen ? 0px : 1px;
+                    border-color: Skin.border;
+                    accessible-role: button;
+                    accessible-label: guess;
+                    accessible-action-default => { FontFinder.choose(i); }
+                    chip := Text {
+                        text: guess;
+                        color: i == FontFinder.chosen ? #ffffff : Skin.text-main;
+                        font-size: 13px;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    chip-touch := TouchArea { clicked => { FontFinder.choose(i); } }
+                }
+            }
+            SectionTitle { text: "YOUR SELECTION · THE GUESS"; }
+            PaperBox { source: FontFinder.picture; empty-text: "Picture deleted"; }
+            PaperBox { source: FontFinder.guess-image; outlined: true; }
+            Rectangle {
+                height: 34px;
+                border-radius: 9px;
+                background: Skin.bg-color;
+                border-width: 1px;
+                border-color: sample-input.has-focus ? FontFinder.ink : Skin.border;
+                sample-input := TextInput {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    color: Skin.text-main;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    single-line: true;
+                    edited => { FontFinder.sample(self.text); }
+                }
+                if sample-input.text == "" : Text {
+                    x: 12px;
+                    text: "Type here to see any text in the guess";
+                    color: Skin.text-muted;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle { height: 1px; background: Skin.border; }
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: FontFinder.credit;
+                    color: Skin.text-muted;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                PillButton { text: "Copy name"; clicked => { FontFinder.copy-name(); } }
+            }
+        }
+    }
+
+    // nothing matched well enough (or the search couldn't run)
+    if FontFinder.state == 3 : Card {
+        height: none.preferred-height;
+        none := VerticalLayout {
+            padding: 18px;
+            spacing: 8px;
+            Text { text: "No font matched well enough"; color: Skin.text-main; font-size: 16px; font-weight: 700; }
+            Text { text: FontFinder.why; color: Skin.text-muted; font-size: 14px; wrap: word-wrap; }
+        }
+    }
+
+    if FontFinder.state >= 2 && !FontFinder.picture-gone : HorizontalLayout {
+        alignment: start;
+        SmallLink {
+            text: "Search again";
+            color: FontFinder.ink;
+            clicked => { FontFinder.search-again(); }
+        }
+    }
+}
+
 export component TextExtractorPage inherits Rectangle {
     // 0 off, 1 installing, 2 ready, 3 Archtoys can't install it here
     in property <int> state;
@@ -117,6 +495,7 @@ export component TextExtractorPage inherits Rectangle {
     in property <[TextEntry]> history;
     // the history entry opened (-1: none)
     in-out property <int> detail: -1;
+    changed detail => { FontFinder.opened(self.detail); }
     callback turn-on();
     callback cancel-install();
     callback check-again();
@@ -374,6 +753,15 @@ export component TextExtractorPage inherits Rectangle {
                     padding-left: 16px;
                     padding-right: 6px;
                     spacing: 12px;
+                    // a font entry: its own look
+                    if entry.font : Rectangle {
+                        width: 30px;
+                        height: 24px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 7px;
+                        background: FontFinder.accent;
+                        Text { text: "Aa"; color: #ffffff; font-size: 13px; font-weight: 700; font-family: "Noto Serif"; }
+                    }
                     Text {
                         text: entry.preview;
                         color: Skin.text-main;
@@ -383,8 +771,8 @@ export component TextExtractorPage inherits Rectangle {
                         horizontal-stretch: 1;
                     }
                     Text {
-                        text: entry.language + " · " + entry.when;
-                        color: Skin.text-muted;
+                        text: (entry.font ? entry.font-name : entry.language) + " · " + entry.when;
+                        color: entry.font ? FontFinder.ink : Skin.text-muted;
                         font-size: 13px;
                         vertical-alignment: center;
                     }
@@ -455,6 +843,7 @@ export component TextExtractorPage inherits Rectangle {
                 Fact { label: "TEXT SIZE"; value: detail-view.entry.size + " px"; }
                 Fact { label: "WORDS"; value: detail-view.entry.words; }
             }
+            if detail-view.entry.font : FontPanel { }
             HorizontalLayout {
                 alignment: end;
                 SmallLink {

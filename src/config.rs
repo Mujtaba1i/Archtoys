@@ -90,6 +90,10 @@ pub struct AppConfig {
     pub ruler_units: i32,
     /// a measure may go on past its screen's edge (only offered with several screens)
     pub ruler_cross: bool,
+    /// the font finder may download fonts: None until the first-time card was answered (v0.7.5)
+    pub font_online: Option<bool>,
+    /// fewer moving things (the font search shows its best guess instead of every font)
+    pub reduce_motion: bool,
 }
 
 fn default_ruler_hotkey() -> String {
@@ -145,6 +149,8 @@ impl Default for AppConfig {
             ruler_buttons: false,
             ruler_units: 0,
             ruler_cross: false,
+            font_online: None,
+            reduce_motion: false,
         }
     }
 }
@@ -267,6 +273,11 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         ruler_buttons: ui.get_setting_ruler_buttons(),
         ruler_units: ui.get_setting_ruler_units(),
         ruler_cross: ui.get_setting_ruler_cross(),
+        font_online: {
+            let g = ui.global::<crate::FontFinder>();
+            g.get_asked().then(|| g.get_online())
+        },
+        reduce_motion: ui.get_setting_reduce_motion(),
     }
 }
 
@@ -315,6 +326,11 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     ui.set_setting_ruler_buttons(cfg.ruler_buttons);
     ui.set_setting_ruler_units(cfg.ruler_units.clamp(0, 2));
     ui.set_setting_ruler_cross(cfg.ruler_cross);
+    if let Some(online) = cfg.font_online {
+        ui.global::<crate::FontFinder>().set_online(online);
+        ui.global::<crate::FontFinder>().set_asked(true);
+    }
+    ui.set_setting_reduce_motion(cfg.reduce_motion);
 
     if !cfg.history.is_empty() {
         let mut guard = history_store.lock().unwrap();

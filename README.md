@@ -30,7 +30,7 @@ Each toy has its own hotkey and works from anywhere. Move between them with the 
 | Toy | What it does | Hotkey |
 | --- | --- | --- |
 | [**Color Picker**](#color-picker) | Pick any pixel, see it magnified and named, find colors by name, copy them in the format you need | `Ctrl+Super+C` |
-| [**Text Extractor**](#text-extractor) | Drag over any text on screen and copy it, even from images, videos and apps that don't let you select text | `Ctrl+Super+T` |
+| [**Text Extractor**](#text-extractor) | Drag over any text on screen and copy it, even from images, videos and apps that don't let you select text. [Find font](#font-finder) tells which font it's in | `Ctrl+Super+T` |
 | [**Screen Ruler**](#screen-ruler) | Measure anything on screen: a box, the space around a point, a width or a height | `Ctrl+Super+M` |
 
 <div align="center">
@@ -122,6 +122,7 @@ It is off until you want it: press **Turn on** and Archtoys installs the free [T
 | Move the box while you drag         | Hold `Shift`                                                                                         |
 | Nudge it one pixel                  | The arrow keys (it reads the text again)                                                            |
 | Copy                                | `Enter`, or **Copy** on the toolbar. **Copy as one line** joins the lines.                          |
+| Find which font it's in             | **Aa Find font** on the toolbar ([Font finder](#font-finder))                                       |
 | Cancel                              | `Esc`                                                                                                |
 | Copy without the toolbar            | **Settings → After selecting text → Copy and close**                                                 |
 | Keep Archtoys out of the way        | **Settings → Stay minimized**                                                                        |
@@ -133,9 +134,30 @@ It is off until you want it: press **Turn on** and Archtoys installs the free [T
 
 English, plus every language Tesseract has (except Hebrew). Archtoys reads with English and your own languages first (your system language, keyboard layouts and input methods), and when that isn't sure, with one language of every writing system side by side, and keeps the reading it is surest of. Those languages download once, the first time they're needed (about 32 MB), from Tesseract's own [language data](https://github.com/tesseract-ocr/tessdata_fast) on GitHub. Reading the text never needs the internet, and nothing you capture is sent anywhere. Offline, it reads with the languages it already has.
 
+When a reading still isn't sure, Archtoys downloads that language's bigger, more accurate data once (from Tesseract's [best data](https://github.com/tesseract-ocr/tessdata_best)) and reads again. On a slow connection it doesn't wait: you get the quick reading, and the better data is used next time. Faint text (gray on gray, a dimmed label) is made dark on white before it's read, and Georgian, Amharic, Sinhala, Telugu, Kannada, Malayalam, Gujarati, Punjabi and Tibetan are read too. A short line is named by its letters and common words (é and _pour_ say French, ñ and _más_ Spanish), and when nothing gives it away, English.
+
 Tested on 24 languages, from a word to a paragraph, 14 to 64 px, light and dark, bold, colored and compressed: 98% of the text comes back right. English, Spanish, French, German, Portuguese, Italian, Dutch, Turkish, Polish, Indonesian, Russian, Ukrainian, Greek, Arabic, Urdu, Hindi, Bengali, Tamil, Thai, Chinese (simplified and traditional), Japanese and Korean read 93-100% right, Vietnamese and Persian about 94%. Short phrases mixed with English, decorative fonts and very small or blurry text read worse, so check the text before you use it, and please [report](https://github.com/Mujtaba1i/Archtoys/issues) what it gets wrong.
 
 </details>
+
+### Font finder
+
+Which font is that? Select the text with Text Extractor and press **Aa Find font**. Archtoys opens on a new history entry and compares your selection with fonts, word by word: it draws the words it read in each font that could match and keeps the ones that look most alike.
+
+<div align="center">
+
+![The font finder's answer: the font's name drawn in it and how sure Archtoys is, its size in px and pt, its weight and style, the text and background colors and their contrast, the other guesses, and your selection above the guess](docs/screenshots/font-finder.png)
+
+</div>
+
+- **The fonts on your computer first, every time.** That's where most text on your screen comes from, and it needs no download.
+- **Google Fonts too, if you turn it on.** The first time, Archtoys asks. Yes downloads a list of every Google Fonts family (about 10 MB, once), which picks a dozen that could match, and only those fonts are downloaded (usually 2 to 8 MB the first times, less after) from [Google Fonts on GitHub](https://github.com/google/fonts). Later searches reuse them. The list is updated monthly in [archtoys-font-index](https://github.com/Mujtaba1i/archtoys-font-index) and checked (SHA-256) before it's used.
+- **Your selection never leaves your computer.** Only font files are downloaded, and the comparing happens on your computer.
+- **The answer:** the font's name drawn in it and how sure Archtoys is, its size in px and pt, weight and style, the text and background colors with their contrast, up to three guesses to switch between, your selection above the guess, and a box to see any text in the guess. **Copy name** copies it, **Search again** reruns it (say, after turning on Google Fonts).
+- **A font entry keeps a picture of your selection** in Archtoys' folder, so it can be searched again. Text-only entries keep none.
+- **Settings → Font finder:** turn Google Fonts on or off, delete the downloaded fonts, or delete the saved pictures (the fonts found stay). **Settings → Reduce motion** shows the best guess while it searches instead of every font flashing past.
+
+It's a best guess, not a sure answer, and Archtoys says so the first time. Your screen's scaling, its font smoothing and hinting, the text's size, bold or styled text and how much text you select all make it better or worse. Fonts made from the same design (Liberation Sans and Arimo, for example) look the same to it, so the right family is often among the guesses rather than first. Find font is grayed out when the text itself wasn't read surely enough, since it compares the words it read.
 
 ## Screen Ruler
 
@@ -143,9 +165,10 @@ Measure anything on screen, the way it looks: a button, the gap between two boxe
 
 <div align="center">
 
-![The Screen Ruler measuring the space around the cursor: lines reach to the edges each way, with the size next to them](docs/screenshots/ruler.png)
+|                                 Home                                 |                                Example                                 |
+| :-------------------------------------------------------------------: | :-----------------------------------------------------------------: |
+| ![The Screen Ruler's page: the Measure button, the four modes, the latest measurement drawn to scale and the history](docs/screenshots/ruler-page.png) | ![The Screen Ruler measuring the space around the cursor: lines reach to the edges each way, with the size next to them](docs/screenshots/ruler.png) |
 
-![The Screen Ruler's page: the Measure button, the four modes, the latest measurement drawn to scale and the history](docs/screenshots/ruler-page.png)
 
 </div>
 
@@ -359,7 +382,7 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, one tool at a 
 - [x] **Text Extractor**: select any area of the screen and copy the text in it (OCR)
 - [x] Buy me a coffee button
 - [x] **Screen Ruler**: measure things on screen
-- [ ] **Font finder** in Text Extractor: which font a text is in, and its size
+- [x] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.5)
 - [ ] **Awake**: keep your PC from sleeping for as long as you choose
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.

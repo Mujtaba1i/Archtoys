@@ -2,7 +2,8 @@
 # Measures Archtoys: binary size, time until the window shows, CPU used to
 # start (in nanoseconds), what it reads from disk, idle CPU and wakeups,
 # memory and threads, a color pick (`--pick`: time until the picker shows,
-# memory during and after) and Text Extractor reading a fixed image
+# memory during and after), Text Extractor reading a fixed image and the font
+# finder on it
 # (`--extract-file`: time, memory). Both builds first start once untimed (a
 # fresh machine's font cache and desktop services: before v0.7.3 the build
 # measured first paid for them alone, and v0.7.2's cold start showed 81-107%
@@ -230,6 +231,37 @@ text() {
     awk '{ print $2 }' "$OUT/$key.texts" | median > "$OUT/$key.text_peak"
   done
 }
+# font KEYS...: the font finder on the same image (`--find-font`, the fonts on
+# this computer only, so no download is timed): time and peak memory, 3 runs
+# each, taking turns. A build without the font finder (before v0.7.5) shows
+# "—" (without the flag it would just start the app).
+font() {
+  local r key bin t0 ms out
+  for key in "$@"; do
+    if ! command -v tesseract >/dev/null || [ ! -x /usr/bin/time ] || [ ! -f "$TEXT_IMAGE" ] || ! grep -aq -- '--find-font' "${BIN[$key]}"; then
+      echo -1 > "$OUT/$key.font"; echo -1 > "$OUT/$key.font_peak"
+      continue
+    fi
+    : > "$OUT/$key.fonts"
+    ARCHTOYS_FONTS_OFFLINE=1 "${BIN[$key]}" --find-font "$TEXT_IMAGE" >/dev/null 2>&1  # untimed: the font cache warms up
+  done
+  for r in 1 2 3; do
+    for key in $(in_turns "$r" "$@"); do
+      [ -f "$OUT/$key.fonts" ] || continue
+      bin=${BIN[$key]}
+      t0=$(now_ms)
+      ARCHTOYS_FONTS_OFFLINE=1 /usr/bin/time -f "%M" -o "$OUT/time" "$bin" --find-font "$TEXT_IMAGE" >/dev/null 2>&1
+      ms=$(( $(now_ms) - t0 ))
+      out=$(tail -1 "$OUT/time" 2>/dev/null)
+      echo "$ms ${out:--1}" >> "$OUT/$key.fonts"
+    done
+  done
+  for key in "$@"; do
+    [ -f "$OUT/$key.fonts" ] || continue
+    awk '{ print $1 }' "$OUT/$key.fonts" | median > "$OUT/$key.font"
+    awk '{ print $2 }' "$OUT/$key.fonts" | median > "$OUT/$key.font_peak"
+  done
+}
 get() { cat "$OUT/$1.$2"; }
 
 HAVE_OLD=0
@@ -241,6 +273,7 @@ cold "${KEYS[@]}"
 measure x11 "${KEYS[@]}"
 pick "${KEYS[@]}"
 text "${KEYS[@]}"
+font "${KEYS[@]}"
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
   if [ "$HAVE_OLD" = 1 ]; then measure wayland new-wl old-wl; else measure wayland new-wl; fi
 fi
@@ -292,6 +325,8 @@ row() { # name formatter metric [key-suffix]
   row "Pick: memory after closing the picker" mb pick_after
   row "Text Extractor: reading a test image" ms text
   row "Text Extractor: peak memory (the app, not Tesseract)" mb text_peak
+  row "Font finder: reading and finding the font of a test image (fonts on the computer)" ms font
+  row "Font finder: peak memory" mb font_peak
   if [ -n "${WAYLAND_DISPLAY:-}" ]; then
     row "Wayland: idle CPU" pct idle -wl
     row "Wayland: memory (RSS)" mb rss -wl

@@ -14,7 +14,7 @@ mod capture;
 mod engine;
 pub(crate) mod history;
 mod install;
-mod lang;
+pub(crate) mod lang;
 pub(crate) use lang::app_data_dir;
 pub(crate) mod page;
 
@@ -256,6 +256,10 @@ pub(crate) struct Reading {
     pub size: f32,
     /// each word's box, in the pixels of the image that was read
     pub boxes: Vec<(f32, f32, f32, f32)>,
+    /// each word's text, in the same order as `boxes` (the font finder compares word by word)
+    pub words: Vec<String>,
+    /// a short message for the capture ("Downloading better French data…"), or None
+    pub note: Option<String>,
 }
 
 fn temp_png() -> std::path::PathBuf {
@@ -274,6 +278,10 @@ fn temp_png() -> std::path::PathBuf {
 /// 24 languages, from 80%). About 32 MB, downloaded together once.
 const SWEEP: &[&str] =
     &["ara", "fas", "urd", "rus", "ukr", "ell", "hin", "ben", "tam", "tha", "chi_sim", "chi_tra", "jpn", "kor", "tur", "vie"];
+/// Writing systems Tesseract reads that the side by side doesn't: Thai's data
+/// reads all of them, wrongly but confidently, so when Thai comes out on
+/// top they're tried too (downloaded once, the first time).
+const RARE: &[&str] = &["kat", "hye", "amh", "khm", "lao", "mya", "sin", "tel", "kan", "mal", "guj", "pan", "bod"];
 /// Read in Latin letters (whatlang then names the exact language).
 const LATIN: &[&str] = &["eng", "tur", "vie"];
 /// Mean word confidence (and no word under 60) at which the first reading,
@@ -281,6 +289,12 @@ const LATIN: &[&str] = &["eng", "tur", "vie"];
 const SURE_FIRST: f32 = 85.0;
 /// Below this, the whole reading is tried again with the lines another size.
 const READ_WELL: u8 = 50;
+/// Below this (mean word confidence), the reading is tried again with the
+/// language's best data (fast first, best when unsure, v0.7.5).
+const BEST_BELOW: f32 = 80.0;
+/// The longest the best data's first download is waited on (judged by its
+/// size and the speed measured): longer, and the fast reading is given now.
+const BEST_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
 /// The text lines' height Tesseract reads at, then the one tried if that reads badly.
 const LINE_TARGETS: [f32; 2] = [32.0, 22.0];
 /// Letters only Persian or only Urdu has (in Arabic script). Not ے or ں:
@@ -288,6 +302,12 @@ const LINE_TARGETS: [f32; 2] = [32.0, 22.0];
 /// Arabic text "Urdu".
 const PERSIAN: &[char] = &['پ', 'چ', 'ژ', 'گ'];
 const URDU: &[char] = &['ٹ', 'ڈ', 'ڑ'];
+
+/// The selection as Text Extractor reads it: gray, dark text on light, faint
+/// text stretched (the font finder compares with this).
+pub(crate) fn prepared_gray(rgba: &[u8], width: u32, height: u32) -> image::GrayImage {
+    engine::gray(rgba, width, height)
+}
 
 /// Reads the text in an RGBA image (the selected part of the screen).
 /// Blocking: call it on a background thread. `status` says what it's doing
@@ -374,6 +394,15 @@ fn pick<'a>(tries: &'a [(&'static str, Vec<engine::Word>)]) -> Option<&'a (&'sta
             }
         }
     }
+    // a close call between another script and a Latin reading goes to the
+    // Latin one, the far more common on screens (v0.7.5: Spanish text came
+    // back Thai, 76 to Vietnamese's 76)
+    if !LATIN.contains(&best.0) {
+        let latin = tries.iter().filter(|t| LATIN.contains(&t.0)).max_by(|a, b| mean_conf(&a.1).total_cmp(&mean_conf(&b.1)));
+        if let Some(latin) = latin.filter(|t| mean_conf(&t.1) >= top - 3.0) {
+            return Some(latin);
+        }
+    }
     // read in Latin letters (Chinese and Japanese read Latin text too, without
     // its accents): the surest Latin reading
     if !LATIN.contains(&best.0) && latin_share(&best.1) > 0.95 {
@@ -442,6 +471,21 @@ fn read_png(
             let all: Vec<String> = all.iter().map(|(conf, c)| format!("{c} {conf:.0}")).collect();
             format!("side by side: {}", all.join(", "))
         });
+        let mut tries = tries;
+        if pick(&tries).is_some_and(|t| t.0 == "tha") {
+            let missing: Vec<&'static str> = RARE.iter().copied().filter(|c| !have(c)).collect();
+            if !missing.is_empty() {
+                status(format!("Downloading {} more languages (once)…", missing.len()));
+                lang::download_all(dir, &missing);
+                status("Reading…".to_string());
+            }
+            let more: Vec<(&'static str, Vec<engine::Word>)> = std::thread::scope(|scope| {
+                let jobs: Vec<_> =
+                    RARE.iter().copied().filter(|c| have(c)).map(|c| (c, scope.spawn(move || tesseract_words(png, c, dir, 6)))).collect();
+                jobs.into_iter().filter_map(|(c, job)| Some((c, job.join().ok()?.ok()?))).collect()
+            });
+            tries.extend(more);
+        }
         if let Some((best, best_words)) = pick(&tries).cloned() {
             if best != first[0] {
                 code = best;
@@ -470,21 +514,47 @@ fn read_png(
     if LATIN.contains(&code) || first.contains(&code) {
         const SURE_ENOUGH: f64 = 0.5;
         let text = engine::text_from_words(&words, true);
-        if let Some(info) = whatlang::detect(&text).filter(|i| i.confidence() >= SURE_ENOUGH) {
-            if let Some(named) = lang::from_whatlang(info.lang()) {
-                if !langs.contains(&named) && (have(named) || get(named).is_ok()) {
-                    let mut again = vec![named];
-                    if named != "eng" {
-                        again.push("eng"); // the odd English word in a Latin text
-                    }
-                    if let Ok(better) = run_words(png, &again.join("+"), dir) {
-                        if mean_conf(&better) >= mean_conf(&words) {
-                            words = better;
-                        }
+        debug(|| format!("whatlang: {:?} on {text:?}", whatlang::detect(&text).map(|i| (i.lang(), (i.confidence() * 100.0).round()))));
+        // not sure (a short line): its letters and little words say (lang::name_latin)
+        let named = whatlang::detect(&text)
+            .filter(|i| i.confidence() >= SURE_ENOUGH)
+            .and_then(|i| lang::from_whatlang(i.lang()))
+            .unwrap_or_else(|| lang::name_latin(&text, lang::user_languages(), code));
+        if !langs.contains(&named) && (have(named) || get(named).is_ok()) {
+            let mut again = vec![named];
+            if named != "eng" {
+                again.push("eng"); // the odd English word in a Latin text
+            }
+            if let Ok(better) = run_words(png, &again.join("+"), dir) {
+                if mean_conf(&better) >= mean_conf(&words) {
+                    words = better;
+                }
+            }
+        }
+        language = named;
+    }
+
+    // 4. still not sure: the language's best data (downloaded once, unless
+    // that would take too long: then the fast reading now, the best next time)
+    let mut note = None;
+    if mean_conf(&words) < BEST_BELOW {
+        if !lang::has(&lang::best_dir(), language) {
+            status(format!("Getting better {} data…", lang::display_name(language)));
+        }
+        match lang::get_best(language, BEST_WAIT) {
+            Ok(lang::Best::Ready) => {
+                status("Reading again…".to_string());
+                if let Ok(better) = run_words(png, language, &lang::best_dir()) {
+                    debug(|| format!("best data: {:.0}% sure (fast {:.0}%)", mean_conf(&better), mean_conf(&words)));
+                    if mean_conf(&better) > mean_conf(&words) {
+                        words = better;
                     }
                 }
-                language = named;
             }
+            Ok(lang::Best::Downloading) => {
+                note = Some(format!("Downloading better {} data for the next time", lang::display_name(language)));
+            }
+            Err(err) => eprintln!("text extractor: {err}"),
         }
     }
 
@@ -502,6 +572,8 @@ fn read_png(
             .iter()
             .map(|w| ((w.x as f32 - pad) / scale, (w.y as f32 - pad) / scale, w.w as f32 / scale, w.h as f32 / scale))
             .collect(),
+        words: words.iter().map(|w| w.text.clone()).collect(),
+        note,
     })
 }
 
@@ -532,6 +604,17 @@ fn to_row(entry: &history::Entry, now: u64) -> TextEntry {
         size: entry.size as i32,
         words: entry.words as i32,
         when: history::when_label(entry.time, now).into(),
+        font: entry.font.is_some(),
+        font_name: entry
+            .font
+            .as_ref()
+            .map(|f| match f.guesses.first() {
+                Some(g) => format!("{}{}", g.family, if g.bold { " Bold" } else { "" }),
+                None if f.done => "No font found".to_string(),
+                None => "Finding the font…".to_string(),
+            })
+            .unwrap_or_default()
+            .into(),
     }
 }
 
@@ -554,14 +637,26 @@ fn sync_history(_ui: &AppWindow) {
 /// A capture was read: it goes to the top of the history. `size_px` is the
 /// text's height in screen pixels.
 pub(crate) fn add_reading(ui: &AppWindow, reading: &Reading, size_px: u32) {
+    add_entry(ui, reading, size_px, None);
+}
+
+/// A capture with Find font: a font entry (with the selection's picture).
+/// Returns its id (its time), which stays the same when others are deleted.
+pub(crate) fn add_entry(ui: &AppWindow, reading: &Reading, size_px: u32, font: Option<history::FontFind>) -> u64 {
     ensure_history(ui);
+    let time = HISTORY.with(|h| {
+        // two captures in the same second still get their own id
+        let newest = h.borrow().as_ref().and_then(|l| l.first().map(|e| e.time)).unwrap_or(0);
+        history::now().max(newest + 1)
+    });
     let entry = history::Entry {
         text: reading.text.clone(),
         language: reading.language.clone(),
         sure: reading.sure,
         size: size_px,
         words: reading.boxes.len() as u32,
-        time: history::now(),
+        time,
+        font,
     };
     HISTORY.with(|h| {
         let mut h = h.borrow_mut();
@@ -571,6 +666,55 @@ pub(crate) fn add_reading(ui: &AppWindow, reading: &Reading, size_px: u32) {
     });
     sync_history(ui);
     ui.set_text_detail(-1);
+    time
+}
+
+/// The entry with this id, and where it is in the list.
+pub(crate) fn entry(id: u64) -> Option<(usize, history::Entry)> {
+    HISTORY.with(|h| h.borrow().as_ref()?.iter().enumerate().find(|(_, e)| e.time == id).map(|(i, e)| (i, e.clone())))
+}
+
+/// The entry shown at `index` in the list (its id), if any.
+pub(crate) fn id_at(index: i32) -> Option<u64> {
+    HISTORY.with(|h| h.borrow().as_ref()?.get(usize::try_from(index).ok()?).map(|e| e.time))
+}
+
+/// Changes a font entry, saves the history and shows it.
+pub(crate) fn update_font(ui: &AppWindow, id: u64, change: impl FnOnce(&mut history::FontFind)) {
+    HISTORY.with(|h| {
+        let mut h = h.borrow_mut();
+        if let Some(list) = h.as_mut() {
+            if let Some(font) = list.iter_mut().find(|e| e.time == id).and_then(|e| e.font.as_mut()) {
+                change(font);
+                history::save(list);
+            }
+        }
+    });
+    sync_history(ui);
+}
+
+/// Every font entry's picture file (Settings: Saved pictures).
+pub(crate) fn font_pictures() -> Vec<String> {
+    HISTORY.with(|h| {
+        h.borrow()
+            .as_ref()
+            .map(|l| l.iter().filter_map(|e| e.font.as_ref()).map(|f| f.picture.clone()).filter(|p| !p.is_empty()).collect())
+            .unwrap_or_default()
+    })
+}
+
+/// Settings: Saved pictures deleted. The entries keep their fonts and guesses.
+pub(crate) fn forget_font_pictures(ui: &AppWindow) {
+    HISTORY.with(|h| {
+        let mut h = h.borrow_mut();
+        if let Some(list) = h.as_mut() {
+            for font in list.iter_mut().filter_map(|e| e.font.as_mut()) {
+                font.picture.clear();
+            }
+            history::save(list);
+        }
+    });
+    sync_history(ui);
 }
 
 pub(crate) fn copy(text: &str) {
@@ -584,8 +728,12 @@ pub(crate) fn delete(ui: &AppWindow, index: i32) {
     HISTORY.with(|h| {
         if let Some(list) = h.borrow_mut().as_mut() {
             if index >= 0 && (index as usize) < list.len() {
-                list.remove(index as usize);
+                let gone = list.remove(index as usize);
                 history::save(list);
+                // a font entry's picture goes with it
+                if let Some(picture) = gone.font.map(|f| f.picture).filter(|p| !p.is_empty()) {
+                    let _ = std::fs::remove_file(crate::fontfind::page::pictures_dir().join(picture));
+                }
             }
         }
     });
@@ -595,6 +743,7 @@ pub(crate) fn delete(ui: &AppWindow, index: i32) {
 pub(crate) fn clear(ui: &AppWindow) {
     HISTORY.with(|h| *h.borrow_mut() = Some(Vec::new()));
     history::save(&[]);
+    let _ = std::fs::remove_dir_all(crate::fontfind::page::pictures_dir());
     sync_history(ui);
     ui.set_text_detail(-1);
 }
@@ -614,6 +763,9 @@ pub(crate) fn run_on_file(path: &str) -> i32 {
         Ok(reading) => {
             println!("language: {}", reading.language);
             println!("sure: {}", reading.sure);
+            if let Some(note) = &reading.note {
+                println!("note: {note}");
+            }
             println!("size: {:.0}", reading.size);
             println!("words: {}", reading.boxes.len());
             println!("---");
@@ -658,5 +810,23 @@ pub(crate) fn check_tesseract() -> i32 {
             println!("no tesseract");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reading(conf: f32, text: &str) -> Vec<engine::Word> {
+        vec![engine::Word { x: 0, y: 0, w: 10, h: 10, conf, text: text.into(), block: 1, par: 1, line: 1 }]
+    }
+
+    #[test]
+    fn a_close_call_with_a_latin_reading_goes_to_latin() {
+        let tries = [("tha", reading(76.4, "ฮิ")), ("vie", reading(76.0, "¿Olvidaste")), ("tur", reading(70.0, "çOlvidaste"))];
+        assert_eq!(pick(&tries).unwrap().0, "vie");
+        // a clear lead stays with the other script
+        let tries = [("tha", reading(90.0, "ฮิ")), ("vie", reading(70.0, "x"))];
+        assert_eq!(pick(&tries).unwrap().0, "tha");
     }
 }

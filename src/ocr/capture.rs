@@ -124,6 +124,8 @@ fn show(ui_weak: slint::Weak<AppWindow>, shot: freeze::Screenshot, restore: Text
 struct LastRead {
     generation: u64,
     reading: Option<(crate::ocr::Reading, u32)>,
+    /// the selection's pixels (RGBA) and size: Find font keeps a picture of it
+    crop: Option<(std::sync::Arc<Vec<u8>>, u32, u32)>,
 }
 
 #[derive(Default)]
@@ -175,6 +177,18 @@ impl State {
             }
         };
         window.set_busy(false);
+        let offer = crate::fontfind::page::offer(&reading);
+        window.set_font_ok(offer.is_ok());
+        window.set_font_why(offer.err().unwrap_or_default().into());
+        if let Some(note) = &reading.note {
+            window.set_text_note(note.into());
+            let weak = window.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_secs(6), move || {
+                if let Some(w) = weak.upgrade() {
+                    w.set_text_note("".into());
+                }
+            });
+        }
 
         // outline the words, in the window's coordinates
         let layout = s.layout.borrow();
@@ -238,9 +252,11 @@ impl Toy for TextCapture {
             let dst = (row * cw * 4) as usize;
             crop[dst..dst + (cw * 4) as usize].copy_from_slice(&s.shot.rgba[src..src + (cw * 4) as usize]);
         }
+        let crop = std::sync::Arc::new(crop);
         let generation = {
             let mut text = self.state.text.borrow_mut();
             text.generation += 1;
+            text.crop = Some((crop.clone(), cw, ch));
             text.generation
         };
         if let Some((window, _)) = s.windows.borrow().get(i) {
@@ -272,6 +288,18 @@ impl Toy for TextCapture {
     /// A toolbar button: "copy", "line" (as one line) or "open" (in the app).
     fn tool(&self, s: &Rc<Session>, action: &str) {
         let Some((reading, size_px)) = self.state.text.borrow().reading.clone() else { return };
+        if action == "font" {
+            // a font entry, with the selection's picture; the app opens on it and searches
+            let crop = self.state.text.borrow().crop.clone();
+            if let (Some(ui), Some((rgba, w, h))) = (s.ui_weak.upgrade(), crop) {
+                if crate::fontfind::page::offer(&reading).is_ok() {
+                    crate::fontfind::page::find_from_capture(&ui, &reading, size_px, &rgba, w, h);
+                    self.state.open_app.set(true);
+                    self.state.finish(s, self.restore);
+                }
+            }
+            return;
+        }
         if let Some(ui) = s.ui_weak.upgrade() {
             crate::ocr::add_reading(&ui, &reading, size_px);
         }

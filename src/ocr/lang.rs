@@ -11,6 +11,8 @@ use std::process::Command;
 
 /// Where the language files come from.
 const TESSDATA_URL: &str = "https://github.com/tesseract-ocr/tessdata_fast/raw/main";
+/// The bigger, more accurate data, read with when the fast data wasn't sure (v0.7.5).
+const BEST_URL: &str = "https://github.com/tesseract-ocr/tessdata_best/raw/main";
 
 /// Every language `tessdata_fast` has (its file names without `.traineddata`),
 /// except Hebrew and Yiddish (written in Hebrew letters): Archtoys reads no
@@ -170,6 +172,119 @@ pub(crate) fn tessdata_dir() -> PathBuf {
     app_data_dir().join("tessdata")
 }
 
+/// The best data has the same file names, so it has its own folder.
+pub(crate) fn best_dir() -> PathBuf {
+    app_data_dir().join("tessdata-best")
+}
+
+/// Is a language's best data there, or on its way?
+pub(crate) enum Best {
+    Ready,
+    Downloading,
+}
+
+/// The best data being downloaded in the background (one download each).
+static BEST_DOWNLOADS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// A language's best data: there already, downloaded now if that takes no
+/// longer than `wait`, else downloading in the background for next time.
+/// The time is judged from the file's size and the speed measured over the
+/// first moment, not a fixed timeout: a fast line finishes a big file, a slow
+/// one isn't waited on for minutes.
+pub(crate) fn get_best(code: &str, wait: std::time::Duration) -> Result<Best, String> {
+    let dir = best_dir();
+    if has(&dir, code) {
+        return Ok(Best::Ready);
+    }
+    if !KNOWN.contains(&code) {
+        return Err(format!("no language data for {code}"));
+    }
+    if BEST_DOWNLOADS.lock().is_ok_and(|d| d.iter().any(|c| c == code)) {
+        return Ok(Best::Downloading);
+    }
+    std::fs::create_dir_all(&dir).map_err(|err| format!("couldn't make {}: {err}", dir.display()))?;
+    let licence = dir.join("LICENSE-tessdata_best.txt");
+    if !licence.exists() {
+        let _ = fetch("https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/LICENSE", &licence);
+    }
+    let url = format!("{BEST_URL}/{code}.traineddata");
+    let dest = file_for(&dir, code);
+    let tmp = dest.with_extension("part");
+    let size = content_length(&url);
+    let Ok(mut child) =
+        Command::new("curl").args(["-fsSL", "--connect-timeout", "10", "--max-time", "900", "-o"]).arg(&tmp).arg(&url).spawn()
+    else {
+        // no curl: wget, in the background (it can't tell how far it got)
+        let (code, tmp, dest, url) = (code.to_string(), tmp.clone(), dest.clone(), url.clone());
+        background(code, move || {
+            Command::new("wget").args(["-q", "-T", "20", "-O"]).arg(&tmp).arg(&url).status().is_ok_and(|s| s.success())
+                && finish_part(&tmp, &dest)
+        });
+        return Ok(Best::Downloading);
+    };
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
+            return if status.success() && finish_part(&tmp, &dest) {
+                Ok(Best::Ready)
+            } else {
+                let _ = std::fs::remove_file(&tmp);
+                Err(format!("couldn't download {url}"))
+            };
+        }
+        let elapsed = start.elapsed();
+        let got = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
+        let too_slow = match size {
+            Some(total) if elapsed.as_millis() >= 1000 && got > 0 => expected_time(total, got, elapsed) > wait,
+            _ => elapsed > wait,
+        };
+        if too_slow {
+            let (code, tmp, dest) = (code.to_string(), tmp.clone(), dest.clone());
+            background(code, move || child.wait().is_ok_and(|s| s.success()) && finish_part(&tmp, &dest));
+            return Ok(Best::Downloading);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// How long a whole download takes at the speed so far.
+fn expected_time(total: u64, got: u64, elapsed: std::time::Duration) -> std::time::Duration {
+    elapsed.mul_f64(total as f64 / got.max(1) as f64)
+}
+
+/// The file's size, from the server's headers (None when it doesn't say).
+fn content_length(url: &str) -> Option<u64> {
+    let out = Command::new("curl").args(["-sIL", "--connect-timeout", "10", "--max-time", "15"]).arg(url).output().ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse().ok()))
+        .next_back() // after redirects: the last response's
+}
+
+/// A download that went on in the background finishes there.
+fn background(code: String, job: impl FnOnce() -> bool + Send + 'static) {
+    if let Ok(mut d) = BEST_DOWNLOADS.lock() {
+        d.push(code.clone());
+    }
+    std::thread::spawn(move || {
+        if !job() {
+            eprintln!("text extractor: couldn't download the best data for {code}");
+        }
+        if let Ok(mut d) = BEST_DOWNLOADS.lock() {
+            d.retain(|c| *c != code);
+        }
+    });
+}
+
+/// A finished download's temporary file becomes the real one (a cut-off one is thrown away).
+fn finish_part(tmp: &Path, dest: &Path) -> bool {
+    if std::fs::metadata(tmp).map(|m| m.len()).unwrap_or(0) < 100 {
+        let _ = std::fs::remove_file(tmp);
+        return false;
+    }
+    std::fs::rename(tmp, dest).is_ok()
+}
+
 fn file_for(dir: &Path, code: &str) -> PathBuf {
     dir.join(format!("{code}.traineddata"))
 }
@@ -253,7 +368,8 @@ pub(crate) fn download_all(dir: &Path, codes: &[&'static str]) -> Vec<&'static s
 pub(crate) fn downloaded() -> (Vec<String>, u64) {
     let mut codes = Vec::new();
     let mut bytes = 0;
-    if let Ok(entries) = std::fs::read_dir(tessdata_dir()) {
+    // the fast data and the best data (a language in both is listed once)
+    for entries in [tessdata_dir(), best_dir()].iter().filter_map(|dir| std::fs::read_dir(dir).ok()) {
         for entry in entries.flatten() {
             let path = entry.path();
             let is_link = entry.file_type().is_ok_and(|t| t.is_symlink());
@@ -267,6 +383,7 @@ pub(crate) fn downloaded() -> (Vec<String>, u64) {
         }
     }
     codes.sort();
+    codes.dedup();
     (codes, bytes)
 }
 
@@ -274,6 +391,7 @@ pub(crate) fn downloaded() -> (Vec<String>, u64) {
 pub(crate) fn delete_downloaded() {
     for code in downloaded().0 {
         let _ = std::fs::remove_file(file_for(&tessdata_dir(), &code));
+        let _ = std::fs::remove_file(file_for(&best_dir(), &code));
     }
 }
 
@@ -291,6 +409,113 @@ pub(crate) fn from_whatlang(lang: whatlang::Lang) -> Option<&'static str> {
     KNOWN.iter().find(|&&k| k == code).copied()
 }
 
+/// Short Latin-script text whatlang isn't sure of (a button, a title, a few
+/// words: it guessed Afrikaans for "Fichier enregistré" and French for
+/// "Network connection lost"): the language its letters and common words
+/// show. Letters only a few languages use count most, then the little words
+/// every sentence has, then a nudge for the user's own languages. A tie goes
+/// to whatlang among the tied ones. No evidence, or English ahead: English.
+/// Before (v0.7.4) a short line kept the language its reading happened to
+/// win with (English, or Turkish or Vietnamese, whose data reads accents).
+/// `read_with`: the data that read it. Turkish's turns è into ö and ¿ into ç,
+/// Vietnamese's sprinkles accents: those letters aren't evidence then (only
+/// the ones its own language alone has, ş ğ ı or đ ơ ư, still are).
+pub(crate) fn name_latin(text: &str, user: &[&str], read_with: &str) -> &'static str {
+    // (code, letters only it and a few others use, its most common little words)
+    const EVIDENCE: &[(&str, &str, &[&str])] = &[
+        (
+            "eng",
+            "",
+            &[
+                "the", "a", "an", "to", "of", "and", "in", "on", "for", "your", "you", "is", "are", "with", "this", "that", "here", "more",
+                "it", "be", "not", "all", "my", "has", "have", "off", "or", "by", "from", "at",
+            ],
+        ),
+        (
+            "fra",
+            "éçèêëœàâîïôûù",
+            &[
+                "le", "la", "les", "de", "du", "des", "un", "une", "et", "pour", "ici", "votre", "vos", "est", "pas", "sur", "avec",
+                "dans", "tout", "au", "aux", "ce", "cette", "mon", "ma", "mes", "ou", "par", "qui", "que", "en", "ne", "il", "elle",
+                "nous", "vous",
+            ],
+        ),
+        (
+            "spa",
+            "ñ¿¡áíóú",
+            &[
+                "el", "la", "los", "las", "de", "del", "un", "una", "y", "para", "por", "tu", "su", "más", "con", "en", "es", "no", "al",
+                "que", "mi", "se", "lo", "como", "este", "esta",
+            ],
+        ),
+        (
+            "por",
+            "ãõçáâêôàóú",
+            &[
+                "o", "os", "as", "de", "do", "da", "dos", "das", "um", "uma", "e", "para", "por", "você", "seu", "sua", "com", "em", "não",
+                "ao", "que", "no", "na", "se", "mais",
+            ],
+        ),
+        (
+            "deu",
+            "äöüß",
+            &[
+                "der", "die", "das", "den", "dem", "des", "und", "ist", "nicht", "mit", "für", "zu", "ein", "eine", "auf", "im", "von",
+                "sie", "es", "ich", "du", "ihr", "wir", "sind", "oder", "auch", "noch", "bitte",
+            ],
+        ),
+        (
+            "ita",
+            "àèìòù",
+            &[
+                "il", "lo", "la", "gli", "le", "di", "del", "della", "un", "una", "e", "per", "con", "non", "che", "è", "in", "su", "al",
+                "sono", "questo", "tuo",
+            ],
+        ),
+        (
+            "nld",
+            "ĳ",
+            &["de", "het", "een", "en", "van", "is", "niet", "met", "voor", "op", "je", "jouw", "uw", "zijn", "dat", "naar", "ook"],
+        ),
+        ("pol", "ąćęłńśźż", &["i", "w", "z", "na", "do", "nie", "się", "jest", "to", "że", "od", "po", "jak", "dla", "twoje"]),
+        ("tur", "şğıİŞĞ", &["ve", "bir", "bu", "için", "ile", "da", "de", "mi", "ne", "çok", "daha", "olarak"]),
+        (
+            "vie",
+            "đơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹĐ",
+            &["và", "của", "là", "có", "không", "cho", "các", "những", "một", "được", "này", "bạn"],
+        ),
+    ];
+    let invented = match read_with {
+        "tur" => "çöü",
+        "vie" => "àáâãèéêìíòóôõùúý",
+        _ => "",
+    };
+    let lower: String = text.to_lowercase().chars().filter(|c| !invented.contains(*c)).collect();
+    let words: Vec<&str> = lower.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let scores: Vec<(&'static str, u32)> = EVIDENCE
+        .iter()
+        .map(|&(code, letters, common)| {
+            let letter_hits = lower.chars().filter(|c| letters.contains(*c)).count() as u32;
+            let word_hits = words.iter().filter(|w| common.contains(w)).count() as u32;
+            (code, 3 * letter_hits.min(2) + 2 * word_hits + u32::from(user.contains(&code) && letter_hits + word_hits > 0))
+        })
+        .collect();
+    let best = scores.iter().map(|s| s.1).max().unwrap_or(0);
+    let english = scores[0].1;
+    if best == 0 || english >= best {
+        return "eng";
+    }
+    let tied: Vec<&'static str> = scores.iter().filter(|s| s.1 == best).map(|s| s.0).collect();
+    if tied.len() == 1 {
+        return tied[0];
+    }
+    let allow: Vec<whatlang::Lang> = tied.iter().filter_map(|c| whatlang::Lang::from_code(*c)).collect();
+    whatlang::Detector::with_allowlist(allow)
+        .detect_lang(text)
+        .and_then(|l| tied.iter().copied().find(|c| Some(*c) == from_whatlang(l)))
+        .unwrap_or(tied[0])
+}
+
 /// The language's name in English ("German"), for the history and the toolbar.
 pub(crate) fn display_name(code: &str) -> String {
     let special = match code {
@@ -301,6 +526,8 @@ pub(crate) fn display_name(code: &str) -> String {
         "msa" => Some("Malay"),
         "fil" => Some("Filipino"),
         "osd" => Some("Unknown"),
+        "bod" => Some("Tibetan"),
+        "sin" => Some("Sinhala"),
         _ => None,
     };
     if let Some(name) = special {
@@ -466,6 +693,52 @@ fn from_input(name: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_download_is_judged_by_its_size_and_speed() {
+        let s = std::time::Duration::from_secs;
+        // 15 MB, 1.5 MB in the first second: 10 s in all (too long for an 8 s wait)
+        assert_eq!(expected_time(15_000_000, 1_500_000, s(1)), s(10));
+        // the same file on a fast line: half a second
+        assert_eq!(expected_time(15_000_000, 30_000_000, s(1)), std::time::Duration::from_millis(500));
+    }
+
+    #[test]
+    fn short_latin_lines_are_named_by_their_letters_and_little_words() {
+        // what Tesseract really read (v0.7.5 tests: 16 px, two fonts, both themes)
+        let cases = [
+            ("eng", "Open the file"),
+            ("eng", "Settings saved"),
+            ("eng", "Network connection lost"), // whatlang: French 36%
+            ("eng", "Forgot password?"),        // whatlang: Afrikaans
+            ("eng", "Download complete"),
+            ("eng", "Last updated yesterday"),
+            ("eng", "Add to cart"),
+            ("fra", "Fichier enregistré"), // whatlang: Afrikaans
+            ("fra", "Mot de passe oublié ?"),
+            ("fra", "Cliquez ici pour continuer"),
+            ("fra", "Paramétres du compte"), // read in English: è came back é
+            ("fra", "Télécharger le fichier"),
+            ("spa", "¿Olvidaste tu contraseña?"),
+            ("spa", "Configuración de la cuenta"), // was named Vietnamese
+            ("deu", "Einstellungen öffnen"),
+            ("tur", "Şifremi unuttum"),
+            ("vie", "Đã lưu tệp tin"),
+        ];
+        for (want, text) in cases {
+            assert_eq!(name_latin(text, &[], "eng"), want, "{text:?}");
+        }
+        // no evidence at all: English, whatever reading won (Turkish read it best, v0.7.4 said Turkish)
+        assert_eq!(name_latin("Dosya kaydedildi", &[], "eng"), "eng");
+        // a user's own language tips a close call ("en la" is French and Spanish alike)
+        assert_eq!(name_latin("en la", &["spa"], "eng"), "spa");
+        assert_eq!(name_latin("en la", &["fra"], "eng"), "fra");
+        // read with Turkish's data, which made è an ö and ¿ a ç (it named them German and Portuguese)
+        assert_eq!(name_latin("Paramötres du compte", &[], "tur"), "fra");
+        assert_eq!(name_latin("çOlvidaste tu contrasefia?", &[], "tur"), "spa");
+        // but Turkish's own letters still say Turkish
+        assert_eq!(name_latin("Şifremi unuttum", &[], "tur"), "tur");
+    }
+
     use super::*;
 
     #[test]

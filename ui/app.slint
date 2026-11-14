@@ -6,7 +6,7 @@ import { RulerPage, RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.s
 import { FormatsPanel, ColorEditor, SearchBar, ColorPickerPage } from "picker.slint";
 // Rust reaches these through this file
 export { FieldRow, FormatOption, SearchCard, ShadeCell, Skin } from "common.slint";
-export { TextEntry } from "text.slint";
+export { TextEntry, FontFinder } from "text.slint";
 export { RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.slint";
 export { PickerOverlay, PickerShieldWindow, FreezePickerWindow, TextBox } from "freeze.slint";
 
@@ -86,6 +86,8 @@ export component AppWindow inherits Window {
     in-out property <int> setting-ruler-units: 0;
     // a measure may go on past its screen's edge
     in-out property <bool> setting-ruler-cross: false;
+    // fewer moving things (v0.7.5): the font search shows its best guess instead of every font
+    in-out property <bool> setting-reduce-motion: false;
     // more than one screen: Settings offers the one above
     in property <bool> several-screens;
     in property <image> ruler-icon: @image-url("ruler.svg");
@@ -691,6 +693,7 @@ export component AppWindow inherits Window {
                     setting-hotkey-recording <=> root.setting-hotkey-recording;
                     setting-minimize <=> root.setting-minimize;
                     setting-minimize-tray <=> root.setting-minimize-tray;
+                    setting-reduce-motion <=> root.setting-reduce-motion;
                     setting-show-name <=> root.setting-show-name;
                     setting-text-hotkey <=> root.setting-text-hotkey;
                     setting-text-keep-lines <=> root.setting-text-keep-lines;

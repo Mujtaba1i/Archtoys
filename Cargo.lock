@@ -135,12 +135,14 @@ name = "archtoys"
 version = "0.7.4"
 dependencies = [
  "arboard",
+ "flate2",
  "global-hotkey",
  "image",
  "ksni",
  "serde",
  "serde_json",
  "slint",
+ "swash",
  "whatlang",
  "x11rb 0.14.0",
  "zbus",

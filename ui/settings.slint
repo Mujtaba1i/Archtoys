@@ -4,6 +4,7 @@
 import { ScrollView, AboutSlint } from "std-widgets.slint";
 import { ComboBox } from "std-widgets.slint";
 import { Skin, HeaderButton, PillButton, Switch, Segmented, SettingCard, SectionLabel } from "common.slint";
+import { FontFinder } from "text.slint";
 
 export component SettingsPage inherits ScrollView {
     in-out property <bool> about-open;
@@ -31,6 +32,9 @@ export component SettingsPage inherits ScrollView {
     in-out property <bool> setting-hotkey-recording;
     in-out property <bool> setting-minimize;
     in-out property <bool> setting-minimize-tray;
+    in-out property <bool> setting-reduce-motion;
+    // the font finder's "Delete downloaded fonts?" card
+    property <bool> confirm-fonts;
     in-out property <bool> setting-show-name;
     in-out property <string> setting-text-hotkey;
     in-out property <bool> setting-text-keep-lines;
@@ -237,8 +241,8 @@ export component SettingsPage inherits ScrollView {
             }
             SettingCard {
                 title: "After selecting text";
-                subtitle: root.setting-text-tools ? "Copy, Copy as one line or Open, on the selection (Enter copies)"
-                    : "The text is copied and the capture closes";
+                subtitle: root.setting-text-tools ? "Copy, Copy as one line, Open or Find font, on the selection (Enter copies)"
+                    : "The text is copied and the capture closes. Find font needs Show tools";
                 Segmented {
                     options: ["Show tools", "Copy and close"];
                     selected: root.setting-text-tools ? 0 : 1;
@@ -290,6 +294,57 @@ export component SettingsPage inherits ScrollView {
                 PillButton {
                     text: "Clear";
                     clicked => { root.text-clear(); }
+                }
+            }
+
+            SectionLabel { text: "FONT FINDER"; }
+            SettingCard {
+                title: "Find fonts online";
+                subtitle: "Download fonts from Google Fonts while searching. Off: only the fonts on your computer";
+                Switch {
+                    label: "Find fonts online";
+                    checked: FontFinder.online;
+                    toggled(on) => { FontFinder.online-changed(on); root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Downloaded fonts";
+                subtitle: FontFinder.fonts-info;
+                PillButton {
+                    text: "Delete";
+                    clicked => { root.confirm-fonts = true; }
+                }
+            }
+            if root.confirm-fonts : Rectangle {
+                border-radius: 14px;
+                background: Skin.surface;
+                border-width: 1px;
+                border-color: Skin.border;
+                height: confirm.preferred-height;
+                confirm := VerticalLayout {
+                    padding: 18px;
+                    spacing: 10px;
+                    Text { text: "Delete the downloaded fonts?"; color: Skin.text-main; font-size: 16px; font-weight: 700; }
+                    Text {
+                        text: "The next font searches will download them again, so they'll be slower. Your history and its answers stay.";
+                        color: Skin.text-muted;
+                        font-size: 13px;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: end;
+                        spacing: 10px;
+                        PillButton { text: "Keep"; clicked => { root.confirm-fonts = false; } }
+                        PillButton { text: "Delete"; danger: true; clicked => { root.confirm-fonts = false; FontFinder.delete-fonts(); } }
+                    }
+                }
+            }
+            SettingCard {
+                title: "Saved pictures";
+                subtitle: FontFinder.pictures-info;
+                PillButton {
+                    text: "Delete";
+                    clicked => { FontFinder.delete-pictures(); }
                 }
             }
         }
@@ -369,6 +424,15 @@ export component SettingsPage inherits ScrollView {
             spacing: 10px;
             SectionLabel { text: "APP"; }
 
+            SettingCard {
+                title: "Reduce motion";
+                subtitle: "Fewer moving things: the font search shows its best guess instead of changing fonts";
+                Switch {
+                    label: "Reduce motion";
+                    checked: root.setting-reduce-motion;
+                    toggled(on) => { root.setting-reduce-motion = on; root.settings-changed(); }
+                }
+            }
             SettingCard {
                 title: "Start on login";
                 subtitle: "Launch Archtoys in the tray";

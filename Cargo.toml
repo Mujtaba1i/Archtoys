@@ -27,6 +27,9 @@ serde_json = "1.0"
 ksni = { version = "0.3.3", default-features = false, features = ["blocking", "async-io"] }
 # the same version Slint uses, so it is compiled once
 image = { version = "0.25", default-features = false, features = ["png"] }
+# the font finder (v0.7.5): both already built in for Slint, same versions and features
+flate2 = { version = "1.1.11", default-features = false, features = ["rust_backend"] }
+swash = { version = "0.2.10", default-features = false, features = ["render"] }
 x11rb = { version = "0.14.0", features = ["randr"] }
 zbus = "5.13.2"
 # which language a text is in (Text Extractor); pure Rust, MIT

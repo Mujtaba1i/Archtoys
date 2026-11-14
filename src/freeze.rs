@@ -440,6 +440,10 @@ impl Session {
         NEXT_MONITOR.with(|m| m.borrow_mut().take());
         let window = window.map_err(|err| format!("window failed: {err:?}"))?;
         window.global::<crate::Skin>().set_real_shadows(!crate::cpu_drawn());
+        // the app's theme: the toolbars and the preview card follow it (each window has its own Skin)
+        if let Some(ui) = self.ui_weak.upgrade() {
+            window.global::<crate::Skin>().set_dark_t(ui.global::<crate::Skin>().get_dark_t());
+        }
         window.set_screenshot_image(self.image.clone());
         let i = self.windows.borrow().len();
         self.toy.window_created(&window, i);

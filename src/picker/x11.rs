@@ -378,6 +378,10 @@ pub(super) fn start(ui_weak: slint::Weak<AppWindow>, history_store: HistoryStore
             return;
         }
     };
+    // the preview card in the app's theme (each window has its own Skin)
+    if let (Some(overlay), Some(ui)) = (overlay_weak.upgrade(), ui_weak.upgrade()) {
+        overlay.global::<crate::Skin>().set_dark_t(ui.global::<crate::Skin>().get_dark_t());
+    }
     show_shield();
 
     thread::spawn(move || {
