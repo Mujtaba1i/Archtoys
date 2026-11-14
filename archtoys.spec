@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.7.4
+Version:        0.7.5
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,11 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Sat Nov 14 2026 Mujtaba1i <mujtaba1i@github> - 0.7.5-1
+- CI: the package check no longer races the X server, and its issue shows the log
+- Screen Ruler: a box across two screens is filled on both
+- NEW! Font finder: which font is that text in? And Text Extractor reads better
+
 * Thu Nov 12 2026 Mujtaba1i <mujtaba1i@github> - 0.7.4-1
 - Slint 1.18: smaller and lighter
 - CI: the end-to-end test runs on every push, failures name the real error, and the benchmark is fair to both builds
