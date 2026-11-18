@@ -1,6 +1,21 @@
 # Builds and tests every push to main and every pull request, so problems
 # (including a Cargo.lock that is out of date after a version bump, which
 # makes `--locked` fail) show up before you tag a release.
+#
+# v0.8.0: one job per kind of check, run side by side. "Build" only builds
+# the release binary and hands it to the jobs that run the app; the jobs
+# that need the source (unit tests, clippy, search speed) compile their own.
+#   Build                          the release binary, shared with the jobs below
+#   Unit tests                     cargo test
+#   Code quality                   formatting and clippy
+#   App tests (X11)                picking on two monitors, the app used end to end
+#   App tests (Wayland, Plasma 5)  KWin 5: window place, picker, the end-to-end checks
+#   App tests (Wayland, Plasma 6)  KWin 6 (Fedora): the same
+#   Accuracy                       Text Extractor and the font finder
+#   Speed                          search speed (and the benchmark, on pull requests)
+#   Packaging and release scripts  PKGBUILDs, release scripts, software centers, Buy me a coffee
+#   Security and licences          cargo deny
+#   tesseract-install              Text Extractor's Turn on, per distribution family
 
 name: CI
 
@@ -21,6 +36,58 @@ env:
 
 jobs:
   build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      # a release build, so the app tests and the timings are the app's
+      - name: Build
+        run: cargo build --release --locked
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: archtoys
+          path: target/release/archtoys
+          retention-days: 3
+          if-no-files-found: error
+
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Test
+        run: cargo test --locked
+
+  # Each check writes a row to the run summary: what it checks, passed or
+  # not, and for a failure what it found and what to do
+  # (.github/scripts/check.sh). Every check runs even when one before failed.
+  code-quality:
+    name: Code quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,43 +104,47 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: Build
-        run: cargo build --locked
+      - name: "Checks: summary table"
+        run: printf '### Code quality\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Test
-        run: cargo test --locked
+      - name: "Code: formatting (cargo fmt)"
+        if: ${{ !cancelled() }}
+        run: >-
+          bash .github/scripts/check.sh "Formatting" "The code is formatted the same way everywhere (cargo fmt, settings in rustfmt.toml)"
+          "Run cargo fmt and commit the result. The lines below show where the code differs."
+          --keep '^(Diff in|[-+])' -- cargo fmt --check
+
+      - name: "Code: common Rust mistakes (clippy)"
+        if: ${{ !cancelled() }}
+        run: >-
+          bash .github/scripts/check.sh "Common mistakes" "Clippy finds no common Rust mistakes (warnings count as failures)"
+          "Each item below names the file and line and what clippy suggests; run cargo clippy --all-targets locally to see them, fix, and push."
+          --keep '^(warning|error)|-->|= help' -- cargo clippy --locked --all-targets -- -D warnings
+
+  app-tests-x11:
+    name: App tests (X11)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archtoys
+          path: bin
+
+      - name: Install what the tests need
+        run: |
+          chmod +x bin/archtoys
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-xserver-utils xdotool feh picom dbus openbox xclip python3-xlib python3-pil \
+            libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 fonts-dejavu-core tesseract-ocr
 
       # Real picks on a virtual X11 screen split into two monitors: arrow keys,
       # Enter, a click and Esc, at the edge between the monitors and in the
-      # corner (the monitor maths itself is covered by the unit tests above).
+      # corner (the monitor maths itself is covered by the unit tests).
       - name: Pick on two monitors (X11)
-        run: |
-          sudo apt-get install -y xvfb x11-xserver-utils xdotool feh picom dbus \
-            libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 fonts-dejavu-core
-          bash .github/scripts/x11-pick-test.sh target/debug/archtoys
-
-      # Text Extractor: known text drawn at screen sizes, light and dark, in
-      # English, German and Russian, read by the real Tesseract through the
-      # app (`archtoys --extract-file`). The run summary shows how much came
-      # back right, the language named, how sure and how fast: one line per
-      # text, then only the cases that went wrong (with each language's score).
-      # English at 14 px and up must come back 90% right; Arabic below that warns.
-      # A release build, so the times are the app's: a debug build reads images
-      # several times slower (the search speed step below reuses its libraries).
-      - name: Text Extractor accuracy
-        run: |
-          sudo apt-get install -y tesseract-ocr imagemagick fonts-dejavu-core fonts-liberation2 fonts-noto-core pango1.0-tools
-          cargo build --release --locked
-          python3 .github/scripts/ocr_accuracy.py target/release/archtoys
-
-      # The font finder (v0.7.5): lines drawn the way GTK apps draw text, in
-      # fonts the runner has, Regular and Bold, found by the app (`archtoys
-      # --find-font`, no download). The run summary shows first / top 3 /
-      # the weight and the time. It only warns (below 50% in the top 3): the
-      # font finder is a best guess by design, and the app says so.
-      - name: Font finder accuracy (warns only)
-        continue-on-error: true
-        run: python3 .github/scripts/font_accuracy.py target/release/archtoys
+        run: bash .github/scripts/x11-pick-test.sh bin/archtoys
 
       # The app used like a person would (in CI since v0.7.4): a real mouse and
       # keyboard on a virtual X11 screen pick colors, search, open the editor,
@@ -83,15 +154,166 @@ jobs:
       # on itself. Every check runs, the run summary lists them, and the step
       # fails if any failed. (Slint 1.18 cut the end of Settings off: this caught it.)
       - name: End to end (the app used like a person would)
-        run: |
-          sudo apt-get install -y xclip python3-xlib python3-pil openbox
-          dbus-run-session -- python3 .github/scripts/e2e_test.py target/release/archtoys
+        if: ${{ !cancelled() }}
+        run: dbus-run-session -- python3 .github/scripts/e2e_test.py bin/archtoys
 
-      # Every library must have a licence an MIT app can use and ship.
-      - name: Licences
+  # KDE Plasma on Wayland, on a headless KWin: Plasma 5 on the runner (Ubuntu
+  # 24.04 has 5.27), Plasma 6 in a Fedora container (they differ: KWin 6 holds
+  # a script's move back while a size change waits for the app). Two jobs, so
+  # they run at the same time as each other and as X11. Each step writes what
+  # it checked and whether it passed to the run summary.
+  # - the main window opens where it was closed (issue #11): Archtoys' KWin
+  #   script; moved, closed, opened again, started fresh with a saved place
+  # - the color picker gets ready on 1 and 2 monitors (issue #12: two
+  #   monitors stayed black)
+  # - the same end-to-end checks as on X11 (v0.8.0), with KWin's fake mouse
+  #   and keyboard (wayland-input.c); what a headless KWin can't do (read
+  #   pixels off the screen) is skipped, with why
+  app-tests-plasma5:
+    name: App tests (Wayland, Plasma 5)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archtoys
+          path: bin
+
+      - name: Install KWin, and what the end-to-end checks need
         run: |
-          cargo install cargo-deny --locked
-          cargo deny check licenses
+          chmod +x bin/archtoys
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-x11-0 kwin-wayland qdbus-qt5 dbus breeze xdg-desktop-portal-kde \
+            plasma-wayland-protocols libwayland-dev wl-clipboard python3-pil tesseract-ocr fonts-dejavu-core
+
+      # KWin's fake mouse and keyboard, for the end-to-end checks
+      - name: Build wayland-input
+        run: |
+          xml=/usr/share/plasma-wayland-protocols/fake-input.xml
+          wayland-scanner client-header "$xml" "$RUNNER_TEMP/fake-input.h"
+          wayland-scanner private-code "$xml" "$RUNNER_TEMP/fake-input.c"
+          cc -O2 -o "$RUNNER_TEMP/wayland-input" .github/scripts/wayland-input.c "$RUNNER_TEMP/fake-input.c" -I"$RUNNER_TEMP" -lwayland-client
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: "KDE Plasma 5 (Wayland): the window opens where it was closed"
+        run: bash .github/scripts/kwin-place-test.sh bin/archtoys
+
+      - name: "KDE Plasma 5 (Wayland): the color picker gets ready on 1 and 2 monitors"
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/kwin-pick-test.sh bin/archtoys
+
+      - name: "KDE Plasma 5 (Wayland): end to end (the app used like a person would)"
+        if: ${{ !cancelled() }}
+        run: |
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          unset XDG_CONFIG_HOME
+          dbus-run-session -- python3 .github/scripts/e2e_test.py bin/archtoys --wayland
+
+  app-tests-plasma6:
+    name: App tests (Wayland, Plasma 6)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archtoys
+          path: bin
+
+      - name: Ready the binary
+        run: chmod +x bin/archtoys
+
+      # privileged: KWin's binary has a file capability a plain container can't run
+      - name: "KDE Plasma 6 (Wayland, Fedora): the window opens where it was closed"
+        run: |
+          docker run --rm --privileged -v "$PWD:/w" -w /w \
+            -v "$GITHUB_STEP_SUMMARY:/summary.md" -e GITHUB_STEP_SUMMARY=/summary.md fedora:latest bash -c '
+            dnf install -y -q kwin qt6-qttools dbus-daemon fontconfig libX11 libxkbcommon libxkbcommon-x11 >/dev/null
+            bash .github/scripts/kwin-place-test.sh bin/archtoys'
+
+      - name: "KDE Plasma 6 (Wayland, Fedora): the color picker gets ready on 1 and 2 monitors"
+        if: ${{ !cancelled() }}
+        run: |
+          docker run --rm --privileged -v "$PWD:/w" -w /w \
+            -v "$GITHUB_STEP_SUMMARY:/summary.md" -e GITHUB_STEP_SUMMARY=/summary.md fedora:latest bash -c '
+            dnf install -y -q kwin dbus-daemon python3 fontconfig libX11 libxkbcommon libxkbcommon-x11 >/dev/null
+            bash .github/scripts/kwin-pick-test.sh bin/archtoys'
+
+      - name: "KDE Plasma 6 (Wayland, Fedora): end to end (the app used like a person would)"
+        if: ${{ !cancelled() }}
+        run: |
+          docker run --rm --privileged -v "$PWD:/w" -w /w \
+            -v "$GITHUB_STEP_SUMMARY:/summary.md" -e GITHUB_STEP_SUMMARY=/summary.md fedora:latest bash -c '
+            dnf install -y -q kwin qt6-qttools dbus-daemon dbus-tools fontconfig libX11 libxkbcommon libxkbcommon-x11 \
+              gcc wayland-devel plasma-wayland-protocols-devel wl-clipboard python3-pillow \
+              xdg-desktop-portal-kde tesseract tesseract-langpack-eng dejavu-sans-fonts >/dev/null
+            xml=/usr/share/plasma-wayland-protocols/fake-input.xml
+            wayland-scanner client-header "$xml" /tmp/fake-input.h
+            wayland-scanner private-code "$xml" /tmp/fake-input.c
+            cc -O2 -o /usr/local/bin/wayland-input .github/scripts/wayland-input.c /tmp/fake-input.c -I/tmp -lwayland-client
+            export XDG_RUNTIME_DIR="$(mktemp -d)"
+            chmod 700 "$XDG_RUNTIME_DIR"
+            dbus-run-session -- python3 .github/scripts/e2e_test.py bin/archtoys --wayland'
+
+  accuracy:
+    name: Accuracy
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archtoys
+          path: bin
+
+      - name: Install Tesseract and the fonts the texts are drawn in
+        run: |
+          chmod +x bin/archtoys
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr imagemagick fonts-dejavu-core fonts-liberation2 fonts-noto-core pango1.0-tools \
+            libxkbcommon-x11-0
+
+      # Text Extractor: known text drawn at screen sizes, light and dark, in
+      # English, German and Russian, read by the real Tesseract through the
+      # app (`archtoys --extract-file`). The run summary shows how much came
+      # back right, the language named, how sure and how fast: one line per
+      # text, then only the cases that went wrong (with each language's score).
+      # English at 14 px and up must come back 90% right; Arabic below that warns.
+      # A release build, so the times are the app's.
+      - name: Text Extractor accuracy
+        run: python3 .github/scripts/ocr_accuracy.py bin/archtoys
+
+      # The font finder (v0.7.5): lines drawn the way GTK apps draw text, in
+      # fonts the runner has, Regular and Bold, found by the app (`archtoys
+      # --find-font`, no download). The run summary shows first / top 3 /
+      # the weight and the time. It only warns (below 50% in the top 3): the
+      # font finder is a best guess by design, and the app says so.
+      - name: Font finder accuracy (warns only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: python3 .github/scripts/font_accuracy.py bin/archtoys
+
+  speed:
+    name: Speed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # Color search must answer each keystroke in under 2 ms. This is a
       # report, not a gate: shared runners vary in speed, so a slow run shows a
@@ -125,43 +347,95 @@ jobs:
             echo "::warning title=Search speed::Slowest keystroke took ${worst} ms (budget 2 ms); see the run summary"
           fi
 
+  # A pull request's speed and memory against main's (a Dependabot update of
+  # Slint or winit, or a feature): the same benchmark as after a release
+  # (bench.sh). The pull request's binary comes from Build; main's is built
+  # once per main commit and kept in the cache. It reports in the run
+  # summary, never fails.
+  benchmark:
+    name: "Benchmark: this pull request vs main"
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: archtoys
+          path: bin
+
+      - name: Install system dependencies
+        run: |
+          chmod +x bin/archtoys
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev \
+            libxkbcommon-x11-0 libxcursor1 libxi6 fonts-dejavu-core xvfb xdotool tesseract-ocr time
+
+      - name: Main's commit
+        id: main
+        run: echo "sha=$(git rev-parse "origin/${{ github.base_ref }}")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: main-binary
+        with:
+          path: main-bin/archtoys
+          key: archtoys-main-${{ steps.main.outputs.sha }}
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        if: steps.main-binary.outputs.cache-hit != 'true'
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: steps.main-binary.outputs.cache-hit != 'true'
+
+      - name: Build main (only when it isn't in the cache)
+        if: steps.main-binary.outputs.cache-hit != 'true'
+        run: |
+          git worktree add "$RUNNER_TEMP/main" "${{ steps.main.outputs.sha }}"
+          cargo build --release --locked --manifest-path "$RUNNER_TEMP/main/Cargo.toml" --target-dir target
+          mkdir -p main-bin
+          cp target/release/archtoys main-bin/archtoys
+
+      - name: Benchmark
+        env:
+          NEW_LABEL: this pull request
+          OLD_LABEL: ${{ github.base_ref }}
+          RUNS: 5
+        run: |
+          xvfb-run -a -s "-screen 0 1280x1024x24" \
+            bash .github/scripts/bench.sh "$PWD/bin/archtoys" "$PWD/main-bin/archtoys"
+
+  packaging:
+    name: Packaging and release scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Check PKGBUILDs parse
         run: |
           bash -n packaging/aur-archtoys/PKGBUILD
           bash -n packaging/aur-archtoys-bin/PKGBUILD
 
       - name: Test the release scripts
+        if: ${{ !cancelled() }}
         run: |
           for f in .github/scripts/*.sh; do bash -n "$f"; done
           # without the run summary: the scripts under test write their fake
           # releases there (they showed up as "COPR: build #5 for 0.3.1")
           env -u GITHUB_STEP_SUMMARY python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
 
-      # Code and project checks (v0.7.3). Each one is its own step that runs
-      # even when an earlier one failed, and writes a row to the run summary:
-      # what it checks, passed or not, and for a failure what it found and what
-      # to do (.github/scripts/check.sh).
       - name: "Checks: summary table"
         if: ${{ !cancelled() }}
-        run: printf '### Code and project checks\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: "Code: formatting (cargo fmt)"
-        if: ${{ !cancelled() }}
-        run: >-
-          bash .github/scripts/check.sh "Formatting" "The code is formatted the same way everywhere (cargo fmt, settings in rustfmt.toml)"
-          "Run cargo fmt and commit the result. The lines below show where the code differs."
-          --keep '^(Diff in|[-+])' -- cargo fmt --check
-
-      - name: "Code: common Rust mistakes (clippy)"
-        if: ${{ !cancelled() }}
-        run: >-
-          bash .github/scripts/check.sh "Common mistakes" "Clippy finds no common Rust mistakes (warnings count as failures)"
-          "Each item below names the file and line and what clippy suggests; run cargo clippy --all-targets locally to see them, fix, and push."
-          --keep '^(warning|error)|-->|= help' -- cargo clippy --locked --all-targets -- -D warnings
+        run: printf '### Packaging and project checks\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
 
       - name: "Software centers: the metainfo and .desktop file are valid"
         if: ${{ !cancelled() }}
         run: |
+          sudo apt-get update
           sudo apt-get install -y appstream desktop-file-utils
           rc=0  # every check here runs and reports, then the step fails if one did
           bash .github/scripts/check.sh "Software centers" "The AppStream metainfo (what KDE Discover and GNOME Software show) is valid" \
@@ -188,6 +462,42 @@ jobs:
             --warn -- bash -c 'link=$(grep -oP "<a id=\"kofi\" href=\"\K[^\"]*" docs/support/index.html); [ -z "$link" ] && exit 0; code=$(curl -s -o /dev/null -w "%{http_code}" -A "archtoys-ci" "$link"); echo "$link answered HTTP $code"; [ "$code" != 404 ] && [ "$code" -lt 500 ]'
           exit $rc
 
+  # cargo-deny, the released binary (checked against its SHA-256) instead of
+  # compiling it on every run. Updating it: the new version and the SHA-256
+  # from its release page (the .tar.gz.sha256 file).
+  security:
+    name: Security and licences
+    runs-on: ubuntu-latest
+    env:
+      DENY_VERSION: 0.20.2
+      DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # cargo deny reads the dependency tree through cargo
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+
+      - name: Get cargo-deny
+        run: |
+          name="cargo-deny-$DENY_VERSION-x86_64-unknown-linux-musl"
+          curl -fsSL -o "$RUNNER_TEMP/deny.tar.gz" "https://github.com/EmbarkStudios/cargo-deny/releases/download/$DENY_VERSION/$name.tar.gz"
+          echo "$DENY_SHA256  $RUNNER_TEMP/deny.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/deny.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
+
+      - name: "Checks: summary table"
+        run: printf '### Security and licences\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+
+      # Every library must have a licence an MIT app can use and ship.
+      - name: Licences
+        if: ${{ !cancelled() }}
+        run: >-
+          bash .github/scripts/check.sh "Licences" "Every library has a licence an MIT app can use and ship (deny.toml is the allow list)"
+          "The library named below has a licence deny.toml doesn't allow: replace the library, or add the licence to deny.toml if it really is fine."
+          -- cargo deny check licenses
+
       # A crate with a known security hole fails CI (the RustSec database);
       # the summary names the crate, the hole and the version that fixes it.
       - name: "Security: no library with a known security hole (cargo deny advisories)"
@@ -196,97 +506,6 @@ jobs:
           bash .github/scripts/check.sh "Security advisories" "No library Archtoys uses has a known security hole (RustSec)"
           "Update the library named below: cargo update -p NAME (the Solution line gives the version that fixes it), run the tests, commit Cargo.lock."
           --keep '^(error|warning)\[|= (ID|Advisory|Solution|Announcement)|^[0-9]+ │' -- cargo deny check advisories
-
-  # A pull request's speed and memory against main's (a Dependabot update of
-  # Slint or winit, or a feature): the same benchmark as after a release
-  # (bench.sh), both built here. It reports in the run summary, never fails.
-  benchmark:
-    name: "Benchmark: this pull request vs main"
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev \
-            libxkbcommon-x11-0 libxcursor1 libxi6 fonts-dejavu-core xvfb xdotool tesseract-ocr time
-
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: stable
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      # both in the same target folder, so main's build reuses the libraries
-      - name: Build this pull request and main
-        run: |
-          cargo build --release --locked
-          cp target/release/archtoys "$RUNNER_TEMP/archtoys-pr"
-          git worktree add "$RUNNER_TEMP/main" "origin/${{ github.base_ref }}"
-          cargo build --release --locked --manifest-path "$RUNNER_TEMP/main/Cargo.toml" --target-dir target
-          cp target/release/archtoys "$RUNNER_TEMP/archtoys-main"
-
-      - name: Benchmark
-        env:
-          NEW_LABEL: this pull request
-          OLD_LABEL: ${{ github.base_ref }}
-          RUNS: 5
-        run: |
-          xvfb-run -a -s "-screen 0 1280x1024x24" \
-            bash .github/scripts/bench.sh "$RUNNER_TEMP/archtoys-pr" "$RUNNER_TEMP/archtoys-main"
-
-  # KDE Plasma on Wayland, on a headless KWin: Plasma 5 on the runner (Ubuntu
-  # 24.04 has 5.27), Plasma 6 in a Fedora container (they differ: KWin 6 holds
-  # a script's move back while a size change waits for the app). Each step
-  # writes what it checked and whether it passed to the run summary.
-  # - the main window opens where it was closed (issue #11): Archtoys' KWin
-  #   script; moved, closed, opened again, started fresh with a saved place
-  # - the color picker gets ready on 1 and 2 monitors (issue #12: two
-  #   monitors stayed black)
-  kde-wayland:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev libxkbcommon-dev \
-            libxkbcommon-x11-0 kwin-wayland qdbus-qt5 dbus
-
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          toolchain: stable
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      - name: Build
-        run: cargo build --locked
-
-      - name: "KDE Plasma 5 (Wayland): the window opens where it was closed"
-        run: bash .github/scripts/kwin-place-test.sh target/debug/archtoys
-
-      - name: "KDE Plasma 5 (Wayland): the color picker gets ready on 1 and 2 monitors"
-        run: bash .github/scripts/kwin-pick-test.sh target/debug/archtoys
-
-      # privileged: KWin's binary has a file capability a plain container can't run
-      - name: "KDE Plasma 6 (Wayland, Fedora): the window opens where it was closed"
-        run: |
-          docker run --rm --privileged -v "$PWD:/w" -w /w \
-            -v "$GITHUB_STEP_SUMMARY:/summary.md" -e GITHUB_STEP_SUMMARY=/summary.md fedora:latest bash -c '
-            dnf install -y -q kwin qt6-qttools dbus-daemon fontconfig libX11 libxkbcommon libxkbcommon-x11 >/dev/null
-            bash .github/scripts/kwin-place-test.sh target/debug/archtoys'
-
-      - name: "KDE Plasma 6 (Wayland, Fedora): the color picker gets ready on 1 and 2 monitors"
-        run: |
-          docker run --rm --privileged -v "$PWD:/w" -w /w \
-            -v "$GITHUB_STEP_SUMMARY:/summary.md" -e GITHUB_STEP_SUMMARY=/summary.md fedora:latest bash -c '
-            dnf install -y -q kwin dbus-daemon python3 fontconfig libX11 libxkbcommon libxkbcommon-x11 >/dev/null
-            bash .github/scripts/kwin-pick-test.sh target/debug/archtoys'
 
   # Text Extractor's "Turn on" on each family it supports: the app's exact
   # install script (kept equal by a unit test) as root in a clean container,
