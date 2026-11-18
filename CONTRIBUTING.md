@@ -57,7 +57,7 @@ dbus-run-session -- python3 .github/scripts/e2e_test.py target/release/archtoys
 2. Keep the change to one thing. A fix and a new feature are two pull requests.
 3. Run the tests, `cargo fmt` and clippy (above).
 4. Write the commit message for the people who use Archtoys: the release notes are made from it. Say what changed for them, not how the code changed.
-5. Open a pull request. CI builds it, runs every check and compares its speed and memory with main.
+5. Open a pull request. CI builds it, runs every check and compares its speed and memory with main. CodeRabbit, an automatic reviewer, also reads it and leaves comments. Treat them like any other review.
 
 New dependencies need a good reason: Archtoys is kept small on purpose. Check the licence is allowed by `deny.toml` (`cargo deny check licenses`).
 
