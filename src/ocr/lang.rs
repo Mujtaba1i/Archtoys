@@ -316,26 +316,20 @@ pub(crate) fn prepare_dir() -> Result<PathBuf, String> {
 }
 
 /// Downloads `url` to `dest` with curl or wget (one of them is on every
-/// desktop), through a temporary file so a cut-off download leaves nothing.
+/// desktop).
 fn fetch(url: &str, dest: &Path) -> Result<(), String> {
-    let tmp = dest.with_extension("part");
-    let curl = Command::new("curl").args(["-fsSL", "--connect-timeout", "10", "--max-time", "300", "-o"]).arg(&tmp).arg(url).status();
+    let curl = Command::new("curl").args(["-sSL", "--connect-timeout", "10", "--max-time", "300", "-o"]).arg(dest).arg(url).status();
     let ok = match curl {
         Ok(status) => status.success(),
         Err(_) => Command::new("wget")
             .args(["-q", "-T", "20", "-O"])
-            .arg(&tmp)
+            .arg(dest)
             .arg(url)
             .status()
             .map_err(|_| "neither curl nor wget is installed".to_string())?
             .success(),
     };
-    let size = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
-    if !ok || size < 100 {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("couldn't download {url}"));
-    }
-    std::fs::rename(&tmp, dest).map_err(|err| format!("couldn't save {}: {err}", dest.display()))
+    if ok { Ok(()) } else { Err(format!("couldn't download {url}")) }
 }
 
 /// Downloads a language into Archtoys' folder (and the licence, once).
