@@ -447,3 +447,30 @@ mod tests {
         assert_eq!(big.get_pixel(0, 0).0[0], 255); // the margin
     }
 }
+
+#[cfg(test)]
+mod hunt_tests {
+    use super::*;
+
+    #[test]
+    fn tesseract_output_and_images_survive_anything() {
+        let mut rng = crate::hunt::Rng::new(7);
+        for text in crate::hunt::texts() {
+            let _ = parse_version(&text);
+            let words = parse_tsv(&text);
+            let _ = text_from_words(&words, true);
+            // a TSV line built from it: wrong column counts, bad numbers
+            let line = format!("level\tpage\n5\t1\t1\t1\t1\t1\t{text}\t{text}\t-5\t-5\t{text}\t{text}");
+            let words = parse_tsv(&line);
+            let _ = (text_from_words(&words, true), text_from_words(&words, false));
+        }
+        // images of every odd size, including nothing at all
+        for (w, h) in [(0, 0), (1, 1), (0, 10), (10, 0), (1, 500), (500, 1), (3, 3), (64, 9)] {
+            let rgba = rng.bytes((w * h * 4) as usize);
+            let g = gray(&rgba, w, h);
+            let _ = line_height(&g);
+            let _ = normalize(&g, 32.0);
+            let _ = normalize(&g, 0.0);
+        }
+    }
+}

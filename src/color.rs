@@ -736,3 +736,34 @@ mod tests {
         assert!(!wants_dark_text((5, 24, 62))); // navy
     }
 }
+
+#[cfg(test)]
+mod hunt_tests {
+    use super::*;
+
+    #[test]
+    fn typed_colors_survive_hostile_text() {
+        for text in crate::hunt::texts() {
+            for field in ColorField::ALL {
+                if let Some(rgb) = parse_color(field, &text) {
+                    // whatever came out formats again in every format
+                    for f in ColorField::ALL {
+                        let _ = (format_canonical(f, rgb), copy_text(f, rgb), format_bare(f, rgb));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn color_math_survives_every_edge() {
+        for h in [f32::NAN, f32::INFINITY, -f32::INFINITY, -1e30, -1.0, 0.0, 359.999, 360.0, 1e30] {
+            for s in [f32::NAN, -1.0, 0.0, 0.5, 1.0, 2.0] {
+                let _ = from_hsv(h, s, s);
+            }
+        }
+        for factor in [f32::NAN, -1.0, 0.0, 0.5, 1.0, 1e30] {
+            let _ = scale_rgb((255, 0, 128), factor);
+        }
+    }
+}

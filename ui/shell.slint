@@ -1,6 +1,6 @@
 // The app's frame (v0.7.0): the bar with the menu, the sidebar and the Home page.
 import { ScrollView } from "std-widgets.slint";
-import { Skin } from "common.slint";
+import { Skin, Switch, Keycaps } from "common.slint";
 
 // A button in the bar (the menu).
 component BarButton inherits Rectangle {
@@ -202,154 +202,158 @@ export component Sidebar inherits Rectangle {
     }
 }
 
-// A toy on Home: its icon, name, what it does and its hotkey.
-component ToyCard inherits Rectangle {
+// A toy on Home (v0.8.0): its icon in a soft tile, name, what it does and
+// its hotkey as keycaps (FancyZones-like toys can show other words after
+// them). The rows sit in one card, a line between them.
+component ToyRow inherits Rectangle {
     in property <image> icon;
     in property <string> title;
     in property <string> subtitle;
     in property <string> hotkey;
+    in property <bool> first;
+    in property <bool> last;
     callback clicked;
-    min-height: 190px;
-    border-radius: 18px;
-    background: touch.has-hover ? Skin.surface-hover : Skin.surface;
-    border-width: 1px;
-    border-color: touch.has-hover ? Skin.accent : Skin.border;
-    animate background, border-color { duration: 120ms; }
+    height: 80px;
     accessible-role: button;
     accessible-label: root.title;
+    accessible-description: root.subtitle;
     accessible-action-default => { root.clicked(); }
+    // the hover, with the card's corners on the first and last row (the CPU
+    // renderer clips only to rectangles)
     Rectangle {
-        x: 18px;
-        y: 18px;
-        width: 48px;
-        height: 48px;
-        border-radius: 14px;
-        background: Skin.accent;
-        Image {
-            source: root.icon;
-            width: 24px;
-            height: 24px;
-            colorize: #ffffff;
-        }
+        border-top-left-radius: root.first ? 15px : 0;
+        border-top-right-radius: root.first ? 15px : 0;
+        border-bottom-left-radius: root.last ? 15px : 0;
+        border-bottom-right-radius: root.last ? 15px : 0;
+        background: touch.has-hover ? Skin.surface-hover : Skin.surface-hover.transparentize(1);
+        animate background { duration: 120ms; }
     }
-    VerticalLayout {
-        padding: 18px;
-        spacing: 5px;
-        alignment: end;
-        Text {
-            text: root.title;
-            color: Skin.text-main;
-            font-size: 18px;
-            font-weight: 700;
-        }
-        Text {
-            text: root.subtitle;
-            color: Skin.text-muted;
-            font-size: 14px;
-            wrap: word-wrap;
-        }
-        Text {
-            text: root.hotkey;
-            color: Skin.accent;
-            font-size: 13px;
-            font-family: "monospace";
-        }
+    if !root.first : Rectangle {
+        y: 0;
+        height: 1px;
+        background: Skin.border;
     }
-    touch := TouchArea { clicked => { root.clicked(); } }
-}
-
-// A recent result on Home: the last color, the last text.
-component RecentCard inherits Rectangle {
-    in property <string> label;
-    in property <string> title;
-    in property <string> detail;
-    in property <color> swatch: transparent;
-    // an icon on a tile instead of a swatch (the ruler's)
-    in property <image> icon;
-    in property <color> icon-color;
-    callback clicked;
-    height: 76px;
-    border-radius: 16px;
-    background: touch.has-hover ? Skin.surface-hover : Skin.surface;
-    border-width: 1px;
-    border-color: Skin.border;
-    animate background { duration: 120ms; }
-    accessible-role: button;
-    accessible-label: root.label + ": " + root.title;
-    accessible-action-default => { root.clicked(); }
     HorizontalLayout {
-        padding: 14px;
-        spacing: 12px;
-        if root.swatch.alpha > 0 : Rectangle {
-            width: 48px;
-            border-radius: 12px;
-            background: root.swatch;
-            border-width: 1px;
-            border-color: Skin.border;
-        }
-        if root.icon.width > 0 : Rectangle {
-            width: 48px;
-            border-radius: 12px;
-            background: Skin.surface-hover;
-            Image {
-                source: root.icon;
-                width: 26px;
-                height: 26px;
-                colorize: root.icon-color;
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 16px;
+        alignment: stretch;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 48px;
+                height: 48px;
+                border-radius: 13px;
+                background: Skin.accent.transparentize(0.86);
+                border-width: 1px;
+                border-color: Skin.accent.transparentize(0.55);
+                Image {
+                    source: root.icon;
+                    width: 24px;
+                    height: 24px;
+                    colorize: Skin.pick(#5cb8f5, #1a7fc1);
+                }
             }
         }
         VerticalLayout {
             alignment: center;
-            spacing: 2px;
+            spacing: 3px;
             horizontal-stretch: 1;
-            Text {
-                text: root.label;
-                color: Skin.text-muted;
-                font-size: 11px;
-                font-weight: 700;
-                letter-spacing: 0.8px;
-            }
             Text {
                 text: root.title;
                 color: Skin.text-main;
-                font-size: 15px;
-                font-weight: 600;
+                font-size: 18px;
+                font-weight: 700;
                 overflow: elide;
             }
-            if root.detail != "" : Text {
-                text: root.detail;
+            Text {
+                text: root.subtitle;
                 color: Skin.text-muted;
-                font-size: 13px;
+                font-size: 14px;
                 overflow: elide;
             }
+        }
+        VerticalLayout {
+            alignment: center;
+            Keycaps { hotkey: root.hotkey; }
         }
     }
     touch := TouchArea { clicked => { root.clicked(); } }
 }
 
-// Home: the toys, and what you did last with them.
+// A Micro-toy on Home (v0.8.0): one line, its name, what it does, its hotkey
+// and its switch. Off, all but the switch is grayed out.
+component MicroRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> hotkey;
+    in property <bool> on;
+    in property <bool> first;
+    callback toggled(bool);
+    height: 60px;
+    if !root.first : Rectangle {
+        y: 0;
+        height: 1px;
+        background: Skin.border;
+    }
+    HorizontalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        spacing: 16px;
+        HorizontalLayout {
+            spacing: 10px;
+            horizontal-stretch: 1;
+            opacity: root.on ? 1 : 0.4;
+            animate opacity { duration: 120ms; }
+            Text {
+                text: root.title;
+                color: Skin.text-main;
+                font-size: 16px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            // shown when it fits (a wider window): a few letters and "…" say nothing
+            Text {
+                text: root.subtitle;
+                color: Skin.text-muted;
+                font-size: 14px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+                opacity: self.width >= min(self.preferred-width, 120px) ? 1 : 0;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            opacity: root.on ? 1 : 0.4;
+            animate opacity { duration: 120ms; }
+            Keycaps { hotkey: root.hotkey; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Switch {
+                label: root.title;
+                checked: root.on;
+                toggled(on) => { root.toggled(on); }
+            }
+        }
+    }
+}
+
+// Home (v0.8.0): the toys, one row each in one card, and the Micro-toys,
+// a switch each (they have no page of their own). Recent is gone: each toy
+// keeps its own history.
 export component HomePage inherits Rectangle {
     in property <string> picker-hotkey;
     in property <string> text-hotkey;
     in property <string> ruler-hotkey;
+    in property <string> screenshot-hotkey;
     in property <image> ruler-icon: @image-url("ruler.svg");
-    in property <color> ruler-line;
-    in property <color> last-color;
-    // "#2D5C76", and its name
-    in property <string> last-color-value;
-    in property <string> last-color-name;
-    // the latest extracted text on one line ("" when there is none)
-    in property <string> last-text;
-    in property <string> last-text-detail;
-    // the latest measurement ("" when there is none) and "Spacing · Today 2:20 PM"
-    in property <string> last-measure;
-    in property <string> last-measure-detail;
+    in property <bool> micro-screenshot;
     callback open-toy(int);
-    // each toy card: half the row (the page's padding is 20 px each side, 14 px between)
-    property <length> card-width: (home-scroll.visible-width - 2 * 20px - 14px) / 2;
+    callback micro-toggled(bool);
     home-scroll := ScrollView {
-        // its width is the window's, not its content's (as in Settings), so
-        // the toy cards can each take exactly half of it
+        // its width is the window's, not its content's (as in Settings)
         content-width: self.visible-width;
         content-height: home-list.preferred-height;
         home-list := VerticalLayout {
@@ -359,76 +363,65 @@ export component HomePage inherits Rectangle {
             spacing: 14px;
             alignment: start;
             Text {
-                text: "YOUR TOYS";
+                text: "TOYS-BOX";
                 color: Skin.text-muted;
                 font-size: 12px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }
-            HorizontalLayout {
-                spacing: 14px;
-                ToyCard {
-                    icon: @image-url("pick.svg");
-                    width: root.card-width;
-                    title: "Color Picker";
-                    subtitle: "Pick, name and copy any pixel";
-                    hotkey: root.picker-hotkey;
-                    clicked => { root.open-toy(1); }
+            Rectangle {
+                border-radius: 16px;
+                background: Skin.surface;
+                border-width: 1px;
+                border-color: Skin.border;
+                VerticalLayout {
+                    ToyRow {
+                        first: true;
+                        icon: @image-url("pick.svg");
+                        title: "Color Picker";
+                        subtitle: "Pick, name and copy any pixel";
+                        hotkey: root.picker-hotkey;
+                        clicked => { root.open-toy(1); }
+                    }
+                    ToyRow {
+                        icon: @image-url("text.svg");
+                        title: "Text Extractor";
+                        subtitle: "Copy text from anywhere on screen";
+                        hotkey: root.text-hotkey;
+                        clicked => { root.open-toy(2); }
+                    }
+                    ToyRow {
+                        icon: root.ruler-icon;
+                        title: "Screen Ruler";
+                        subtitle: "Measure anything on screen";
+                        hotkey: root.ruler-hotkey;
+                        last: true;
+                        clicked => { root.open-toy(3); }
+                    }
                 }
-                ToyCard {
-                    icon: @image-url("text.svg");
-                    width: root.card-width;
-                    title: "Text Extractor";
-                    subtitle: "Copy text from anywhere on screen";
-                    hotkey: root.text-hotkey;
-                    clicked => { root.open-toy(2); }
-                }
-            }
-            HorizontalLayout {
-                spacing: 14px;
-                ToyCard {
-                    icon: root.ruler-icon;
-                    width: root.card-width;
-                    title: "Screen Ruler";
-                    subtitle: "Measure anything on screen";
-                    hotkey: root.ruler-hotkey;
-                    clicked => { root.open-toy(3); }
-                }
-                Rectangle { }
             }
             Text {
-                text: "RECENT";
+                text: "MICRO-TOYS";
                 color: Skin.text-muted;
                 font-size: 12px;
                 font-weight: 700;
                 letter-spacing: 1px;
             }
-            if root.last-measure != "" : RecentCard {
-                label: "RULER";
-                title: root.last-measure;
-                detail: root.last-measure-detail;
-                icon: @image-url("spacing.svg");
-                icon-color: root.ruler-line;
-                clicked => { root.open-toy(3); }
-            }
-            RecentCard {
-                label: "COLOR";
-                title: root.last-color-value;
-                detail: root.last-color-name;
-                swatch: root.last-color;
-                clicked => { root.open-toy(1); }
-            }
-            RecentCard {
-                label: "TEXT";
-                title: root.last-text != "" ? root.last-text : "Nothing extracted yet";
-                detail: root.last-text != "" ? root.last-text-detail : "Press " + root.text-hotkey + " and drag over any text";
-                clicked => { root.open-toy(2); }
-            }
-            if root.last-measure == "" : RecentCard {
-                label: "RULER";
-                title: "Nothing measured yet";
-                detail: "Press " + root.ruler-hotkey + " and point at anything";
-                clicked => { root.open-toy(3); }
+            Rectangle {
+                border-radius: 16px;
+                background: Skin.surface;
+                border-width: 1px;
+                border-color: Skin.border;
+                VerticalLayout {
+                    MicroRow {
+                        first: true;
+                        title: "Screenshot to clipboard";
+                        subtitle: "Copy an area to the clipboard";
+                        hotkey: root.screenshot-hotkey;
+                        on: root.micro-screenshot;
+                        toggled(on) => { root.micro-toggled(on); }
+                    }
+                }
             }
         }
     }

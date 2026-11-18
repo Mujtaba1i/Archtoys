@@ -1,4 +1,5 @@
-//! The global hotkeys: one per toy (pick a color, extract text).
+//! The global hotkeys: one per toy (pick a color, extract text, measure) and
+//! per Micro-toy (screenshot to clipboard).
 //!
 //! Two ways to listen for it:
 //! * **Portal** (Wayland): the desktop's GlobalShortcuts portal. Works on
@@ -20,6 +21,7 @@ use std::thread;
 pub const DEFAULT_HOTKEY_TEXT: &str = "Ctrl+Super+C";
 pub const DEFAULT_TEXT_HOTKEY_TEXT: &str = "Ctrl+Super+T";
 pub const DEFAULT_RULER_HOTKEY_TEXT: &str = "Ctrl+Super+M";
+pub const DEFAULT_SCREENSHOT_HOTKEY_TEXT: &str = "Ctrl+Super+S";
 
 /// One global shortcut: its id (for the desktop), what the desktop shows for
 /// it, the keys wanted, the keys used if those can't be, and what it does.
@@ -30,6 +32,11 @@ pub struct Shortcut {
     pub text: String,
     pub default: &'static str,
     pub trigger: Trigger,
+    /// A Micro-toy's (v0.8.0): switched on and off, and off it holds no keys
+    /// (on Wayland it has its own portal session, closed when it's switched off).
+    pub micro: bool,
+    /// Switched on (a toy's always is).
+    pub active: bool,
 }
 
 /// Called (on a background thread) whenever the hotkey is pressed.
@@ -43,6 +50,9 @@ pub enum HotkeyStatus {
     SystemManaged(Vec<String>),
     /// Archtoys owns it (X11 hotkey). Change it in Archtoys.
     AppManaged,
+    /// The desktop's description of Micro-toy shortcut `index` (its own
+    /// portal session, bound when it's switched on).
+    Micro(usize, String),
 }
 
 /// Called (on a background thread) whenever the status changes.
@@ -68,9 +78,8 @@ pub fn parse_hotkey_text(input: &str) -> Result<(HotKey, String), String> {
         return Err("hotkey cannot be empty".to_string());
     }
 
-    let parsed = std::panic::catch_unwind(|| HotKey::from_str(&normalized))
-        .map_err(|_| format!("invalid hotkey `{normalized}`"))?
-        .map_err(|err| format!("invalid hotkey `{normalized}`: {err}"))?;
+    // global-hotkey's parser returns errors, never panics (the bug hunt's test checks it)
+    let parsed = HotKey::from_str(&normalized).map_err(|err| format!("invalid hotkey `{normalized}`: {err}"))?;
     Ok((parsed, normalized))
 }
 
@@ -202,6 +211,8 @@ struct X11Key {
     hotkey: HotKey,
     text: String,
     trigger: Trigger,
+    /// registered (a Micro-toy that's off isn't)
+    active: bool,
 }
 
 enum Backend {
@@ -271,12 +282,12 @@ impl HotkeyService {
         // 50 ms, and each separate register waits for it (a second hotkey made
         // the window appear ~50 ms later).
         let wanted: Vec<(HotKey, String)> = shortcuts.iter().map(|s| parse_or_default(&s.text, s.default)).collect();
-        let all: Vec<HotKey> = wanted.iter().map(|(hotkey, _)| *hotkey).collect();
+        let all: Vec<HotKey> = wanted.iter().zip(&shortcuts).filter(|(_, s)| s.active).map(|((hotkey, _), _)| *hotkey).collect();
         if manager.register_all(&all).is_ok() {
             let keys: Vec<X11Key> = shortcuts
                 .into_iter()
                 .zip(wanted)
-                .map(|(shortcut, (hotkey, text))| X11Key { hotkey, text, trigger: shortcut.trigger })
+                .map(|(shortcut, (hotkey, text))| X11Key { hotkey, text, trigger: shortcut.trigger, active: shortcut.active })
                 .collect();
             return Self::listen_x11(manager, keys);
         }
@@ -284,6 +295,10 @@ impl HotkeyService {
         let mut keys = Vec::new();
         for shortcut in shortcuts {
             let (hotkey, text) = parse_or_default(&shortcut.text, shortcut.default);
+            if !shortcut.active {
+                keys.push(X11Key { hotkey, text, trigger: shortcut.trigger, active: false });
+                continue;
+            }
             let (hotkey, text) = match manager.register(hotkey) {
                 Ok(()) => (hotkey, text),
                 Err(err) => {
@@ -295,7 +310,7 @@ impl HotkeyService {
                     fallback
                 }
             };
-            keys.push(X11Key { hotkey, text, trigger: shortcut.trigger });
+            keys.push(X11Key { hotkey, text, trigger: shortcut.trigger, active: true });
         }
         Self::listen_x11(manager, keys)
     }
@@ -333,7 +348,9 @@ impl HotkeyService {
                 let Some(current) = keys.get_mut(index) else {
                     return Err("no such hotkey".into());
                 };
-                if current.hotkey.id() == new_hotkey.id() {
+                if current.hotkey.id() == new_hotkey.id() || !current.active {
+                    // the same keys, or a Micro-toy that's off: registered when it's switched on
+                    current.hotkey = new_hotkey;
                     current.text = new_text.clone();
                     return Ok(new_text);
                 }
@@ -356,6 +373,27 @@ impl HotkeyService {
 }
 
 impl HotkeyService {
+    /// Turns Micro-toy shortcut `index` on or off. Off, its keys are let go
+    /// (X11) or its portal session is closed, so other apps can use them.
+    pub fn set_active(&self, index: usize, on: bool) {
+        match &self.backend {
+            Some(Backend::X11 { manager, keys }) => {
+                if let Some(key) = keys.lock().unwrap().get_mut(index) {
+                    if key.active == on {
+                        return;
+                    }
+                    let result = if on { manager.register(key.hotkey) } else { manager.unregister(key.hotkey) };
+                    match result {
+                        Ok(()) => key.active = on,
+                        Err(err) => eprintln!("hotkey: couldn't turn `{}` {}: {err}", key.text, if on { "on" } else { "off" }),
+                    }
+                }
+            }
+            Some(Backend::Portal(shortcut)) => shortcut.set_active(index, on),
+            None => {}
+        }
+    }
+
     /// Opens the desktop's shortcut settings (only meaningful when the
     /// desktop manages the shortcuts).
     pub fn open_system_settings(&self) {
@@ -397,7 +435,29 @@ mod tests {
     fn default_hotkey_parses() {
         assert!(parse_hotkey_text(DEFAULT_HOTKEY_TEXT).is_ok());
         assert!(parse_hotkey_text(DEFAULT_TEXT_HOTKEY_TEXT).is_ok());
+        assert!(parse_hotkey_text(DEFAULT_SCREENSHOT_HOTKEY_TEXT).is_ok());
+        let ids: Vec<u32> = [DEFAULT_HOTKEY_TEXT, DEFAULT_TEXT_HOTKEY_TEXT, DEFAULT_RULER_HOTKEY_TEXT, DEFAULT_SCREENSHOT_HOTKEY_TEXT]
+            .iter()
+            .map(|t| parse_hotkey_text(t).unwrap().0.id())
+            .collect();
+        assert!(ids.iter().enumerate().all(|(i, id)| !ids[i + 1..].contains(id)), "two toys share a default hotkey");
         assert_ne!(parse_hotkey_text(DEFAULT_HOTKEY_TEXT).unwrap().0.id(), parse_hotkey_text(DEFAULT_TEXT_HOTKEY_TEXT).unwrap().0.id());
         assert_eq!(normalize_hotkey_text(" ctrl + win + c "), "ctrl+Super+c");
+    }
+}
+
+#[cfg(test)]
+mod hunt_tests {
+    use super::*;
+
+    #[test]
+    fn hotkey_text_survives_hostile_input() {
+        for text in crate::hunt::texts() {
+            let _ = parse_hotkey_text(&text);
+            let _ = to_portal_trigger(&text);
+            for mods in 0..16u8 {
+                let _ = build_hotkey_from_capture(&text, mods & 1 != 0, mods & 2 != 0, mods & 4 != 0, mods & 8 != 0);
+            }
+        }
     }
 }

@@ -228,6 +228,11 @@ export component FreezePickerWindow inherits Window {
     // reading the text (Tesseract is running)
     in property <bool> busy: false;
     in property <string> busy-text: "Reading…";
+    // the hint before a drag (the Screenshot to clipboard Micro-toy has its own)
+    in property <string> drag-hint: "Drag over the text · Shift moves the box · Esc cancels";
+    // the Screenshot to clipboard Micro-toy: letting go copies the area at
+    // once, nothing else (no moving the box with Shift or the arrows, no Enter)
+    in property <bool> quick-copy: false;
     // Find font (v0.7.5): offered when the reading is sure enough, else why not
     in property <bool> font-ok: true;
     in property <string> font-why;
@@ -359,7 +364,7 @@ export component FreezePickerWindow inherits Window {
             }
             // Shift held while dragging moves the rectangle instead of resizing it
             if root.drags && root.selecting && event.kind == PointerEventKind.move {
-                if event.modifiers.shift {
+                if event.modifiers.shift && !root.quick-copy {
                     root.sel-x += self.mouse-x - self.last-x;
                     root.sel-y += self.mouse-y - self.last-y;
                     self.anchor-x += self.mouse-x - self.last-x;
@@ -447,6 +452,9 @@ export component FreezePickerWindow inherits Window {
                 if event.text == "+" || event.text == "=" { root.ruler-tolerance-step(1); return accept; }
                 if event.text == "-" { root.ruler-tolerance-step(-1); return accept; }
                 // the arrows: below (the box in Bounds, else the point)
+            }
+            if root.quick-copy {
+                return reject;
             }
             if root.text-mode {
                 if event.text == Key.LeftArrow {
@@ -646,7 +654,7 @@ export component FreezePickerWindow inherits Window {
             border-radius: 21px;
             background: Skin.pick(#111216d9, #ffffffe6);
             hint := Text {
-                text: "Drag over the text · Shift moves the box · Esc cancels";
+                text: root.drag-hint;
                 color: Skin.text-main;
                 font-size: 15px;
                 horizontal-alignment: center;

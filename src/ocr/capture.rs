@@ -2,6 +2,10 @@
 //! where the user drags a rectangle over text. Reads the selection on a
 //! background thread, outlines the words, and the toolbar (Copy, Copy as one
 //! line, Open) or "Copy and close" ends it.
+//!
+//! The Screenshot to clipboard Micro-toy (v0.8.0) is the same capture in
+//! screenshot mode: the dragged area is copied as a picture, never saved,
+//! and that ends it.
 
 use crate::freeze::{self, Session, Toy};
 use crate::picker::PICKER_ACTIVE;
@@ -10,7 +14,19 @@ use crate::{AppWindow, FreezePickerWindow, TextBox};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// The Screenshot to clipboard Micro-toy is on (its switch on Home and in
+/// Settings; Micro-toys are off until switched on).
+static SCREENSHOT_ON: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn set_screenshot_on(on: bool) {
+    SCREENSHOT_ON.store(on, Ordering::SeqCst);
+}
+
+pub(crate) fn screenshot_on() -> bool {
+    SCREENSHOT_ON.load(Ordering::SeqCst)
+}
 
 /// How to put the main window back after a text capture: it is hidden (or
 /// made see-through on KDE) during the capture, so the text behind it can be read.
@@ -25,13 +41,27 @@ pub(crate) struct TextRestore {
 /// One screenshot, shown frozen on every monitor, where the user drags a
 /// rectangle over text. UI thread only.
 pub(crate) fn start(ui: &AppWindow) {
+    start_mode(ui, false);
+}
+
+/// The Screenshot to clipboard Micro-toy: the same frozen screen, and the
+/// dragged area goes to the clipboard as a picture. UI thread only.
+pub(crate) fn start_screenshot(ui: &AppWindow) {
+    if screenshot_on() {
+        start_mode(ui, true);
+    } else {
+        eprintln!("screenshot: Screenshot to clipboard is off (switch it on on Archtoys' Home)");
+    }
+}
+
+fn start_mode(ui: &AppWindow, screenshot: bool) {
     if PICKER_ACTIVE.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return; // a pick or a capture is already running
     }
-    crate::diagnostics::set_picker("text capture");
+    crate::diagnostics::set_picker(if screenshot { "screenshot" } else { "text capture" });
     let visible = ui.window().is_visible() && !ui.window().is_minimized();
-    // "Stay minimized": out of the way now, and nothing to bring back afterwards
-    let minimize = visible && ui.get_setting_text_stay_minimized();
+    // "Stay minimized" (Text Extractor's): out of the way now, and nothing to bring back afterwards
+    let minimize = visible && !screenshot && ui.get_setting_text_stay_minimized();
     if minimize {
         ui.window().set_minimized(true);
     }
@@ -54,11 +84,12 @@ pub(crate) fn start(ui: &AppWindow) {
         }
         let shot = crate::picker::take_screenshot(wayland);
         let _ = slint::invoke_from_event_loop(move || match shot {
-            Ok(shot) => show(ui_weak, shot, restore),
+            Ok(shot) => show(ui_weak, shot, restore, screenshot),
             Err(err) => {
                 eprintln!("text capture: {err}");
                 if let Some(ui) = ui_weak.upgrade() {
-                    crate::ui_state::show_message(&ui, "Text Extractor couldn't take a screenshot");
+                    let who = if screenshot { "Screenshot to clipboard" } else { "Text Extractor" };
+                    crate::ui_state::show_message(&ui, &format!("{who} couldn't take a screenshot"));
                 }
                 end(ui_weak, restore);
             }
@@ -105,16 +136,17 @@ thread_local! {
 }
 
 /// Shows the frozen screen for selecting text. UI thread only.
-fn show(ui_weak: slint::Weak<AppWindow>, shot: freeze::Screenshot, restore: TextRestore) {
+fn show(ui_weak: slint::Weak<AppWindow>, shot: freeze::Screenshot, restore: TextRestore, screenshot: bool) {
     let weak = ui_weak.clone();
     let fallback = Box::new(move || {
         if let Some(ui) = weak.upgrade() {
-            crate::ui_state::show_message(&ui, "Text Extractor couldn't line the screenshot up with your screens");
+            let who = if screenshot { "Screenshot to clipboard" } else { "Text Extractor" };
+            crate::ui_state::show_message(&ui, &format!("{who} couldn't line the screenshot up with your screens"));
         }
     });
     let state = Rc::new(State::default());
     CURRENT.with(|c| *c.borrow_mut() = Some(state.clone()));
-    let toy = Rc::new(TextCapture { restore, state });
+    let toy = Rc::new(TextCapture { restore, state, screenshot });
     freeze::show(ui_weak, toy, shot, fallback);
 }
 
@@ -138,6 +170,29 @@ struct State {
 struct TextCapture {
     restore: TextRestore,
     state: Rc<State>,
+    /// the Screenshot to clipboard Micro-toy, not Text Extractor
+    screenshot: bool,
+}
+
+/// A selection's pixels (RGBA), their size, and where they start in the screenshot.
+struct Crop {
+    rgba: Vec<u8>,
+    w: u32,
+    h: u32,
+    origin: (i32, i32),
+}
+
+/// The pixels of window `i`'s selection.
+fn crop(s: &Session, i: usize, x: f32, y: f32, w: f32, h: f32) -> Option<Crop> {
+    let ((x0, y0), (x1, y1)) = s.pixel(i, x, y).zip(s.pixel(i, x + w, y + h))?;
+    let (cw, ch) = ((x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32);
+    let mut rgba = vec![0u8; (cw * ch * 4) as usize];
+    for row in 0..ch {
+        let src = (((y0 as u32 + row) * s.shot.width + x0 as u32) * 4) as usize;
+        let dst = (row * cw * 4) as usize;
+        rgba[dst..dst + (cw * 4) as usize].copy_from_slice(&s.shot.rgba[src..src + (cw * 4) as usize]);
+    }
+    Some(Crop { rgba, w: cw, h: ch, origin: (x0, y0) })
 }
 
 impl State {
@@ -228,6 +283,11 @@ impl State {
 impl Toy for TextCapture {
     fn window_created(&self, window: &FreezePickerWindow, _i: usize) {
         window.set_text_mode(true);
+        if self.screenshot {
+            // letting go copies it: no moving the box, no toolbar
+            window.set_quick_copy(true);
+            window.set_drag_hint("Drag over what to copy · Esc cancels".into());
+        }
     }
 
     /// A new selection started (or the old one moved): forget what was read.
@@ -243,14 +303,12 @@ impl Toy for TextCapture {
 
     /// The selection is done: read the text in it (on a background thread).
     fn region_done(&self, s: &Rc<Session>, i: usize, x: f32, y: f32, w: f32, h: f32) {
-        let Some(((x0, y0), (x1, y1))) = s.pixel(i, x, y).zip(s.pixel(i, x + w, y + h)) else { return };
-        let (cw, ch) = ((x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32);
-        // the selected pixels, as RGBA
-        let mut crop = vec![0u8; (cw * ch * 4) as usize];
-        for row in 0..ch {
-            let src = (((y0 as u32 + row) * s.shot.width + x0 as u32) * 4) as usize;
-            let dst = (row * cw * 4) as usize;
-            crop[dst..dst + (cw * 4) as usize].copy_from_slice(&s.shot.rgba[src..src + (cw * 4) as usize]);
+        let Some(Crop { rgba: crop, w: cw, h: ch, origin: (x0, y0) }) = crop(s, i, x, y, w, h) else { return };
+        if self.screenshot {
+            // a picture on the clipboard, never saved, and that's all
+            crate::ui_state::copy_image_async(crop, cw, ch);
+            self.state.finish(s, self.restore);
+            return;
         }
         let crop = std::sync::Arc::new(crop);
         let generation = {

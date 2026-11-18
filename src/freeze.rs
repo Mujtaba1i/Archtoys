@@ -819,3 +819,19 @@ mod tests {
         assert_eq!(layout.screens[1].step, 1);
     }
 }
+
+#[cfg(test)]
+mod hunt_tests {
+    #[test]
+    fn a_damaged_screenshot_is_an_error_not_a_crash() {
+        let dir = std::env::temp_dir().join(format!("archtoys-hunt-shot-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (i, data) in crate::hunt::files().iter().enumerate() {
+            let path = dir.join(format!("{i}.png"));
+            std::fs::write(&path, data).unwrap();
+            assert!(super::load_png(&path).is_err(), "file {i} loaded");
+        }
+        assert!(super::load_png(&dir.join("missing.png")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

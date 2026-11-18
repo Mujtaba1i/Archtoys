@@ -426,6 +426,34 @@ export component Switch inherits Rectangle {
     TouchArea { clicked => { root.toggled(!root.checked); } }
 }
 
+// Splits a hotkey ("Ctrl+Super+C") into its keys for `Keycaps` (Rust does
+// it in main.rs: Slint can't split text).
+export global Keys {
+    pure callback split(string) -> [string];
+}
+
+// A hotkey as gray keycaps, one per key (Home, v0.8.0). "" shows "Not set".
+export component Keycaps inherits HorizontalLayout {
+    in property <string> hotkey;
+    spacing: 5px;
+    alignment: end;
+    for key in (root.hotkey == "" ? ["Not set"] : Keys.split(root.hotkey)) : Rectangle {
+        width: key-text.preferred-width + 16px;
+        height: 24px;
+        border-radius: 6px;
+        background: Skin.pick(#262931, #eceef2);
+        border-width: 1px;
+        border-color: Skin.pick(#383c46, #c9ced8);
+        key-text := Text {
+            text: key;
+            color: Skin.icon-tint;
+            font-size: 12px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+}
+
 // A row of choices, one selected (Theme, Color card style).
 export component Segmented inherits Rectangle {
     in property <[string]> options;

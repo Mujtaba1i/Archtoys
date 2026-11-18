@@ -705,3 +705,16 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod hunt_tests {
+    #[test]
+    fn search_survives_hostile_text() {
+        for text in crate::hunt::texts() {
+            let results = super::search(&text);
+            for &hit in results.hits.iter().take(50) {
+                let _ = super::entry(hit);
+            }
+        }
+    }
+}

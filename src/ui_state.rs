@@ -528,6 +528,20 @@ pub fn copy_text_async(text: String) {
     });
 }
 
+/// Puts a picture (RGBA pixels) on the clipboard; like the text, a thread
+/// keeps offering it until something else is copied.
+pub fn copy_image_async(rgba: Vec<u8>, width: u32, height: u32) {
+    thread::spawn(move || match Clipboard::new() {
+        Ok(mut clipboard) => {
+            let image = arboard::ImageData { width: width as usize, height: height as usize, bytes: rgba.into() };
+            if let Err(err) = clipboard.set().wait().image(image) {
+                eprintln!("Clipboard error: {err}");
+            }
+        }
+        Err(err) => eprintln!("Clipboard error: {err}"),
+    });
+}
+
 /// A color was picked: add it to history, show it, copy it if enabled, save.
 pub fn apply_selected_color(ui: &AppWindow, history_store: &HistoryStore, rgb: Rgb) {
     push_history(history_store, rgb);

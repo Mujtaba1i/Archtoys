@@ -19,8 +19,9 @@ cpu = ["slint/renderer-software"]
 
 [dependencies]
 slint = { version = "1.15.0", default-features = false, features = ["backend-winit", "compat-1-2", "unstable-winit-030"] }
-# text only: copying images needs extra crates the app never uses
-arboard = { version = "3.2", default-features = false }
+# text, and pictures for the Screenshot to clipboard Micro-toy (v0.8.0): on
+# Linux image-data only adds the image crate, already built in for Slint
+arboard = { version = "3.2", default-features = false, features = ["image-data"] }
 global-hotkey = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -41,9 +42,12 @@ whatlang = "0.18"
 strip = true
 # One code unit: the optimizer sees all of it, 12% smaller (v0.7.0: 27.2 MB ->
 # 24.1 MB) for about 5% more build time. Thin LTO made it bigger, full LTO
-# saves less and doubles the build time; panic = "abort" would save 2 MB more,
-# but a panic in a background thread would then close the whole app.
+# saves less and doubles the build time.
 codegen-units = 1
+# A panic ends the app instead of leaving it half working (v0.8.0): smaller
+# and slightly faster. The bug hunt's "survives" tests (src/hunt.rs) feed
+# every input from outside hostile data, so nothing reachable panics.
+panic = "abort"
 
 
 # How the .deb is built (cargo-deb). Used by the optional "Build + test the .deb"

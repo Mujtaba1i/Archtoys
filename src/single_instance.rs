@@ -62,7 +62,8 @@ fn acquire_at(path: &Path) -> Lock {
 }
 
 /// Asks the running copy to show itself (`"Show"`), start a pick (`"Pick"`)
-/// start a text capture (`"Extract"`) or open the Screen Ruler (`"Measure"`).
+/// start a text capture (`"Extract"`), open the Screen Ruler (`"Measure"`) or
+/// take a Screenshot to clipboard (`"Screenshot"`, when that Micro-toy is on).
 pub fn send(method: &str) -> Result<(), String> {
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     // Right after its own start, the first copy holds the lock but may not
@@ -104,6 +105,7 @@ struct Remote {
     pick: Trigger,
     extract: Trigger,
     measure: Trigger,
+    screenshot: Trigger,
 }
 
 #[zbus::interface(name = "io.github.Mujtaba1i.Archtoys")]
@@ -124,6 +126,10 @@ impl Remote {
         (self.measure)();
     }
 
+    fn screenshot(&self) {
+        (self.screenshot)();
+    }
+
     /// The KWin script (kwin.rs): where the main window was, "x,y,w,h".
     fn save_geometry(&self, geometry: &str) {
         if let Some(g) = crate::kwin::parse_geometry(geometry) {
@@ -133,10 +139,10 @@ impl Remote {
 }
 
 /// Starts answering later launches. Keep the connection alive.
-pub fn serve(show: Trigger, pick: Trigger, extract: Trigger, measure: Trigger) -> Option<Connection> {
+pub fn serve(show: Trigger, pick: Trigger, extract: Trigger, measure: Trigger, screenshot: Trigger) -> Option<Connection> {
     let result = zbus::blocking::connection::Builder::session()
         .and_then(|builder| builder.name(BUS_NAME))
-        .and_then(|builder| builder.serve_at(OBJECT_PATH, Remote { show, pick, extract, measure }))
+        .and_then(|builder| builder.serve_at(OBJECT_PATH, Remote { show, pick, extract, measure, screenshot }))
         .and_then(|builder| builder.build());
     match result {
         Ok(conn) => Some(conn),

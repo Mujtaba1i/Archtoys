@@ -5,6 +5,10 @@
 //! Settings → Keyboard → Shortcuts). We show what the desktop reports and
 //! update when it changes. If the portal is missing or the user declines,
 //! we switch to the X11 hotkey, which Archtoys manages itself.
+//!
+//! The toys' shortcuts share one session. Each Micro-toy that's switched on
+//! has its own (v0.8.0): switched off, its session is closed and the desktop
+//! lets the keys go (a bound session can't be changed).
 
 use super::{to_portal_trigger, HotkeyService, HotkeyStatus, Shortcut, StatusCallback};
 use crate::portal::{self, Outcome};
@@ -22,7 +26,12 @@ type ShortcutList = Vec<(String, HashMap<String, OwnedValue>)>;
 enum Command {
     OpenSettings,
     Refresh,
+    /// a Micro-toy switched on or off
+    Micro(usize, bool),
 }
+
+/// The Micro-toys' own sessions: shortcut index → session path.
+type MicroSessions = Arc<Mutex<HashMap<usize, String>>>;
 
 pub struct PortalShortcut {
     commands: Mutex<Sender<Command>>,
@@ -58,6 +67,14 @@ impl PortalShortcut {
             return service.change(index, text);
         }
         Err("this shortcut is managed by your desktop. Change it in its settings".into())
+    }
+
+    /// A Micro-toy switched on (its own session is bound) or off (closed).
+    pub fn set_active(&self, index: usize, on: bool) {
+        if let Some(service) = self.fallback.lock().unwrap().as_ref() {
+            return service.set_active(index, on);
+        }
+        let _ = self.commands.lock().unwrap().send(Command::Micro(index, on));
     }
 
     pub fn open_settings(&self) {
@@ -131,6 +148,33 @@ fn bind(conn: &Connection, shortcuts: &[Shortcut]) -> Result<(String, Vec<String
     Ok((session, descriptions))
 }
 
+/// Binds Micro-toy `index` in a session of its own and reports its keys.
+fn bind_micro(conn: &Connection, shortcuts: &[Shortcut], index: usize, sessions: &MicroSessions, on_status: &StatusCallback) {
+    if sessions.lock().unwrap().contains_key(&index) {
+        return;
+    }
+    let Some(shortcut) = shortcuts.get(index) else { return };
+    match bind(conn, std::slice::from_ref(shortcut)) {
+        Ok((session, descriptions)) => {
+            sessions.lock().unwrap().insert(index, session);
+            on_status(HotkeyStatus::Micro(index, descriptions.into_iter().next().unwrap_or_default()));
+        }
+        Err(err) => eprintln!("hotkey: {} couldn't be bound: {err}", shortcut.id),
+    }
+}
+
+/// Closes Micro-toy `index`'s session: the desktop lets its keys go.
+fn close_micro(conn: &Connection, index: usize, sessions: &MicroSessions) {
+    let Some(session) = sessions.lock().unwrap().remove(&index) else { return };
+    let closed = OwnedObjectPath::try_from(session)
+        .map_err(|e| e.to_string())
+        .and_then(|path| Proxy::new(conn, portal::DESTINATION, path, "org.freedesktop.portal.Session").map_err(|e| e.to_string()))
+        .and_then(|proxy| proxy.call_method("Close", &()).map(|_| ()).map_err(|e| e.to_string()));
+    if let Err(err) = closed {
+        eprintln!("hotkey: couldn't close a Micro-toy's session: {err}");
+    }
+}
+
 fn list_shortcuts(conn: &Connection, session: &str, ids: &[&str]) -> Result<Vec<String>, String> {
     let session_path = OwnedObjectPath::try_from(session.to_string()).map_err(|err| format!("bad session path: {err}"))?;
     let token = portal::new_token("archtoys_list");
@@ -162,7 +206,6 @@ pub(super) fn open_desktop_shortcut_settings() {
 }
 
 fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiver<Command>) -> Result<(), String> {
-    let ids: Vec<&'static str> = shortcuts.iter().map(|s| s.id).collect();
     let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
     portal::register_host_app(&conn, "archtoys");
 
@@ -174,8 +217,15 @@ fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiv
     let activated = probe.receive_signal("Activated").map_err(|err| format!("GlobalShortcuts subscribe: {err}"))?;
     let changed = probe.receive_signal("ShortcutsChanged").map_err(|err| format!("GlobalShortcuts subscribe: {err}"))?;
 
-    let (session, descriptions) = bind(&conn, shortcuts)?;
+    // the toys together; each Micro-toy that's on in its own session
+    let toys: Vec<Shortcut> = shortcuts.iter().filter(|s| !s.micro).cloned().collect();
+    let ids: Vec<&'static str> = toys.iter().map(|s| s.id).collect();
+    let (session, descriptions) = bind(&conn, &toys)?;
     on_status(HotkeyStatus::SystemManaged(descriptions));
+    let micro_sessions: MicroSessions = Arc::new(Mutex::new(HashMap::new()));
+    for (index, _) in shortcuts.iter().enumerate().filter(|(_, s)| s.micro && s.active) {
+        bind_micro(&conn, shortcuts, index, &micro_sessions, &on_status);
+    }
 
     // The user changed the shortcut in the desktop's settings.
     {
@@ -199,9 +249,13 @@ fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiv
         let session = session.clone();
         let on_status = on_status.clone();
         let ids = ids.clone();
+        let shortcuts = shortcuts.to_vec();
+        let micro_sessions = micro_sessions.clone();
         thread::spawn(move || {
             while let Ok(command) = commands.recv() {
                 match command {
+                    Command::Micro(index, true) => bind_micro(&conn, &shortcuts, index, &micro_sessions, &on_status),
+                    Command::Micro(index, false) => close_micro(&conn, index, &micro_sessions),
                     Command::Refresh => match list_shortcuts(&conn, &session, &ids) {
                         Ok(descriptions) => on_status(HotkeyStatus::SystemManaged(descriptions)),
                         Err(err) => eprintln!("hotkey: refresh failed: {err}"),
@@ -230,7 +284,7 @@ fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiv
         else {
             continue;
         };
-        if path.as_str() != session {
+        if path.as_str() != session && !micro_sessions.lock().unwrap().values().any(|s| s == path.as_str()) {
             continue;
         }
         if let Some(shortcut) = shortcuts.iter().find(|s| s.id == shortcut_id) {

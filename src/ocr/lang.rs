@@ -4,15 +4,39 @@
 //! the system's languages are linked into it, and any other language is
 //! downloaded there the first time it is seen (Tesseract's `tessdata_fast`
 //! files, Apache-2.0, 1-4 MB each; the licence is saved next to them). No
-//! password is needed for that.
+//! password is needed for that. Every download is the newest file, checked
+//! against the hash GitHub gives for it before it's used (v0.8.0,
+//! `verify.rs`): a file that was changed, swapped or cut off is thrown away.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Where the language files come from.
-const TESSDATA_URL: &str = "https://github.com/tesseract-ocr/tessdata_fast/raw/main";
-/// The bigger, more accurate data, read with when the fast data wasn't sure (v0.7.5).
-const BEST_URL: &str = "https://github.com/tesseract-ocr/tessdata_best/raw/main";
+/// Which tessdata a download is from.
+#[derive(Clone, Copy)]
+enum Set {
+    Fast,
+    /// The bigger, more accurate data, read with when the fast data wasn't sure (v0.7.5).
+    Best,
+}
+
+impl Set {
+    fn repo(self) -> &'static str {
+        match self {
+            Set::Fast => "tesseract-ocr/tessdata_fast",
+            Set::Best => "tesseract-ocr/tessdata_best",
+        }
+    }
+
+    /// A file's address in the newest version ("eng.traineddata", "LICENSE").
+    fn url(self, file: &str) -> String {
+        format!("https://raw.githubusercontent.com/{}/main/{file}", self.repo())
+    }
+
+    /// What a file must hash to, from GitHub.
+    fn expected(self, file: &str) -> Result<crate::verify::Expected, String> {
+        crate::verify::github_file(self.repo(), "", file)
+    }
+}
 
 /// Every language `tessdata_fast` has (its file names without `.traineddata`),
 /// except Hebrew and Yiddish (written in Hebrew letters): Archtoys reads no
@@ -205,9 +229,11 @@ pub(crate) fn get_best(code: &str, wait: std::time::Duration) -> Result<Best, St
     std::fs::create_dir_all(&dir).map_err(|err| format!("couldn't make {}: {err}", dir.display()))?;
     let licence = dir.join("LICENSE-tessdata_best.txt");
     if !licence.exists() {
-        let _ = fetch("https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/LICENSE", &licence);
+        let _ = fetch(Set::Best, "LICENSE", &licence);
     }
-    let url = format!("{BEST_URL}/{code}.traineddata");
+    let file = format!("{code}.traineddata");
+    let sha = Set::Best.expected(&file)?;
+    let url = Set::Best.url(&file);
     let dest = file_for(&dir, code);
     let tmp = dest.with_extension("part");
     let size = content_length(&url);
@@ -218,14 +244,14 @@ pub(crate) fn get_best(code: &str, wait: std::time::Duration) -> Result<Best, St
         let (code, tmp, dest, url) = (code.to_string(), tmp.clone(), dest.clone(), url.clone());
         background(code, move || {
             Command::new("wget").args(["-q", "-T", "20", "-O"]).arg(&tmp).arg(&url).status().is_ok_and(|s| s.success())
-                && finish_part(&tmp, &dest)
+                && finish_part(&tmp, &dest, &sha)
         });
         return Ok(Best::Downloading);
     };
     let start = std::time::Instant::now();
     loop {
         if let Some(status) = child.try_wait().map_err(|err| err.to_string())? {
-            return if status.success() && finish_part(&tmp, &dest) {
+            return if status.success() && finish_part(&tmp, &dest, &sha) {
                 Ok(Best::Ready)
             } else {
                 let _ = std::fs::remove_file(&tmp);
@@ -240,7 +266,7 @@ pub(crate) fn get_best(code: &str, wait: std::time::Duration) -> Result<Best, St
         };
         if too_slow {
             let (code, tmp, dest) = (code.to_string(), tmp.clone(), dest.clone());
-            background(code, move || child.wait().is_ok_and(|s| s.success()) && finish_part(&tmp, &dest));
+            background(code, move || child.wait().is_ok_and(|s| s.success()) && finish_part(&tmp, &dest, &sha));
             return Ok(Best::Downloading);
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -276,9 +302,11 @@ fn background(code: String, job: impl FnOnce() -> bool + Send + 'static) {
     });
 }
 
-/// A finished download's temporary file becomes the real one (a cut-off one is thrown away).
-fn finish_part(tmp: &Path, dest: &Path) -> bool {
-    if std::fs::metadata(tmp).map(|m| m.len()).unwrap_or(0) < 100 {
+/// A finished download's temporary file becomes the real one, only when it
+/// hashes to what GitHub said (a cut-off, changed or swapped file is thrown away).
+fn finish_part(tmp: &Path, dest: &Path, expected: &crate::verify::Expected) -> bool {
+    if !expected.matches(tmp) {
+        eprintln!("text extractor: {} failed its check, thrown away", dest.display());
         let _ = std::fs::remove_file(tmp);
         return false;
     }
@@ -315,9 +343,13 @@ pub(crate) fn prepare_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Downloads `url` to `dest` with curl or wget (one of them is on every
-/// desktop), through a temporary file so a cut-off download leaves nothing.
-fn fetch(url: &str, dest: &Path) -> Result<(), String> {
+/// Downloads a file of tessdata ("eng.traineddata", "LICENSE") to `dest`
+/// with curl or wget (one of them is on every desktop), through a temporary
+/// file that's checked before it becomes `dest`.
+fn fetch(set: Set, file: &str, dest: &Path) -> Result<(), String> {
+    let sha = set.expected(file)?;
+    let url = set.url(file);
+    let url = url.as_str();
     let tmp = dest.with_extension("part");
     let curl = Command::new("curl").args(["-fsSL", "--connect-timeout", "10", "--max-time", "300", "-o"]).arg(&tmp).arg(url).status();
     let ok = match curl {
@@ -330,12 +362,14 @@ fn fetch(url: &str, dest: &Path) -> Result<(), String> {
             .map_err(|_| "neither curl nor wget is installed".to_string())?
             .success(),
     };
-    let size = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
-    if !ok || size < 100 {
+    if !ok {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("couldn't download {url}"));
     }
-    std::fs::rename(&tmp, dest).map_err(|err| format!("couldn't save {}: {err}", dest.display()))
+    if !finish_part(&tmp, dest, &sha) {
+        return Err(format!("the download of {file} failed its check, so it was thrown away"));
+    }
+    Ok(())
 }
 
 /// Downloads a language into Archtoys' folder (and the licence, once).
@@ -345,9 +379,9 @@ pub(crate) fn download(dir: &Path, code: &str) -> Result<(), String> {
     }
     let licence = dir.join("LICENSE-tessdata_fast.txt");
     if !licence.exists() {
-        let _ = fetch("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE", &licence);
+        let _ = fetch(Set::Fast, "LICENSE", &licence);
     }
-    fetch(&format!("{TESSDATA_URL}/{code}.traineddata"), &file_for(dir, code))
+    fetch(Set::Fast, &format!("{code}.traineddata"), &file_for(dir, code))
 }
 
 /// Downloads several languages at once (the licence first, once), each in
@@ -355,7 +389,7 @@ pub(crate) fn download(dir: &Path, code: &str) -> Result<(), String> {
 pub(crate) fn download_all(dir: &Path, codes: &[&'static str]) -> Vec<&'static str> {
     let licence = dir.join("LICENSE-tessdata_fast.txt");
     if !licence.exists() {
-        let _ = fetch("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/LICENSE", &licence);
+        let _ = fetch(Set::Fast, "LICENSE", &licence);
     }
     std::thread::scope(|scope| {
         let jobs: Vec<_> = codes.iter().map(|&code| (code, scope.spawn(move || download(dir, code)))).collect();
@@ -693,6 +727,29 @@ fn from_input(name: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn downloads_come_from_the_newest_version() {
+        assert_eq!(Set::Fast.url("eng.traineddata"), "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/eng.traineddata");
+        assert_eq!(Set::Best.url("LICENSE"), "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main/LICENSE");
+    }
+
+    #[test]
+    fn a_download_that_fails_its_check_is_thrown_away() {
+        use crate::verify::Expected;
+        let dir = std::env::temp_dir().join(format!("archtoys-check-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (tmp, dest) = (dir.join("x.part"), dir.join("x.traineddata"));
+        let abc = Expected::GitBlob("f2ba8f84ab5c1bce84a7b441cb1959cfc7093b7f".into());
+        std::fs::write(&tmp, b"not the language file").unwrap();
+        assert!(!finish_part(&tmp, &dest, &abc));
+        assert!(!tmp.exists() && !dest.exists());
+        // the right bytes go through
+        std::fs::write(&tmp, b"abc").unwrap();
+        assert!(finish_part(&tmp, &dest, &abc));
+        assert!(dest.exists() && !tmp.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_download_is_judged_by_its_size_and_speed() {
         let s = std::time::Duration::from_secs;

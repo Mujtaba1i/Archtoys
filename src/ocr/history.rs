@@ -276,3 +276,21 @@ mod tests {
         assert_eq!(label_from((2025, 12, 31, 8, 0), today, yesterday), "31 Dec 2025");
     }
 }
+
+#[cfg(test)]
+mod hunt_tests {
+    #[test]
+    fn a_broken_history_file_never_panics() {
+        for data in crate::hunt::files() {
+            let _ = serde_json::from_slice::<Vec<super::Entry>>(&data);
+        }
+        for text in crate::hunt::texts() {
+            let json = format!("[{{\"text\": {}, \"time\": -1}}]", serde_json::Value::String(text.clone()));
+            let _ = serde_json::from_str::<Vec<super::Entry>>(&json);
+            let _ = serde_json::from_str::<Vec<super::Entry>>(&text);
+        }
+        for t in [0, 1, u64::MAX, u64::MAX / 2] {
+            let _ = (super::when_label(t, 0), super::when_label(0, t), super::when_label(t, t));
+        }
+    }
+}

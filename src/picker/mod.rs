@@ -226,8 +226,8 @@ pub(crate) fn crop_rgba(rgba: &[u8], width: u32, height: u32, cx: i32, cy: i32, 
     let mut out = vec![0u8; size * size * 4];
     for dy in 0..size as i32 {
         for dx in 0..size as i32 {
-            let x = cx - radius + dx;
-            let y = cy - radius + dy;
+            let x = cx.saturating_sub(radius).saturating_add(dx);
+            let y = cy.saturating_sub(radius).saturating_add(dy);
             let o = (dy as usize * size + dx as usize) * 4;
             if x >= 0 && y >= 0 && (x as u32) < width && (y as u32) < height {
                 let i = (y as usize * width as usize + x as usize) * 4;
@@ -292,5 +292,22 @@ mod tests {
         // the center block is exactly x 10..19, y 10..19
         assert_eq!((at(9, 15), at(10, 15), at(19, 15), at(20, 15)), (80, 255, 255, 80));
         assert_eq!((at(15, 9), at(15, 10), at(15, 19), at(15, 20)), (80, 255, 255, 80));
+    }
+}
+
+#[cfg(test)]
+mod hunt_tests {
+    #[test]
+    fn the_magnifier_survives_any_point() {
+        let mut rng = crate::hunt::Rng::new(3);
+        for (w, h) in [(1u32, 1u32), (2, 3), (40, 40)] {
+            let rgba = rng.bytes((w * h * 4) as usize);
+            for (x, y) in [(0, 0), (-100, -100), (i32::MAX, i32::MAX), (w as i32, h as i32)] {
+                for radius in [0, 1, 7, 60] {
+                    let area = super::crop_rgba(&rgba, w, h, x, y, radius);
+                    let _ = super::center_rgb(&area, radius);
+                }
+            }
+        }
     }
 }

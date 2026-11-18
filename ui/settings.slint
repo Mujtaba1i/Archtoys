@@ -62,6 +62,11 @@ export component SettingsPage inherits ScrollView {
     in-out property <int> setting-ruler-units;
     in-out property <bool> setting-ruler-cross;
     in property <bool> several-screens;
+    // Micro-toys (v0.8.0)
+    in property <bool> setting-micro-screenshot;
+    in-out property <string> setting-screenshot-hotkey;
+    in-out property <string> screenshot-hotkey-display;
+    callback micro-toggled(bool);
     callback ruler-clear();
 
     content-width: self.visible-width;
@@ -416,6 +421,45 @@ export component SettingsPage inherits ScrollView {
                 PillButton {
                     text: "Clear";
                     clicked => { root.ruler-clear(); }
+                }
+            }
+        }
+
+        // Micro-toys have no page of their own, so their settings show
+        // wherever Settings was opened from
+        if !root.about-open : VerticalLayout {
+            spacing: 10px;
+            SectionLabel { text: "MICRO-TOYS"; }
+
+            SettingCard {
+                title: "Screenshot to clipboard";
+                subtitle: root.setting-micro-screenshot ? "Drag over an area and it's copied as a picture, never saved"
+                    : "Off: its hotkey is free for other apps";
+                Switch {
+                    label: "Screenshot to clipboard";
+                    checked: root.setting-micro-screenshot;
+                    toggled(on) => { root.micro-toggled(on); }
+                }
+            }
+            SettingCard {
+                title: "Screenshot to clipboard hotkey";
+                subtitle: root.hotkey-system-managed ? "Your desktop manages it. Click to change it in System Settings."
+                    : root.setting-hotkey-recording && root.hotkey-target == 3 ? "Press the new keys, or Esc to cancel"
+                    : "Starts a screenshot from anywhere";
+                PillButton {
+                    // off on Wayland, the desktop holds nothing for it yet: what it asks for
+                    text: root.hotkey-system-managed && root.screenshot-hotkey-display != "" ? root.screenshot-hotkey-display
+                        : root.setting-hotkey-recording && root.hotkey-target == 3 ? "Press keys…" : root.setting-screenshot-hotkey;
+                    highlighted: root.setting-hotkey-recording && root.hotkey-target == 3;
+                    clicked => {
+                        if root.hotkey-system-managed {
+                            root.open-hotkey-settings();
+                        } else {
+                            root.hotkey-target = 3;
+                            root.setting-hotkey-recording = true;
+                            root.focus-hotkey-recorder();
+                        }
+                    }
                 }
             }
         }

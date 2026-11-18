@@ -102,7 +102,7 @@ pub(crate) fn reach(
 /// stacked, either way).
 pub(crate) fn most(screens: &[(u32, u32)], i: usize, cross: bool) -> (u32, u32) {
     if cross {
-        screens.iter().fold((0, 0), |(w, h), s| (w + s.0, h + s.1))
+        screens.iter().fold((0u32, 0u32), |(w, h), s| (w.saturating_add(s.0), h.saturating_add(s.1)))
     } else {
         screens.get(i).copied().unwrap_or((u32::MAX, u32::MAX))
     }
@@ -236,6 +236,10 @@ pub(crate) struct Bar {
 /// The outline of a box as dashes, `thick` wide.
 pub(crate) fn dashes(x: f32, y: f32, w: f32, h: f32, thick: f32, dash: f32, gap: f32) -> Vec<Bar> {
     let mut out = Vec::new();
+    // a step that never moves on, or a side that never ends, would never stop
+    if dash + gap <= 0.0 || !(w.is_finite() && h.is_finite()) {
+        return out;
+    }
     let mut run = |len: f32, mut put: Box<dyn FnMut(f32, f32) -> Bar>| {
         let mut at = 0.0;
         while at < len {
@@ -500,5 +504,45 @@ mod tests {
         // top and bottom: 20 / (6 + 4) = 2 each, the sides: 1 each... rounded up
         assert_eq!(d.iter().filter(|b| b.h == 2.0).count(), 4);
         assert!(d.iter().all(|b| b.x >= 0.0 && b.x + b.w <= 20.0 && b.y >= 0.0 && b.y + b.h <= 10.0));
+    }
+}
+
+#[cfg(test)]
+mod hunt_tests {
+    use super::*;
+
+    #[test]
+    fn measuring_survives_odd_screens_and_sizes() {
+        let mut rng = crate::hunt::Rng::new(11);
+        // a screenshot of every odd size, and a point inside, on the edge and far outside
+        for (w, h) in [(1u32, 1u32), (2, 1), (1, 2), (5, 5), (300, 2)] {
+            let rgba = rng.bytes((w * h * 4) as usize);
+            for p in [(0, 0), (-5, -5), (w as i32, h as i32), (i32::MAX, i32::MIN), (1, 0)] {
+                for tolerance in [-1, 0, 255, i32::MAX] {
+                    let _ = reach(&rgba, w, h, p, tolerance, |_, _| true);
+                }
+            }
+        }
+        let sizes = [Size { w: 0, h: 0 }, Size { w: 1, h: 1 }, Size { w: u32::MAX, h: u32::MAX }, Size { w: 0, h: 40_000 }];
+        for mode in [Mode::Bounds, Mode::Spacing, Mode::Horizontal, Mode::Vertical] {
+            for s in sizes {
+                for unit in [Unit::Px, Unit::Cm, Unit::In] {
+                    for mm in [None, Some(0.0), Some(-1.0), Some(f32::NAN), Some(f32::INFINITY), Some(1e30)] {
+                        let _ = (text(mode, s, unit, mm), physical_line(mode, s, mm));
+                    }
+                }
+            }
+            let _ = preview(mode, &sizes);
+            let _ = preview(mode, &[]);
+        }
+        for mm in [None, Some(0.0), Some(-1.0), Some(f32::NAN), Some(f32::INFINITY)] {
+            let _ = teeth(u32::MAX, mm);
+        }
+        let _ = (most(&[], 3, true), most(&[], 0, false), most(&[(u32::MAX, u32::MAX), (u32::MAX, 1)], 9, true));
+        let _ = (screen_px(i32::MIN, 0), screen_px(i32::MAX, -1));
+        let _ = dashes(0.0, 0.0, 10.0, 10.0, 2.0, 0.0, 0.0);
+        for side in [f32::NAN, f32::INFINITY, -50.0, 0.0, 100_000.0] {
+            let _ = dashes(0.0, 0.0, side, side, 2.0, 5.0, 3.0);
+        }
     }
 }

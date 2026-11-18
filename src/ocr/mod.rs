@@ -10,7 +10,7 @@
 //! This module reads the selected area and keeps the result. Nothing here runs at startup: with Text Extractor off,
 //! the app costs what v0.6.2 cost.
 
-mod capture;
+pub(crate) mod capture;
 mod engine;
 pub(crate) mod history;
 mod install;

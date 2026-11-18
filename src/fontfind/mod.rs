@@ -15,7 +15,7 @@ pub(crate) mod page;
 pub(crate) mod render;
 
 use image::GrayImage;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 /// How many Google families the index's short list downloads and compares
@@ -203,8 +203,9 @@ pub(crate) fn find(
                             (s.got, s.size, s.speed) = (got, size, speed);
                             progress(&s);
                         };
-                        if net::download(&net::google_url(&family.path), &file, &show, stop).is_ok() {
-                            licence_file(&family.path, family.licence);
+                        match google_download(&family.path, &file, &show, stop) {
+                            Ok(()) => licence_file(&family.path, family.licence),
+                            Err(err) => eprintln!("font finder: {err}"),
                         }
                     }
                     // not downloaded (offline, stopped): the index's own measure
@@ -242,14 +243,23 @@ pub(crate) fn find(
             (s.got, s.size, s.speed) = (got, size, speed);
             progress(&s);
         };
-        if net::download(&net::google_url(path), &g.file, &show, stop).is_ok() {
-            licence_file(path, *licence);
+        match google_download(path, &g.file, &show, stop) {
+            Ok(()) => licence_file(path, *licence),
+            Err(err) => eprintln!("font finder: {err}"),
         }
         state.done += 1;
     }
     (state.got, state.size, state.speed) = (0, None, 0.0);
     progress(&state);
     Ok(guesses)
+}
+
+/// Downloads a file of google/fonts (its newest version), checked against
+/// the hash GitHub gives for it.
+fn google_download(path: &str, dest: &Path, progress: &dyn Fn(u64, Option<u64>, f64), stop: &AtomicBool) -> Result<(), String> {
+    let (folder, name) = path.rsplit_once('/').ok_or(format!("not a font path: {path}"))?;
+    let expected = crate::verify::github_file("google/fonts", folder, name)?;
+    net::download(&net::google_url(path), dest, &expected, progress, stop)
 }
 
 /// A downloaded font's licence, next to it (OFL.txt, LICENSE.txt or UFL.txt in its folder in google/fonts).
@@ -262,7 +272,7 @@ fn licence_file(path: &str, licence: u8) {
     };
     let dest = fonts_dir().join(format!("{}_{name}", folder.replace('/', "_")));
     if !dest.exists() {
-        let _ = net::download(&net::google_url(&format!("{folder}/{name}")), &dest, &|_, _, _| {}, &AtomicBool::new(false));
+        let _ = google_download(&format!("{folder}/{name}"), &dest, &|_, _, _| {}, &AtomicBool::new(false));
     }
 }
 

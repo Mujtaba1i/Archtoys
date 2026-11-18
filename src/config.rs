@@ -94,6 +94,14 @@ pub struct AppConfig {
     pub font_online: Option<bool>,
     /// fewer moving things (the font search shows its best guess instead of every font)
     pub reduce_motion: bool,
+    /// Micro-toys (v0.8.0, off until switched on): Screenshot to clipboard and its hotkey.
+    pub micro_screenshot: bool,
+    #[serde(default = "default_screenshot_hotkey")]
+    pub screenshot_hotkey: String,
+}
+
+fn default_screenshot_hotkey() -> String {
+    crate::hotkey::DEFAULT_SCREENSHOT_HOTKEY_TEXT.to_string()
 }
 
 fn default_ruler_hotkey() -> String {
@@ -151,6 +159,8 @@ impl Default for AppConfig {
             ruler_cross: false,
             font_online: None,
             reduce_motion: false,
+            micro_screenshot: false,
+            screenshot_hotkey: default_screenshot_hotkey(),
         }
     }
 }
@@ -198,7 +208,31 @@ pub fn sync_autostart_entry(enabled: bool) {
 
 pub fn load_config() -> Option<AppConfig> {
     let data = fs::read_to_string(config_path()).ok()?;
-    serde_json::from_str(&data).ok()
+    parse_config(&data)
+}
+
+/// The settings in a config file. A setting that makes no sense (a wrong
+/// type, a number out of range) falls back to its default and the rest are
+/// kept (v0.8.0: before, one bad value reset every setting). Not JSON at
+/// all: None, so everything starts from the defaults.
+fn parse_config(data: &str) -> Option<AppConfig> {
+    if let Ok(cfg) = serde_json::from_str(data) {
+        return Some(cfg);
+    }
+    let serde_json::Value::Object(mut fields) = serde_json::from_str(data).ok()? else { return None };
+    let bad: Vec<String> = fields
+        .iter()
+        .filter(|(key, value)| {
+            let alone = serde_json::Value::Object([((*key).clone(), (*value).clone())].into_iter().collect());
+            serde_json::from_value::<AppConfig>(alone).is_err()
+        })
+        .map(|(key, _)| key.clone())
+        .collect();
+    for key in &bad {
+        eprintln!("config: the setting \"{key}\" made no sense, so it's back to its default");
+        fields.remove(key);
+    }
+    serde_json::from_value(serde_json::Value::Object(fields)).ok()
 }
 
 fn save_config(cfg: &AppConfig) {
@@ -278,6 +312,8 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
             g.get_asked().then(|| g.get_online())
         },
         reduce_motion: ui.get_setting_reduce_motion(),
+        micro_screenshot: ui.get_setting_micro_screenshot(),
+        screenshot_hotkey: ui.get_setting_screenshot_hotkey().to_string(),
     }
 }
 
@@ -331,6 +367,11 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
         ui.global::<crate::FontFinder>().set_asked(true);
     }
     ui.set_setting_reduce_motion(cfg.reduce_motion);
+    ui.set_setting_micro_screenshot(cfg.micro_screenshot);
+    crate::ocr::capture::set_screenshot_on(cfg.micro_screenshot);
+    if !cfg.screenshot_hotkey.trim().is_empty() {
+        ui.set_setting_screenshot_hotkey(cfg.screenshot_hotkey.clone().into());
+    }
 
     if !cfg.history.is_empty() {
         let mut guard = history_store.lock().unwrap();
@@ -398,5 +439,55 @@ mod tests {
         let old: AppConfig = serde_json::from_str(r#"{"setting_autocopy":true}"#).unwrap();
         assert!(!old.editor_compare && !old.editor_keep && old.editor_saved.is_none());
         assert!(old.editor_cancel_forgets && old.editor_reset_on_new_color);
+    }
+}
+
+#[cfg(test)]
+mod hunt_tests {
+    #[test]
+    fn one_bad_setting_falls_back_alone() {
+        let cfg =
+            super::parse_config(r#"{"theme": "dark", "ruler_units": "abc", "last_color": [300, 1, 2], "setting_autocopy": true}"#).unwrap();
+        assert_eq!(cfg.theme, "dark");
+        assert!(cfg.setting_autocopy);
+        assert_eq!(cfg.ruler_units, 0);
+        assert_eq!(cfg.last_color, None);
+        assert!(super::parse_config("not json").is_none());
+        assert!(super::parse_config("[1, 2]").is_none());
+    }
+
+    #[test]
+    fn a_broken_config_file_never_panics() {
+        for data in crate::hunt::files() {
+            let _ = serde_json::from_slice::<super::AppConfig>(&data);
+        }
+        for text in crate::hunt::texts() {
+            let _ = serde_json::from_str::<super::AppConfig>(&text);
+            // every field with a wrong type or a value out of range
+            for field in [
+                "theme",
+                "formats",
+                "history",
+                "last_color",
+                "window_size",
+                "window_geometry",
+                "last_page",
+                "sidebar_mode",
+                "ruler_tolerance",
+                "ruler_units",
+                "screenshot_hotkey",
+            ] {
+                let json = format!("{{\"{field}\": {}}}", serde_json::Value::String(text.clone()));
+                let _ = serde_json::from_str::<super::AppConfig>(&json);
+            }
+        }
+        for n in ["-1", "1e309", "-9223372036854775809", "18446744073709551616", "null", "[]", "{}", "[[[[[[[[[[]]]]]]]]]]"] {
+            for field in ["last_color", "window_size", "last_page", "sidebar_mode", "ruler_tolerance", "ruler_units", "history"] {
+                let _ = serde_json::from_str::<super::AppConfig>(&format!("{{\"{field}\": {n}}}"));
+            }
+        }
+        // deeply nested: serde_json stops at 128 levels instead of overflowing the stack
+        let deep = format!("{{\"formats\": {}{}}}", "[".repeat(100_000), "]".repeat(100_000));
+        assert!(serde_json::from_str::<super::AppConfig>(&deep).is_err());
     }
 }

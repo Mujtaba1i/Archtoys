@@ -33,9 +33,15 @@ Each toy has its own hotkey and works from anywhere. Move between them with the 
 | [**Text Extractor**](#text-extractor) | Drag over any text on screen and copy it, even from images, videos and apps that don't let you select text. [Find font](#font-finder) tells which font it's in | `Ctrl+Super+T` |
 | [**Screen Ruler**](#screen-ruler) | Measure anything on screen: a box, the space around a point, a width or a height | `Ctrl+Super+M` |
 
+**Micro-toys** (v0.8.0) are small helpers that are just a hotkey: no window, no page of their own. Each one is off until you switch it on, on Home, and their settings are together in **Settings → Micro-toys**.
+
+| Micro-toy | What it does | Hotkey |
+| --- | --- | --- |
+| **Screenshot to clipboard** | Drag over an area of the screen and it's copied as a picture, never saved | `Ctrl+Super+S` |
+
 <div align="center">
 
-![Home: the three toys with their hotkeys, and your recent color, text and measurement](docs/screenshots/home.png)
+![Home: the toys with their hotkeys, and the Micro-toys with their switches](docs/screenshots/home.png)
 
 </div>
 
@@ -233,7 +239,7 @@ Measure anything on screen, the way it looks: a button, the gap between two boxe
 ² GNOME before 48 (including Ubuntu 22.04 and 24.04) can't register a global hotkey. Add your own in **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts**, with the command `archtoys --pick`.<br>
 ³ If the desktop's screenshot doesn't line up with your monitors, Archtoys uses the desktop's own picker instead (same color, no magnifier). Please report it if that happens.
 
-On GNOME before 48, add Text Extractor's and the Screen Ruler's shortcuts the same way, with `archtoys --extract` and `archtoys --measure`.
+On GNOME before 48, add Text Extractor's and the Screen Ruler's shortcuts the same way, with `archtoys --extract` and `archtoys --measure` (and Screenshot to clipboard's with `archtoys --screenshot`).
 
 <details>
 <summary>How picking works on Wayland</summary>
@@ -352,12 +358,14 @@ src/
 ├── ocr/                Text Extractor: Tesseract, installing it, languages, history
 ├── ruler/              the Screen Ruler: edges, sizes, the screen's real size, history
 ├── config.rs           settings (saved safely) and autostart
-├── single_instance.rs  one copy at a time, archtoys --pick / --extract / --measure
+├── single_instance.rs  one copy at a time, archtoys --pick / --extract / --measure / --screenshot
 ├── diagnostics.rs      Report a problem
 ├── launch.rs           starting the browser and desktop settings
 ├── kwin.rs             KDE Plasma: hiding the window during a pick, keeping its place
 ├── ui_state.rs         updating the main window
 ├── tray.rs             tray icon
+├── verify.rs           every download checked: GitHub's hash of the file, or the font index's SHA-256
+├── hunt.rs             the bug hunt's hostile input (tests only)
 ├── portal.rs           talking to the desktop portal
 └── hotkey/             global hotkeys (portal and X11)
 ui/app.slint            the main window
@@ -383,6 +391,7 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, one tool at a 
 - [x] Buy me a coffee button
 - [x] **Screen Ruler**: measure things on screen
 - [x] **Font finder** in Text Extractor: which font a text is in, and its size (v0.7.5)
+- [x] **Micro-toys**: small hotkey helpers, starting with Screenshot to clipboard (v0.8.0)
 - [ ] **Awake**: keep your PC from sleeping for as long as you choose
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.

@@ -1,6 +1,8 @@
 //! Downloads for the font finder (the index and font files), with curl like
 //! the language data: its progress (bytes, speed) for the search view, and
-//! Stop. Through a temporary file, so a cut-off download leaves nothing.
+//! Stop. Through a temporary file that becomes the real one only when it
+//! hashes to what was expected (v0.8.0, `verify.rs`), so a cut-off, changed
+//! or swapped download leaves nothing.
 
 use std::path::Path;
 use std::process::Command;
@@ -28,8 +30,15 @@ fn size(url: &str) -> Option<u64> {
 }
 
 /// Downloads `url` to `dest`, telling `progress` (bytes so far, the size when
-/// known, bytes per second) about every 100 ms. `stop` cancels it.
-pub(crate) fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, Option<u64>, f64), stop: &AtomicBool) -> Result<(), String> {
+/// known, bytes per second) about every 100 ms. `stop` cancels it. The file
+/// must hash to `expected`, else it's thrown away.
+pub(crate) fn download(
+    url: &str,
+    dest: &Path,
+    expected: &crate::verify::Expected,
+    progress: &dyn Fn(u64, Option<u64>, f64),
+    stop: &AtomicBool,
+) -> Result<(), String> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -52,10 +61,13 @@ pub(crate) fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, Option<u64
             return Err("stopped".into());
         }
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-            let got = std::fs::metadata(&tmp).map(|m| m.len()).unwrap_or(0);
-            if !status.success() || got < 100 {
+            if !status.success() {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(format!("couldn't download {url}"));
+            }
+            if !expected.matches(&tmp) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(format!("{url} failed its check, so it was thrown away"));
             }
             return std::fs::rename(&tmp, dest).map_err(|e| e.to_string());
         }
@@ -63,15 +75,9 @@ pub(crate) fn download(url: &str, dest: &Path, progress: &dyn Fn(u64, Option<u64
     }
 }
 
-/// A file's SHA-256 (sha256sum is in every distribution's coreutils).
-pub(crate) fn sha256(path: &Path) -> Option<String> {
-    let out = Command::new("sha256sum").arg(path).output().ok()?;
-    String::from_utf8_lossy(&out.stdout).split_whitespace().next().map(str::to_string)
-}
-
-/// A path in github.com/google/fonts as a download link ([ and ] escaped).
+/// A path in github.com/google/fonts as a download link of its newest version ([ and ] escaped).
 pub(crate) fn google_url(path: &str) -> String {
-    format!("https://github.com/google/fonts/raw/main/{}", path.replace('[', "%5B").replace(']', "%5D").replace(' ', "%20"))
+    format!("https://raw.githubusercontent.com/google/fonts/main/{}", path.replace('[', "%5B").replace(']', "%5D").replace(' ', "%20"))
 }
 
 #[cfg(test)]
@@ -80,7 +86,7 @@ mod tests {
     fn google_font_paths_become_links() {
         assert_eq!(
             super::google_url("ofl/roboto/Roboto[wdth,wght].ttf"),
-            "https://github.com/google/fonts/raw/main/ofl/roboto/Roboto%5Bwdth,wght%5D.ttf"
+            "https://raw.githubusercontent.com/google/fonts/main/ofl/roboto/Roboto%5Bwdth,wght%5D.ttf"
         );
     }
 }

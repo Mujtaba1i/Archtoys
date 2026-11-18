@@ -57,15 +57,12 @@ pub(crate) fn get(progress: &dyn Fn(u64, Option<u64>, f64), stop: &std::sync::at
         return cached().ok_or("the font index is a newer format: update Archtoys".into());
     }
     let dest = dir().join(file.replace('/', "-"));
-    if dest.exists() && net::sha256(&dest).as_deref() == Some(sha) {
+    if dest.exists() && crate::verify::sha256(&dest).as_deref() == Some(sha) {
         return Ok(dest);
     }
     std::fs::create_dir_all(dir()).map_err(|e| e.to_string())?;
-    net::download(&format!("{BASE}/{file}"), &dest, progress, stop)?;
-    if net::sha256(&dest).as_deref() != Some(sha) {
-        let _ = std::fs::remove_file(&dest);
-        return Err("the font index didn't download right (its SHA-256 is wrong)".into());
-    }
+    // thrown away unless its SHA-256 is latest.json's
+    net::download(&format!("{BASE}/{file}"), &dest, &crate::verify::Expected::Sha256(sha.to_string()), progress, stop)?;
     // the older months aren't needed any more
     if let Ok(entries) = std::fs::read_dir(dir()) {
         for entry in entries.flatten().filter(|e| e.path() != dest) {
@@ -211,5 +208,30 @@ mod tests {
         let img = GrayImage::from_fn(4, 1, |x, _| image::Luma([if x == 1 { 0 } else { 255 }]));
         let b = embolden(&img);
         assert_eq!((b.get_pixel(1, 0).0[0], b.get_pixel(2, 0).0[0], b.get_pixel(3, 0).0[0]), (0, 0, 255));
+    }
+}
+
+#[cfg(test)]
+mod hunt_tests {
+    #[test]
+    fn a_damaged_font_index_is_an_error_not_a_crash() {
+        let dir = std::env::temp_dir().join(format!("archtoys-hunt-index-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let word = (image::GrayImage::new(20, 10), "word".to_string());
+        let mut files = crate::hunt::files();
+        // a real header with nothing after it, and one claiming a billion fonts
+        for count in [0u32, 1_000_000_000] {
+            let mut raw = b"ATFI\x01\x18\0\0".to_vec();
+            raw.extend(count.to_le_bytes());
+            let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+            std::io::Write::write_all(&mut gz, &raw).unwrap();
+            files.push(gz.finish().unwrap());
+        }
+        for (i, data) in files.iter().enumerate() {
+            let path = dir.join(format!("{i}.gz"));
+            std::fs::write(&path, data).unwrap();
+            let _ = super::shortlist(&path, std::slice::from_ref(&word), 12);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

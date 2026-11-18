@@ -11,6 +11,8 @@ mod fontfind;
 mod formats;
 mod freeze;
 mod hotkey;
+#[cfg(test)]
+mod hunt;
 mod kwin;
 mod launch;
 mod name_index;
@@ -23,12 +25,13 @@ mod search;
 mod single_instance;
 mod tray;
 mod ui_state;
+mod verify;
 mod window;
 
 use config::{apply_config, load_config, persist_config, sync_autostart_entry, HistoryStore};
 use hotkey::{
     build_hotkey_from_capture, HotkeyService, HotkeyStatus, Shortcut, DEFAULT_HOTKEY_TEXT, DEFAULT_RULER_HOTKEY_TEXT,
-    DEFAULT_TEXT_HOTKEY_TEXT,
+    DEFAULT_SCREENSHOT_HOTKEY_TEXT, DEFAULT_TEXT_HOTKEY_TEXT,
 };
 use ksni::blocking::TrayMethods;
 use picker::{start_picker, PickerSource};
@@ -191,6 +194,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let pick_now = std::env::args().any(|arg| arg == "--pick");
     let extract_now = std::env::args().any(|arg| arg == "--extract");
     let measure_now = std::env::args().any(|arg| arg == "--measure");
+    let screenshot_now = std::env::args().any(|arg| arg == "--screenshot");
 
     let _instance_lock = match single_instance::acquire() {
         single_instance::Lock::TakenByAnother => {
@@ -202,6 +206,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     "Extract"
                 } else if measure_now {
                     "Measure"
+                } else if screenshot_now {
+                    "Screenshot"
                 } else {
                     "Show"
                 };
@@ -218,7 +224,7 @@ fn main() -> Result<(), slint::PlatformError> {
     diagnostics::keep_recent_messages();
     // `archtoys --pick` / `--extract` with no copy running starts in the tray
     // and picks (or captures text), like the hotkey.
-    let start_hidden = autostart || pick_now || extract_now || measure_now;
+    let start_hidden = autostart || pick_now || extract_now || measure_now || screenshot_now;
 
     // each picker window opens full screen on its own monitor (freeze.rs)
     slint::BackendSelector::new().backend_name("winit".into()).with_winit_window_attributes_hook(freeze::window_attributes).select()?;
@@ -232,6 +238,11 @@ fn main() -> Result<(), slint::PlatformError> {
         eprintln!("app id: couldn't set it: {err:?}");
     }
     ui.global::<Skin>().set_real_shadows(!cpu_drawn());
+    // a hotkey's keys for the keycaps on Home ("Ctrl+Super+C": Ctrl, Super, C)
+    ui.global::<Keys>().on_split(|hotkey| {
+        let keys: Vec<slint::SharedString> = hotkey.split('+').map(str::trim).filter(|k| !k.is_empty()).map(Into::into).collect();
+        slint::ModelRc::new(slint::VecModel::from(keys))
+    });
     ui.set_app_version(env!("CARGO_PKG_VERSION").into());
     if start_hidden {
         apply_hidden_startup_state(&ui);
@@ -247,7 +258,8 @@ fn main() -> Result<(), slint::PlatformError> {
         Err(err) => eprintln!("tray: failed to spawn: {err:?}"),
     }
 
-    let history_store: HistoryStore = Arc::new(Mutex::new(vec![(203, 182, 172), (85, 85, 85)]));
+    // no history yet (or none in the config): a default row, starting with red, never an empty one
+    let history_store: HistoryStore = Arc::new(Mutex::new(vec![(229, 57, 53), (203, 182, 172), (85, 85, 85)]));
     ui_state::install_models(&ui);
     editor::install(&ui);
 
@@ -267,6 +279,9 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     if ui.get_setting_ruler_hotkey().trim().is_empty() {
         ui.set_setting_ruler_hotkey(DEFAULT_RULER_HOTKEY_TEXT.into());
+    }
+    if ui.get_setting_screenshot_hotkey().trim().is_empty() {
+        ui.set_setting_screenshot_hotkey(DEFAULT_SCREENSHOT_HOTKEY_TEXT.into());
     }
     // the size limits, with the sidebar's width if it was pinned
     window::apply_constraints(&ui);
@@ -324,6 +339,13 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         })
     };
+    // the Screenshot to clipboard Micro-toy (ignored while it's switched off)
+    let screenshot_trigger: hotkey::Trigger = {
+        let ui_weak = Mutex::new(ui_handle.clone());
+        Arc::new(move || {
+            let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| ocr::capture::start_screenshot(&ui));
+        })
+    };
     // Shows who owns the shortcut. When the desktop does, the settings show
     // the desktop's real shortcut and a button to change it there.
     let on_status: hotkey::StatusCallback = {
@@ -336,7 +358,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_hotkey_display(descriptions.first().cloned().unwrap_or_default().into());
                     ui.set_text_hotkey_display(descriptions.get(1).cloned().unwrap_or_default().into());
                     ui.set_ruler_hotkey_display(descriptions.get(2).cloned().unwrap_or_default().into());
+                    ui.set_screenshot_hotkey_display(descriptions.get(3).cloned().unwrap_or_default().into());
                 }
+                HotkeyStatus::Micro(3, description) => ui.set_screenshot_hotkey_display(description.into()),
+                HotkeyStatus::Micro(..) => {}
                 HotkeyStatus::AppManaged => {
                     diagnostics::set_hotkey("X11 (global-hotkey)");
                     ui.set_hotkey_system_managed(false);
@@ -351,6 +376,8 @@ fn main() -> Result<(), slint::PlatformError> {
             text: ui.get_setting_hotkey().to_string(),
             default: DEFAULT_HOTKEY_TEXT,
             trigger: trigger.clone(),
+            micro: false,
+            active: true,
         },
         Shortcut {
             id: "extract-text",
@@ -358,6 +385,8 @@ fn main() -> Result<(), slint::PlatformError> {
             text: ui.get_setting_text_hotkey().to_string(),
             default: DEFAULT_TEXT_HOTKEY_TEXT,
             trigger: extract_trigger.clone(),
+            micro: false,
+            active: true,
         },
         Shortcut {
             id: "measure",
@@ -365,6 +394,17 @@ fn main() -> Result<(), slint::PlatformError> {
             text: ui.get_setting_ruler_hotkey().to_string(),
             default: DEFAULT_RULER_HOTKEY_TEXT,
             trigger: measure_trigger.clone(),
+            micro: false,
+            active: true,
+        },
+        Shortcut {
+            id: "screenshot",
+            description: "Screenshot to clipboard (Archtoys)",
+            text: ui.get_setting_screenshot_hotkey().to_string(),
+            default: DEFAULT_SCREENSHOT_HOTKEY_TEXT,
+            trigger: screenshot_trigger.clone(),
+            micro: true,
+            active: ui.get_setting_micro_screenshot(),
         },
     ];
     let (hotkey_service, hotkey_texts) = HotkeyService::start(shortcuts, on_status);
@@ -376,7 +416,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| bring_to_front(&ui));
         })
     };
-    let _remote = single_instance::serve(show, trigger.clone(), extract_trigger.clone(), measure_trigger.clone());
+    let _remote =
+        single_instance::serve(show, trigger.clone(), extract_trigger.clone(), measure_trigger.clone(), screenshot_trigger.clone());
     if pick_now {
         trigger();
     }
@@ -386,11 +427,15 @@ fn main() -> Result<(), slint::PlatformError> {
     if measure_now {
         measure_trigger();
     }
+    if screenshot_now {
+        screenshot_trigger();
+    }
     let hotkey_service = Rc::new(hotkey_service);
     let active_hotkey_texts = Rc::new(RefCell::new(hotkey_texts.clone()));
     ui.set_setting_hotkey(hotkey_texts[0].clone().into());
     ui.set_setting_text_hotkey(hotkey_texts[1].clone().into());
     ui.set_setting_ruler_hotkey(hotkey_texts[2].clone().into());
+    ui.set_setting_screenshot_hotkey(hotkey_texts[3].clone().into());
 
     sync_history_model(&ui, &history_store);
     update_ui_colors(&ui, start_color);
@@ -413,13 +458,14 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         };
         // which toy's hotkey was being recorded
-        let index = ui.get_hotkey_target().clamp(0, 2) as usize;
+        let index = ui.get_hotkey_target().clamp(0, 3) as usize;
         let result = build_hotkey_from_capture(&key_text, ctrl, alt, shift, meta)
             .and_then(|candidate| hotkey_service_apply.change(index, &candidate));
         let set = |ui: &AppWindow, text: String| match index {
             0 => ui.set_setting_hotkey(text.into()),
             1 => ui.set_setting_text_hotkey(text.into()),
-            _ => ui.set_setting_ruler_hotkey(text.into()),
+            2 => ui.set_setting_ruler_hotkey(text.into()),
+            _ => ui.set_setting_screenshot_hotkey(text.into()),
         };
         match result {
             Ok(text) => {
@@ -433,6 +479,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 set(&ui, active_hotkey_texts.borrow()[index].clone());
             }
         }
+    });
+
+    // a Micro-toy switched on or off (on Home or in Settings)
+    let micro_ui = ui_handle.clone();
+    let micro_history = history_store.clone();
+    let micro_service = hotkey_service.clone();
+    ui.on_micro_toggled(move |on| {
+        let Some(ui) = micro_ui.upgrade() else { return };
+        ui.set_setting_micro_screenshot(on);
+        ocr::capture::set_screenshot_on(on);
+        micro_service.set_active(3, on);
+        persist_config(&ui, &micro_history);
     });
 
     let open_settings_service = hotkey_service.clone();

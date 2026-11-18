@@ -249,7 +249,6 @@ fn refresh(ui: &AppWindow) {
         ui.set_ruler_history(ModelRc::new(VecModel::from(rows)));
         let Some(newest) = h.first() else {
             ui.set_ruler_has_latest(false);
-            ui.set_home_last_measure("".into());
             ui.set_ruler_icon(icon(4));
             return;
         };
@@ -291,9 +290,6 @@ fn refresh(ui: &AppWindow) {
         ui.set_ruler_preview_bars(ModelRc::new(VecModel::from(bars)));
         ui.set_ruler_preview_frames(ModelRc::new(VecModel::from(frames)));
         ui.set_ruler_preview_labels(ModelRc::new(VecModel::from(labels)));
-        // Home and the icon: always the newest
-        ui.set_home_last_measure(newest.text(Unit::Px).into());
-        ui.set_home_last_measure_detail(detail(newest, now).into());
         // the icon's teeth: a tooth per cm of the newest shape's longest side
         let newest_shape = newest.sizes().last().copied().unwrap_or(Size { w: 0, h: 0 });
         ui.set_ruler_icon(icon(logic::teeth(newest_shape.w.max(newest_shape.h), newest.mm_per_px)));
@@ -331,5 +327,26 @@ mod tests {
         assert_eq!(shown_after_delete(3, 3, 5), 3); // it went: the next one takes its place
         assert_eq!(shown_after_delete(5, 5, 5), 4); // the last went: the new last
         assert_eq!(shown_after_delete(0, 0, 0), 0); // nothing left
+    }
+}
+
+#[cfg(test)]
+mod hunt_tests {
+    #[test]
+    fn a_broken_ruler_history_never_panics() {
+        for data in crate::hunt::files() {
+            let _ = serde_json::from_slice::<Vec<super::Entry>>(&data);
+        }
+        for text in crate::hunt::texts() {
+            let json = format!(
+                "[{{\"mode\": {}, \"shapes\": [[0, 0], [4294967295, 1]], \"mm_per_px\": -1, \"time\": 0}}]",
+                serde_json::Value::String(text)
+            );
+            if let Ok(entries) = serde_json::from_str::<Vec<super::Entry>>(&json) {
+                for e in &entries {
+                    let _ = (e.mode(), e.sizes(), e.text(super::Unit::Cm), super::detail(e, 0));
+                }
+            }
+        }
     }
 }
