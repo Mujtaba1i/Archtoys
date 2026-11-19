@@ -1059,6 +1059,7 @@ def ruler_checks(wm):
 
     @test("Screen Ruler", "the sidebar's ruler opens its page")
     def _():
+        not_on_kwin6("the sidebar works, but the window keeps the size KWin first gave it, so a click on it can miss")
         app.click(*AT["menu"], wait=1.0)  # pins the icons
         app.click(*AT["rail_ruler"])
         app.shot("ruler-page")
