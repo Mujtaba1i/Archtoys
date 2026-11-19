@@ -3,7 +3,7 @@
 # makes `--locked` fail) show up before you tag a release.
 #
 # v0.8.0: one job per kind of check, run side by side. Every job runs on
-# Ubuntu 24.04 (Unit tests: 26.04, see there), not ubuntu-latest: the binary Build makes must run on the
+# Ubuntu 24.04 (Unit tests and tesseract-install: 26.04, see there), not ubuntu-latest: the binary Build makes must run on the
 # Plasma 5 job (24.04, the last with Plasma 5), and the end-to-end checks'
 # click positions are measured with 24.04's fonts. (ubuntu-latest is now
 # 26.04: its glibc 2.43 binary wouldn't start on 24.04.)
@@ -526,7 +526,10 @@ jobs:
   # install script (kept equal by a unit test) as root in a clean container,
   # with nothing installed and with an older Tesseract already there.
   tesseract-install:
-    runs-on: ubuntu-24.04
+    # 26.04, not 24.04: everything here runs in a container, and on 24.04's
+    # runners apt inside it took up to 10 minutes to reach Ubuntu's servers
+    # (the whole job takes under a minute on 26.04)
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
