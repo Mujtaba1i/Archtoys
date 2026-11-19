@@ -62,11 +62,9 @@ export component SettingsPage inherits ScrollView {
     in-out property <int> setting-ruler-units;
     in-out property <bool> setting-ruler-cross;
     in property <bool> several-screens;
-    // Micro-toys (v0.8.0)
-    in property <bool> setting-micro-screenshot;
+    // Micro-toys (v0.8.0): their hotkeys (switched on and off on Home)
     in-out property <string> setting-screenshot-hotkey;
     in-out property <string> screenshot-hotkey-display;
-    callback micro-toggled(bool);
     callback ruler-clear();
 
     content-width: self.visible-width;
@@ -426,21 +424,12 @@ export component SettingsPage inherits ScrollView {
         }
 
         // Micro-toys have no page of their own, so their settings show
-        // wherever Settings was opened from
+        // wherever Settings was opened from. Switching one on or off is only
+        // on Home (one place for it).
         if !root.about-open : VerticalLayout {
             spacing: 10px;
             SectionLabel { text: "MICRO-TOYS"; }
 
-            SettingCard {
-                title: "Screenshot to clipboard";
-                subtitle: root.setting-micro-screenshot ? "Drag over an area and it's copied as a picture, never saved"
-                    : "Off: its hotkey is free for other apps";
-                Switch {
-                    label: "Screenshot to clipboard";
-                    checked: root.setting-micro-screenshot;
-                    toggled(on) => { root.micro-toggled(on); }
-                }
-            }
             SettingCard {
                 title: "Screenshot to clipboard hotkey";
                 subtitle: root.hotkey-system-managed ? "Your desktop manages it. Click to change it in System Settings."

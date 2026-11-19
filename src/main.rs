@@ -13,6 +13,39 @@ mod freeze;
 mod hotkey;
 #[cfg(test)]
 mod hunt;
+
+/// A hotkey's keys, one per keycap: "Ctrl+Super+C" gives Ctrl, Super, C. The
+/// desktop describes two shortcuts as "Meta+Ctrl+S, Meta+Shift+S": "or"
+/// goes between them (Home draws it as a word, not a key).
+fn hotkey_keys(hotkey: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    for (i, combo) in hotkey.split(',').map(str::trim).filter(|c| !c.is_empty()).enumerate() {
+        if i > 0 {
+            keys.push("or".to_string());
+        }
+        // "Ctrl++" is Ctrl and the + key
+        let combo = combo.replace("++", "+plus");
+        keys.extend(combo.split('+').map(str::trim).filter(|k| !k.is_empty()).map(|k| {
+            if k == "plus" {
+                "+".to_string()
+            } else {
+                k.to_string()
+            }
+        }));
+    }
+    keys
+}
+
+#[cfg(test)]
+mod keys_tests {
+    #[test]
+    fn two_shortcuts_become_two_sets_of_keys() {
+        assert_eq!(super::hotkey_keys("Ctrl+Super+C"), ["Ctrl", "Super", "C"]);
+        assert_eq!(super::hotkey_keys("Meta+Ctrl+S, Meta+Shift+S"), ["Meta", "Ctrl", "S", "or", "Meta", "Shift", "S"]);
+        assert_eq!(super::hotkey_keys("Ctrl++"), ["Ctrl", "+"]);
+        assert!(super::hotkey_keys("").is_empty());
+    }
+}
 mod kwin;
 mod launch;
 mod name_index;
@@ -240,7 +273,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.global::<Skin>().set_real_shadows(!cpu_drawn());
     // a hotkey's keys for the keycaps on Home ("Ctrl+Super+C": Ctrl, Super, C)
     ui.global::<Keys>().on_split(|hotkey| {
-        let keys: Vec<slint::SharedString> = hotkey.split('+').map(str::trim).filter(|k| !k.is_empty()).map(Into::into).collect();
+        let keys: Vec<slint::SharedString> = hotkey_keys(&hotkey).into_iter().map(Into::into).collect();
         slint::ModelRc::new(slint::VecModel::from(keys))
     });
     ui.set_app_version(env!("CARGO_PKG_VERSION").into());
@@ -488,7 +521,6 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_micro_toggled(move |on| {
         let Some(ui) = micro_ui.upgrade() else { return };
         ui.set_setting_micro_screenshot(on);
-        ocr::capture::set_screenshot_on(on);
         micro_service.set_active(3, on);
         persist_config(&ui, &micro_history);
     });

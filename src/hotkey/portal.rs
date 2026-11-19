@@ -163,6 +163,11 @@ fn bind_micro(conn: &Connection, shortcuts: &[Shortcut], index: usize, sessions:
     }
 }
 
+/// Which Micro-toy a session is (None: not a Micro-toy's).
+fn micro_index(sessions: &MicroSessions, path: &str) -> Option<usize> {
+    sessions.lock().unwrap().iter().find(|(_, s)| s.as_str() == path).map(|(i, _)| *i)
+}
+
 /// Closes Micro-toy `index`'s session: the desktop lets its keys go.
 fn close_micro(conn: &Connection, index: usize, sessions: &MicroSessions) {
     let Some(session) = sessions.lock().unwrap().remove(&index) else { return };
@@ -227,16 +232,22 @@ fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiv
         bind_micro(&conn, shortcuts, index, &micro_sessions, &on_status);
     }
 
-    // The user changed the shortcut in the desktop's settings.
+    // The user changed a shortcut in the desktop's settings (a toy's, or a
+    // Micro-toy's in its own session: a second key added there shows too).
     {
         let session = session.clone();
         let on_status = on_status.clone();
         let ids = ids.clone();
+        let micro_ids: Vec<&'static str> = shortcuts.iter().map(|s| s.id).collect();
+        let micro_sessions = micro_sessions.clone();
         thread::spawn(move || {
             for message in changed {
                 if let Ok((path, list)) = message.body().deserialize::<(OwnedObjectPath, ShortcutList)>() {
                     if path.as_str() == session {
                         on_status(HotkeyStatus::SystemManaged(describe(&list, &ids)));
+                    } else if let Some(index) = micro_index(&micro_sessions, path.as_str()) {
+                        let description = describe(&list, &micro_ids[index..=index]).into_iter().next().unwrap_or_default();
+                        on_status(HotkeyStatus::Micro(index, description));
                     }
                 }
             }
@@ -256,10 +267,18 @@ fn run(shortcuts: &[Shortcut], on_status: StatusCallback, commands: mpsc::Receiv
                 match command {
                     Command::Micro(index, true) => bind_micro(&conn, &shortcuts, index, &micro_sessions, &on_status),
                     Command::Micro(index, false) => close_micro(&conn, index, &micro_sessions),
-                    Command::Refresh => match list_shortcuts(&conn, &session, &ids) {
-                        Ok(descriptions) => on_status(HotkeyStatus::SystemManaged(descriptions)),
-                        Err(err) => eprintln!("hotkey: refresh failed: {err}"),
-                    },
+                    Command::Refresh => {
+                        match list_shortcuts(&conn, &session, &ids) {
+                            Ok(descriptions) => on_status(HotkeyStatus::SystemManaged(descriptions)),
+                            Err(err) => eprintln!("hotkey: refresh failed: {err}"),
+                        }
+                        let bound: Vec<(usize, String)> = micro_sessions.lock().unwrap().iter().map(|(i, s)| (*i, s.clone())).collect();
+                        for (index, micro_session) in bound {
+                            if let Ok(descriptions) = list_shortcuts(&conn, &micro_session, &[shortcuts[index].id]) {
+                                on_status(HotkeyStatus::Micro(index, descriptions.into_iter().next().unwrap_or_default()));
+                            }
+                        }
+                    }
                     Command::OpenSettings => {
                         // Portal version 2 can open the right settings page itself.
                         let opened = version >= 2

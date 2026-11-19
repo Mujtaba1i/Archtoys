@@ -368,7 +368,6 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     }
     ui.set_setting_reduce_motion(cfg.reduce_motion);
     ui.set_setting_micro_screenshot(cfg.micro_screenshot);
-    crate::ocr::capture::set_screenshot_on(cfg.micro_screenshot);
     if !cfg.screenshot_hotkey.trim().is_empty() {
         ui.set_setting_screenshot_hotkey(cfg.screenshot_hotkey.clone().into());
     }

@@ -14,19 +14,7 @@ use crate::{AppWindow, FreezePickerWindow, TextBox};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-/// The Screenshot to clipboard Micro-toy is on (its switch on Home and in
-/// Settings; Micro-toys are off until switched on).
-static SCREENSHOT_ON: AtomicBool = AtomicBool::new(false);
-
-pub(crate) fn set_screenshot_on(on: bool) {
-    SCREENSHOT_ON.store(on, Ordering::SeqCst);
-}
-
-pub(crate) fn screenshot_on() -> bool {
-    SCREENSHOT_ON.load(Ordering::SeqCst)
-}
+use std::sync::atomic::Ordering;
 
 /// How to put the main window back after a text capture: it is hidden (or
 /// made see-through on KDE) during the capture, so the text behind it can be read.
@@ -45,13 +33,11 @@ pub(crate) fn start(ui: &AppWindow) {
 }
 
 /// The Screenshot to clipboard Micro-toy: the same frozen screen, and the
-/// dragged area goes to the clipboard as a picture. UI thread only.
+/// dragged area goes to the clipboard as a picture. UI thread only. Its
+/// switch on Home only says whether its hotkey is bound (off, the keys are
+/// free for other apps): `archtoys --screenshot` always works.
 pub(crate) fn start_screenshot(ui: &AppWindow) {
-    if screenshot_on() {
-        start_mode(ui, true);
-    } else {
-        eprintln!("screenshot: Screenshot to clipboard is off (switch it on on Archtoys' Home)");
-    }
+    start_mode(ui, true);
 }
 
 fn start_mode(ui: &AppWindow, screenshot: bool) {
