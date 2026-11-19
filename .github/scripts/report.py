@@ -225,7 +225,9 @@ def build_report(tag, run_url, results, failures):
                     "by itself and opens an issue only if COPR needs your attention.")
 
     if not failed:
-        return None, None, f"# ✅ Release {tag} finished\n\n{table}\n\n{watcher_note}\n", 0
+        # all passed: one line, the steps folded under it
+        return None, None, (f"# ✅ Release {tag} finished\n\n{watcher_note}\n\n"
+                            f"<details><summary>Every step passed (click to see them)</summary>\n\n{table}\n\n</details>\n"), 0
 
     details = []
     for f in failures:

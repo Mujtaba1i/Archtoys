@@ -2,6 +2,12 @@
 # (including a Cargo.lock that is out of date after a version bump, which
 # makes `--locked` fail) show up before you tag a release.
 #
+# v0.8.0: one job per kind of check, run side by side. Every job runs on
+# Ubuntu 24.04, not ubuntu-latest: the binary Build makes must run on the
+# Plasma 5 job (24.04, the last with Plasma 5), and the end-to-end checks'
+# click positions are measured with 24.04's fonts. (ubuntu-latest became
+# 26.04 in November 2026: its glibc 2.43 binary wouldn't start on 24.04.)
+#
 # v0.8.0: one job per kind of check, run side by side. "Build" only builds
 # the release binary and hands it to the jobs that run the app; the jobs
 # that need the source (unit tests, clippy, search speed) compile their own.
@@ -37,7 +43,7 @@ env:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -65,7 +71,7 @@ jobs:
 
   unit-tests:
     name: Unit tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -88,7 +94,7 @@ jobs:
   # (.github/scripts/check.sh). Every check runs even when one before failed.
   code-quality:
     name: Code quality
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -104,9 +110,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
-      - name: "Checks: summary table"
-        run: printf '### Code quality\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
-
       - name: "Code: formatting (cargo fmt)"
         if: ${{ !cancelled() }}
         run: >-
@@ -121,10 +124,15 @@ jobs:
           "Each item below names the file and line and what clippy suggests; run cargo clippy --all-targets locally to see them, fix, and push."
           --keep '^(warning|error)|-->|= help' -- cargo clippy --locked --all-targets -- -D warnings
 
+      # the passes, folded into one line (failures are above, in the open)
+      - name: "Checks: what passed"
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/check.sh --passed "Code quality"
+
   app-tests-x11:
     name: App tests (X11)
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -138,7 +146,7 @@ jobs:
           chmod +x bin/archtoys
           sudo apt-get update
           sudo apt-get install -y xvfb x11-xserver-utils xdotool feh picom dbus openbox xclip python3-xlib python3-pil \
-            libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 fonts-dejavu-core tesseract-ocr
+            libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 fonts-dejavu-core fonts-noto-core fonts-liberation2 tesseract-ocr
 
       # Real picks on a virtual X11 screen split into two monitors: arrow keys,
       # Enter, a click and Esc, at the edge between the monitors and in the
@@ -186,7 +194,7 @@ jobs:
           chmod +x bin/archtoys
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-x11-0 kwin-wayland qdbus-qt5 dbus breeze xdg-desktop-portal-kde \
-            plasma-wayland-protocols libwayland-dev wl-clipboard python3-pil tesseract-ocr fonts-dejavu-core
+            plasma-wayland-protocols libwayland-dev wl-clipboard python3-pil tesseract-ocr fonts-dejavu-core fonts-noto-core fonts-liberation2
 
       # KWin's fake mouse and keyboard, for the end-to-end checks
       - name: Build wayland-input
@@ -194,7 +202,7 @@ jobs:
           xml=/usr/share/plasma-wayland-protocols/fake-input.xml
           wayland-scanner client-header "$xml" "$RUNNER_TEMP/fake-input.h"
           wayland-scanner private-code "$xml" "$RUNNER_TEMP/fake-input.c"
-          cc -O2 -o "$RUNNER_TEMP/wayland-input" .github/scripts/wayland-input.c "$RUNNER_TEMP/fake-input.c" -I"$RUNNER_TEMP" -lwayland-client
+          cc -O2 -o "$RUNNER_TEMP/wayland-input" .github/scripts/wayland-input.c "$RUNNER_TEMP/fake-input.c" -I"$RUNNER_TEMP" -lwayland-client -lm
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: "KDE Plasma 5 (Wayland): the window opens where it was closed"
@@ -254,7 +262,7 @@ jobs:
             xml=/usr/share/plasma-wayland-protocols/fake-input.xml
             wayland-scanner client-header "$xml" /tmp/fake-input.h
             wayland-scanner private-code "$xml" /tmp/fake-input.c
-            cc -O2 -o /usr/local/bin/wayland-input .github/scripts/wayland-input.c /tmp/fake-input.c -I/tmp -lwayland-client
+            cc -O2 -o /usr/local/bin/wayland-input .github/scripts/wayland-input.c /tmp/fake-input.c -I/tmp -lwayland-client -lm
             export XDG_RUNTIME_DIR="$(mktemp -d)"
             chmod 700 "$XDG_RUNTIME_DIR"
             dbus-run-session -- python3 .github/scripts/e2e_test.py bin/archtoys --wayland'
@@ -262,7 +270,7 @@ jobs:
   accuracy:
     name: Accuracy
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -300,7 +308,7 @@ jobs:
 
   speed:
     name: Speed
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -356,7 +364,7 @@ jobs:
     name: "Benchmark: this pull request vs main"
     if: github.event_name == 'pull_request'
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -411,7 +419,7 @@ jobs:
 
   packaging:
     name: Packaging and release scripts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -427,10 +435,6 @@ jobs:
           # without the run summary: the scripts under test write their fake
           # releases there (they showed up as "COPR: build #5 for 0.3.1")
           env -u GITHUB_STEP_SUMMARY python3 -m unittest discover -v -s .github/scripts -p 'test_*.py'
-
-      - name: "Checks: summary table"
-        if: ${{ !cancelled() }}
-        run: printf '### Packaging and project checks\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
 
       - name: "Software centers: the metainfo and .desktop file are valid"
         if: ${{ !cancelled() }}
@@ -462,12 +466,17 @@ jobs:
             --warn -- bash -c 'link=$(grep -oP "<a id=\"kofi\" href=\"\K[^\"]*" docs/support/index.html); [ -z "$link" ] && exit 0; code=$(curl -s -o /dev/null -w "%{http_code}" -A "archtoys-ci" "$link"); echo "$link answered HTTP $code"; [ "$code" != 404 ] && [ "$code" -lt 500 ]'
           exit $rc
 
+      # the passes, folded into one line (failures are above, in the open)
+      - name: "Checks: what passed"
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/check.sh --passed "Packaging and project checks"
+
   # cargo-deny, the released binary (checked against its SHA-256) instead of
   # compiling it on every run. Updating it: the new version and the SHA-256
   # from its release page (the .tar.gz.sha256 file).
   security:
     name: Security and licences
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       DENY_VERSION: 0.20.2
       DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
@@ -487,9 +496,6 @@ jobs:
           tar -xzf "$RUNNER_TEMP/deny.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/$name" >> "$GITHUB_PATH"
 
-      - name: "Checks: summary table"
-        run: printf '### Security and licences\n\n| | Check | What it checks |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
-
       # Every library must have a licence an MIT app can use and ship.
       - name: Licences
         if: ${{ !cancelled() }}
@@ -507,11 +513,16 @@ jobs:
           "Update the library named below: cargo update -p NAME (the Solution line gives the version that fixes it), run the tests, commit Cargo.lock."
           --keep '^(error|warning)\[|= (ID|Advisory|Solution|Announcement)|^[0-9]+ │' -- cargo deny check advisories
 
+      # the passes, folded into one line (failures are above, in the open)
+      - name: "Checks: what passed"
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/check.sh --passed "Security and licences"
+
   # Text Extractor's "Turn on" on each family it supports: the app's exact
   # install script (kept equal by a unit test) as root in a clean container,
   # with nothing installed and with an older Tesseract already there.
   tesseract-install:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -525,3 +536,25 @@ jobs:
         run: bash .github/scripts/tesseract-install-test.sh "${{ matrix.image }}" "${{ matrix.distro }}"
       - name: Turn on with an older Tesseract already there
         run: bash .github/scripts/tesseract-install-test.sh "${{ matrix.image }}" "${{ matrix.distro }}" preinstalled
+
+  # When CI fails on main, an issue says which jobs and steps failed and the
+  # log lines that say why (.github/scripts/ci_issue.py). One at a time: a
+  # later failure adds a comment, and the next green run on main closes it.
+  # (A pull request shows its failures on the pull request itself.)
+  report:
+    name: Report
+    if: ${{ !cancelled() && github.event_name == 'push' }}
+    needs: [build, unit-tests, code-quality, app-tests-x11, app-tests-plasma5, app-tests-plasma6, accuracy, speed, packaging, security, tesseract-install]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Open, update or close the CI issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/ci_issue.py

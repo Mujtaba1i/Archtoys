@@ -1,14 +1,27 @@
 #!/usr/bin/env bash
-# Runs one CI check and reports it in plain words: a row in the run summary
-# (what was checked, passed or failed), and for a failure the useful lines of
-# the tool's output and how to fix it, also as an error annotation. Never a
-# bare "exit code 1".
+# Runs one CI check and reports it in plain words. A failure goes in the run
+# summary in the open: what was checked, the useful lines of the tool's
+# output and how to fix it, also as an error annotation (never a bare "exit
+# code 1"). A pass is only noted, and the job's last step folds them all
+# into one line (v0.8.0: a page of passes hid the failures):
 #
 #   bash .github/scripts/check.sh "Title" "What it checks" "How to fix" [--keep REGEX] [--warn] -- command...
+#   bash .github/scripts/check.sh --passed "Code quality"     (the job's last step)
 #
 # --keep REGEX  only these output lines go in the report (the rest is in the log)
 # --warn        a failure is a warning: reported, but the step still passes
 set -uo pipefail
+summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+passes="${RUNNER_TEMP:-/tmp}/archtoys-checks-passed.md"
+if [ "${1:-}" = "--passed" ]; then
+  n=$( [ -f "$passes" ] && grep -c . "$passes" || echo 0)
+  if [ "$n" -gt 0 ]; then
+    { printf '<details><summary>✅ %s: %s check(s) passed (click to see them)</summary>\n\n' "$2" "$n"
+      cat "$passes"; printf '\n</details>\n\n'; } >> "$summary"
+  fi
+  rm -f "$passes"
+  exit 0
+fi
 title=$1 what=$2 fix=$3; shift 3
 keep="" warn=0
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do
@@ -24,9 +37,8 @@ out="$(mktemp)"
 code=$?
 cat "$out"
 
-summary=${GITHUB_STEP_SUMMARY:-/dev/null}
 if [ $code -eq 0 ]; then
-  printf '| ✅ | **%s** | %s |\n' "$title" "$what" >> "$summary"
+  printf -- '- ✅ **%s**: %s\n' "$title" "$what" >> "$passes"
   exit 0
 fi
 
@@ -43,10 +55,9 @@ lines="$(printf '%s\n' "$kept" | awk '
 mark="❌"; level=error
 if [ $warn = 1 ]; then mark="⚠️"; level=warning; fi
 {
-  printf '| %s | **%s** | %s |\n\n' "$mark" "$title" "$what"
-  printf '**%s: what to do.** %s\n\n' "$title" "$fix"
+  printf '### %s %s\n\n%s\n\n' "$mark" "$title" "$what"
+  printf '**What to do.** %s\n\n' "$fix"
   printf '<details><summary>What it found</summary>\n\n```\n%s\n```\n</details>\n\n' "${lines//\`\`\`/\'\'\'}"
-  printf '| | Check | What it checks |\n|---|---|---|\n'   # the next rows go in a fresh table
 } >> "$summary"
 # the headline: the first real error and where it is (cargo's "-->", cargo deny's "┌─"),
 # not whatever line came first (that was a warning's place, or a "│")

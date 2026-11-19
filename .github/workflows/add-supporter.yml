@@ -21,6 +21,8 @@ on:
 
 permissions:
   contents: write   # commits SUPPORTERS.md
+  actions: read     # a failure's issue reads which step failed
+  issues: write     # and opens it
 
 # one at a time, so two tips arriving together don't overwrite each other
 concurrency:
@@ -56,3 +58,13 @@ jobs:
           git commit -m "Add supporter: $SUPPORTER"
           git pull --rebase --quiet origin "${GITHUB_REF_NAME:-main}"
           git push --quiet origin "HEAD:${GITHUB_REF_NAME:-main}"
+
+      # A failure opens an issue (one at a time; it closes itself when a
+      # later run passes), so a supporter is never silently missed.
+      - name: Report a failure
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_TITLE: Adding a supporter failed
+          RESULTS: '{"add": {"result": "failure"}}'
+        run: python3 .github/scripts/ci_issue.py

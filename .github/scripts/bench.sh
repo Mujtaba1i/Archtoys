@@ -383,9 +383,14 @@ fi
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
-    if [ ${#WARNINGS[@]} -eq 0 ]; then echo "### ✅ Benchmark: $NEW_LABEL vs $OLD_LABEL"
-    else echo "### ⚠️ Benchmark: $NEW_LABEL vs $OLD_LABEL"; fi
-    echo; cat "$OUT/table.md"; echo
+    # no warnings: one line, the table folded under it
+    if [ ${#WARNINGS[@]} -eq 0 ]; then
+      echo "<details><summary>✅ Benchmark: $NEW_LABEL vs $OLD_LABEL, no big changes (click to see the numbers)</summary>"
+      echo; cat "$OUT/table.md"; echo; echo "</details>"
+    else
+      echo "### ⚠️ Benchmark: $NEW_LABEL vs $OLD_LABEL"
+      echo; cat "$OUT/table.md"; echo
+    fi
     for w in "${WARNINGS[@]}"; do echo "- ⚠️ $w"; done
     for key in "${FAILED[@]}"; do
       echo; echo "<details><summary>Output of the last $key run</summary>"; echo

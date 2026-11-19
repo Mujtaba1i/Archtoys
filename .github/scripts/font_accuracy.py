@@ -74,17 +74,21 @@ def main():
         return 0
     pct = lambda n: round(100 * n / total)
     times.sort()
+    # fine: one line, the lines folded under it (below the warning level they stay in the open)
+    fine = pct(top3) >= WARN_BELOW
     summary = [
-        "### Font finder (the fonts on the computer, warns only)",
+        f"### Font finder (the fonts on the computer, warns only) {'✅' if fine else '⚠️'}",
         "",
         f"First: **{pct(first)}%** · in the top 3: **{pct(top3)}%** · weight right (when found): {pct(weight)}% · "
         f"{total} lines, median {times[len(times) // 2]:.2f} s",
         "",
+        *(["<details><summary>Every line (click to see them)</summary>", ""] if fine else []),
         "| Drawn in | Size | | Archtoys' guesses (top 3) | Time |",
         "|---|---|---|---|---|",
         *rows,
         "",
         "✅ first, 🟡 in the top 3, ❌ not in it. Lines drawn by pango (GTK's text), slight hinting, gray smoothing.",
+        *(["", "</details>"] if fine else []),
     ]
     text = "\n".join(summary)
     print(text)

@@ -60,8 +60,13 @@ one 1
 one 2
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  # passed: one line, the checks folded under it (a failure stays in the open)
   {
-    echo "### Color picker: $desktop $([ "$failed" = 0 ] && echo "✅ passed" || echo "❌ failed")"
+    if [ "$failed" = 0 ]; then
+      echo "<details><summary>✅ Color picker: $desktop passed (${#rows[@]} checks, click to see them)</summary>"
+    else
+      echo "### Color picker: $desktop ❌ failed"
+    fi
     echo
     echo "The frozen screen must get ready on every monitor (issue #12: two monitors stayed black)."
     echo
@@ -69,6 +74,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "|---|---|---|---|"
     printf "%s\n" "${rows[@]}"
     echo
+    [ "$failed" = 0 ] && { echo "</details>"; echo; }
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 exit "$failed"

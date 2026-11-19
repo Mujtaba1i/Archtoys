@@ -121,9 +121,11 @@ def main():
     problems = [r for r in rows if r["acc"] < GATE or r["named"] != r["expected"]]
 
     # one line per text: the whole picture at a glance
+    # all right: one line, the table folded under it (a problem stays in the open)
     lines = [
         "### Text Extractor accuracy" + (" ❌" if failures else " ⚠️" if problems else " ✅"),
         "",
+        *([] if problems else [f"<details><summary>All {len(rows)} readings right (click to see them)</summary>", ""]),
         "| Text | Lowest (14 px +) | Average | Language right | Median time | Rule |",
         "|---|---|---|---|---|---|",
     ]
@@ -140,6 +142,8 @@ def main():
     downloads = [r for r in rows if r["download"]]
     if downloads:
         lines.append(f"The first non-English text also downloaded the languages ({downloads[0]['ms'] / 1000:.1f} s, once): left out of the median times.")
+    if not problems:
+        lines += ["", "</details>"]
 
     # only what went wrong, with what it read and why
     if problems:

@@ -26,8 +26,14 @@ rows=()
 report() {
   local verdict=$1
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  # passed: one line, the checks folded under it (a failure stays in the open)
+  local passed=0; [ "${verdict#✅}" != "$verdict" ] && passed=1
   {
-    echo "### Window place: $desktop $verdict"
+    if [ "$passed" = 1 ]; then
+      echo "<details><summary>✅ Window place: $desktop passed (${#rows[@]} checks, click to see them)</summary>"
+    else
+      echo "### Window place: $desktop $verdict"
+    fi
     echo
     echo "The main window must open where it was closed (issue #11), through Archtoys own KWin script."
     echo
@@ -35,6 +41,7 @@ report() {
     echo "|---|---|---|---|"
     printf "%s\n" "${rows[@]}"
     echo
+    [ "$passed" = 1 ] && { echo "</details>"; echo; }
   } >> "$GITHUB_STEP_SUMMARY"
 }
 check() {  # check NAME EXPECTED GOT: one row, and a failure when they differ
