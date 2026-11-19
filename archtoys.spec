@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.7.5
+Version:        0.8.0
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,18 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Thu Nov 19 2026 Mujtaba1i <mujtaba1i@github> - 0.8.0-1
+- Small wording change in readme
+- Contributing: say that CodeRabbit reviews pull requests
+- CI: a job for each kind of check, side by side, and the app tested on KDE Plasma (Wayland)
+- NEW! Micro-toys, starting with Screenshot to clipboard, and a safer, smaller Archtoys
+- CI: runs on Ubuntu 24.04, opens an issue when it fails, and folds what passed
+- Micro-toys: switched on only on Home, a second hotkey shows, and archtoys --screenshot always works
+- CI: the unit tests run on Ubuntu 26.04 again
+- Two icons nothing used are gone
+- CI: on KDE Plasma 6, the sidebar's ruler check is skipped with the reason
+- CI: Text Extractor's install check runs on Ubuntu 26.04 again
+
 * Sat Nov 14 2026 Mujtaba1i <mujtaba1i@github> - 0.7.5-1
 - CI: the package check no longer races the X server, and its issue shows the log
 - Screen Ruler: a box across two screens is filled on both
