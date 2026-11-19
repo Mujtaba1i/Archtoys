@@ -3,10 +3,10 @@
 # makes `--locked` fail) show up before you tag a release.
 #
 # v0.8.0: one job per kind of check, run side by side. Every job runs on
-# Ubuntu 24.04, not ubuntu-latest: the binary Build makes must run on the
+# Ubuntu 24.04 (Unit tests: 26.04, see there), not ubuntu-latest: the binary Build makes must run on the
 # Plasma 5 job (24.04, the last with Plasma 5), and the end-to-end checks'
-# click positions are measured with 24.04's fonts. (ubuntu-latest became
-# 26.04 in November 2026: its glibc 2.43 binary wouldn't start on 24.04.)
+# click positions are measured with 24.04's fonts. (ubuntu-latest is now
+# 26.04: its glibc 2.43 binary wouldn't start on 24.04.)
 #
 # v0.8.0: one job per kind of check, run side by side. "Build" only builds
 # the release binary and hands it to the jobs that run the app; the jobs
@@ -71,7 +71,11 @@ jobs:
 
   unit-tests:
     name: Unit tests
-    runs-on: ubuntu-24.04
+    # not 24.04: the color names index (data/names-index.bin) is checked against
+    # one built here with the math library's cbrt/pow/atan2/hypot, and glibc
+    # 2.41+ (26.04, Arch) gets those exact to the last bit while 24.04's 2.39 is
+    # sometimes one bit off, so the index never matched there
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
