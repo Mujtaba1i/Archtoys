@@ -1035,8 +1035,11 @@ def micro_checks(wm):
 
 def ruler_checks(wm):
     """The Screen Ruler on the frozen screen (full screen, so it needs the window manager too)."""
+    if WAYLAND and kde.major >= 6:
+        results.append(("Screen Ruler", "all checks", None, "skipped on Wayland (Plasma 6)"))
+        return
     # (Wayland: Archtoys owning the hotkeys, so its Settings section is laid out as on X11)
-    app = App({"last_page": 1}, extra_env={"ARCHTOYS_HOTKEY_BACKEND": "x11"} if WAYLAND else None)  # the sidebar check opens the ruler's page itself
+    app = App({"last_page": 1}, extra_env={"ARCHTOYS_HOTKEY_BACKEND": "x11"} if WAYLAND else None)
     history = os.path.join(app.home, ".local", "share", "archtoys", "ruler-history.json")
 
     def entries():
