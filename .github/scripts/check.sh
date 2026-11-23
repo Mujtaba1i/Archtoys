@@ -52,13 +52,6 @@ lines="$(printf '%s\n' "$kept" | awk '
   END { for (i = 0; i <= n; i++) if (err[i]) printf "%s", block[i]
         for (i = 0; i <= n; i++) if (!err[i]) printf "%s", block[i] }' | head -60)"
 [ -n "$lines" ] || lines="$(printf '%s\n' "$clean" | tail -30)"
-mark="❌"; level=error
-if [ $warn = 1 ]; then mark="⚠️"; level=warning; fi
-{
-  printf '### %s %s\n\n%s\n\n' "$mark" "$title" "$what"
-  printf '**What to do.** %s\n\n' "$fix"
-  printf '<details><summary>What it found</summary>\n\n```\n%s\n```\n</details>\n\n' "${lines//\`\`\`/\'\'\'}"
-} >> "$summary"
 # the headline: the first real error and where it is (cargo's "-->", cargo deny's "┌─"),
 # not whatever line came first (that was a warning's place, or a "│")
 first="$(printf '%s\n' "$clean" | awk '
@@ -67,6 +60,16 @@ first="$(printf '%s\n' "$clean" | awk '
   END { if (h != "" && !found) print h }')"
 [ -n "$first" ] || first="$(printf '%s\n' "$lines" | grep -m1 -v '^[[:space:]]*$')"
 first="$(printf '%s' "$first" | cut -c1-200)"
+mark="❌"; level=error
+if [ $warn = 1 ]; then mark="⚠️"; level=warning; fi
+# "what" is the goal, not the result: on a failure it says so, and what failed comes first
+{
+  q="'"
+  printf '### %s %s\n\n**What failed:** `%s`\n\n' "$mark" "$title" "${first//\`/$q}"
+  printf '**What it checks:** %s\n\n' "$what"
+  printf '**What to do.** %s\n\n' "$fix"
+  printf '<details><summary>Everything it found</summary>\n\n```\n%s\n```\n</details>\n\n' "${lines//\`\`\`/\'\'\'}"
+} >> "$summary"
 echo "::$level title=$title::$first. $fix"
 [ $warn = 1 ] && exit 0
 exit 1

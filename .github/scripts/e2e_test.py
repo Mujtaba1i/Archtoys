@@ -316,9 +316,11 @@ class Skip(Exception):
 
 
 def not_on_kwin6(why):
-    """A check a headless KWin 6 fails for a reason still to be found (v0.8.1): skipped, with why."""
-    if WAYLAND and kde.major >= 6:
-        raise Skip(f"headless KWin 6: {why} (to look into in v0.8.1; Plasma 5 and X11 pass it)")
+    """A check a headless KWin 6 fails for a reason still to be found: skipped, with why.
+    E2E_TRY_KWIN6=1 runs them anyway (v0.8.1: the sidebar's ruler passes again; the window
+    keeping KWin's first size isn't Archtoys' window script, tried without it)."""
+    if WAYLAND and kde.major >= 6 and not os.environ.get("E2E_TRY_KWIN6"):
+        raise Skip(f"headless KWin 6: {why} (Plasma 5 and X11 pass it)")
 
 
 def wait_for(predicate, timeout=5.0, step=0.1):
@@ -353,7 +355,9 @@ class App:
         os.chmod(runtime, 0o700)
         self.env = dict(os.environ, HOME=self.home, DISPLAY=DISPLAY_NUM, XDG_SESSION_TYPE="x11",
                         XDG_RUNTIME_DIR=runtime, XDG_CURRENT_DESKTOP="",
-                        PATH=self.bin_dir + ":" + os.environ["PATH"], ARCHTOYS_HOTKEY_BACKEND="x11")
+                        PATH=self.bin_dir + ":" + os.environ["PATH"], ARCHTOYS_HOTKEY_BACKEND="x11",
+                        # no real update check: a newer release's bubble would cover the bar
+                        ARCHTOYS_UPDATE_API="file:///nonexistent/release.json")
         self.env.pop("WAYLAND_DISPLAY", None)
         if WAYLAND:
             # KDE Plasma: the app's own Wayland window and the desktop's shortcuts; the screen it sees is kde.shot
@@ -1059,7 +1063,6 @@ def ruler_checks(wm):
 
     @test("Screen Ruler", "the sidebar's ruler opens its page")
     def _():
-        not_on_kwin6("the sidebar works, but the window keeps the size KWin first gave it, so a click on it can miss")
         app.click(*AT["menu"], wait=1.0)  # pins the icons
         app.click(*AT["rail_ruler"])
         app.shot("ruler-page")

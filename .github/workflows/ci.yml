@@ -3,7 +3,7 @@
 # makes `--locked` fail) show up before you tag a release.
 #
 # v0.8.0: one job per kind of check, run side by side. Every job runs on
-# Ubuntu 24.04 (Unit tests and tesseract-install: 26.04, see there), not ubuntu-latest: the binary Build makes must run on the
+# Ubuntu 24.04 (Unit tests: 26.04, Build: 22.04, see there), not ubuntu-latest: the binary Build makes must run on the
 # Plasma 5 job (24.04, the last with Plasma 5), and the end-to-end checks'
 # click positions are measured with 24.04's fonts. (ubuntu-latest is now
 # 26.04: its glibc 2.43 binary wouldn't start on 24.04.)
@@ -43,7 +43,9 @@ env:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-24.04
+    # 22.04, like the release: its build runs on 24.04 too, and the cache it
+    # saves on main (shared-key) is what the release build starts from
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -57,6 +59,8 @@ jobs:
           toolchain: stable
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-2204
 
       # a release build, so the app tests and the timings are the app's
       - name: Build
@@ -145,16 +149,27 @@ jobs:
           name: archtoys
           path: bin
 
+      # the downloaded packages, kept between runs (apt-cached.sh)
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-cache
+          key: apt-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ github.job }}-
+
       - name: Install what the tests need
         run: |
           chmod +x bin/archtoys
-          sudo apt-get update
-          sudo apt-get install -y xvfb x11-xserver-utils xdotool feh picom dbus openbox xclip python3-xlib python3-pil \
+          bash .github/scripts/apt-cached.sh xvfb x11-xserver-utils xdotool feh picom dbus openbox xclip python3-xlib python3-pil \
             libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2 fonts-dejavu-core fonts-noto-core fonts-liberation2 tesseract-ocr
 
       # Real picks on a virtual X11 screen split into two monitors: arrow keys,
       # Enter, a click and Esc, at the edge between the monitors and in the
       # corner (the monitor maths itself is covered by the unit tests).
+      # the update check against made-up releases (the real updates of each
+      # install are checked after a release, in package-check)
+      - name: Update check
+        run: bash .github/scripts/update-check-test.sh bin/archtoys
+
       - name: Pick on two monitors (X11)
         run: bash .github/scripts/x11-pick-test.sh bin/archtoys
 
@@ -193,11 +208,17 @@ jobs:
           name: archtoys
           path: bin
 
+      # the downloaded packages (about 500 MB), kept between runs (apt-cached.sh)
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-cache
+          key: apt-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ github.job }}-
+
       - name: Install KWin, and what the end-to-end checks need
         run: |
           chmod +x bin/archtoys
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-x11-0 kwin-wayland qdbus-qt5 dbus breeze xdg-desktop-portal-kde \
+          bash .github/scripts/apt-cached.sh libxkbcommon-x11-0 kwin-wayland qdbus-qt5 dbus breeze xdg-desktop-portal-kde \
             plasma-wayland-protocols libwayland-dev wl-clipboard python3-pil tesseract-ocr fonts-dejavu-core fonts-noto-core fonts-liberation2
 
       # KWin's fake mouse and keyboard, for the end-to-end checks
@@ -283,11 +304,17 @@ jobs:
           name: archtoys
           path: bin
 
+      # the downloaded packages, kept between runs (apt-cached.sh)
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/apt-cache
+          key: apt-${{ github.job }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: apt-${{ github.job }}-
+
       - name: Install Tesseract and the fonts the texts are drawn in
         run: |
           chmod +x bin/archtoys
-          sudo apt-get update
-          sudo apt-get install -y tesseract-ocr imagemagick fonts-dejavu-core fonts-liberation2 fonts-noto-core pango1.0-tools \
+          bash .github/scripts/apt-cached.sh tesseract-ocr imagemagick fonts-dejavu-core fonts-liberation2 fonts-noto-core pango1.0-tools \
             libxkbcommon-x11-0
 
       # Text Extractor: known text drawn at screen sizes, light and dark, in
@@ -526,10 +553,7 @@ jobs:
   # install script (kept equal by a unit test) as root in a clean container,
   # with nothing installed and with an older Tesseract already there.
   tesseract-install:
-    # 26.04, not 24.04: everything here runs in a container, and on 24.04's
-    # runners apt inside it took up to 10 minutes to reach Ubuntu's servers
-    # (the whole job takes under a minute on 26.04)
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

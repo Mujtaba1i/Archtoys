@@ -32,11 +32,12 @@ if [ "$mode" = preinstalled ]; then
   esac
 fi
 
-docker run --rm -v "$here/tesseract-install:/scripts:ro" "$image" sh -c "
+# mirror_try: a slow Ubuntu server switches to Azure's mirror (mirror-try.sh)
+docker run --rm -v "$here/tesseract-install:/scripts:ro" -v "$here/mirror-try.sh:/mirror-try.sh:ro" "$image" sh -c "
   set -e
-  $prepare
-  $preinstall
-  sh /scripts/$distro.sh > /tmp/install.log 2>&1 || { tail -n 30 /tmp/install.log; exit 1; }
+  . /mirror-try.sh
+  mirror_try sh -c '$prepare && $preinstall && sh /scripts/$distro.sh > /tmp/install.log 2>&1' \
+    || { tail -n 30 /tmp/install.log 2>/dev/null; exit 1; }
   version=\$(tesseract --version 2>&1 | head -n 1)
   echo \"installed: \$version\"
   v=\$(echo \"\$version\" | grep -oE '[0-9]+\.[0-9]+' | head -n 1)

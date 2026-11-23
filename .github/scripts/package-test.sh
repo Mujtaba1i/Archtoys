@@ -3,6 +3,7 @@
 #
 #   package-test.sh install <channel>   put the published package on the system
 #   package-test.sh start <channel>     the app must still run after 10 seconds
+#   package-test.sh update <channel>    the release before (PREV) updates itself to VERSION
 #
 # Channels: appimage, deb, aur-bin, aur, rpm. Needs VERSION (0.3.2) and REPO.
 # Every install checks it got exactly VERSION, so it can never test the old one.
@@ -28,9 +29,12 @@ fail_log() {
   exit 1
 }
 
+# mirror_try: a slow Ubuntu server switches to Azure's mirror
+. "$(dirname "$0")/mirror-try.sh"
+
 pkgs() {
   case "$ID" in
-    ubuntu|debian) apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$@" >/dev/null ;;
+    ubuntu|debian) mirror_try apt-get update -qq && DEBIAN_FRONTEND=noninteractive mirror_try apt-get install -y -qq "$@" >/dev/null ;;
     fedora) dnf install -y -q "$@" ;;
     arch) pacman -Syu --noconfirm --needed --quiet "$@" >/dev/null ;;
   esac
@@ -63,8 +67,18 @@ aur_install() {
     echo "AUR clone failed ($n/5); retrying in 15 s"
     sleep 15
   done
-  local aur_ver
+  local aur_ver c
   aur_ver="$(sed -n 's/^pkgver=//p' "/home/builder/$name/PKGBUILD")"
+  # the update check installs the release before: its PKGBUILD from the AUR's history
+  if [ "$aur_ver" != "$VERSION" ] && [ -n "${OLD_FROM_HISTORY:-}" ]; then
+    for c in $(sudo -u builder git -C "/home/builder/$name" rev-list HEAD -- PKGBUILD); do
+      if sudo -u builder git -C "/home/builder/$name" show "$c:PKGBUILD" | grep -qx "pkgver=$VERSION"; then
+        sudo -u builder git -C "/home/builder/$name" checkout -q "$c"
+        aur_ver="$VERSION"
+        break
+      fi
+    done
+  fi
   [ "$aur_ver" = "$VERSION" ] || fail "the AUR has $name $aur_ver, not $VERSION"
   (cd "/home/builder/$name" && sudo -u builder makepkg -si --noconfirm)
   pacman -Q "$name" | grep -q " $VERSION-" || fail "pacman did not install $name $VERSION"
@@ -101,7 +115,7 @@ install() {
       pkgs curl ca-certificates xvfb xdotool
       curl -fsSL -o /tmp/archtoys.deb "$url/archtoys_${VERSION}_amd64.deb" \
         || fail "could not download archtoys_${VERSION}_amd64.deb from the release"
-      apt-get install -y -qq /tmp/archtoys.deb
+      mirror_try apt-get install -y -qq /tmp/archtoys.deb
       [ "$(dpkg-query -W -f='${Version}' archtoys)" = "$VERSION" ] || fail "apt did not install archtoys $VERSION" ;;
     aur-bin) aur_install archtoys-bin ;;
     aur) aur_install archtoys ;;
@@ -222,7 +236,38 @@ PY
   echo "The window keeps its size through closes at SLINT_SCALE_FACTOR=1.5 ($size): OK"
 }
 
+# The release before, installed the same way, must update itself to VERSION
+# with `archtoys --update` (the steps the app's Update button runs), reading
+# this release from ARCHTOYS_UPDATE_API (the workflow saves it as a file).
+update() {
+  : "${PREV:?}" "${ARCHTOYS_UPDATE_API:?}"
+  local new="$VERSION"
+  VERSION="$PREV" OLD_FROM_HISTORY=1 install
+  VERSION="$new"
+  local got
+  case "$channel" in
+    appimage)
+      APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE=/opt/archtoys.AppImage /opt/archtoys.AppImage --update 2>&1 | tee /tmp/update.log \
+        || fail_log /tmp/update.log "archtoys --update failed:"
+      got="$(APPIMAGE_EXTRACT_AND_RUN=1 /opt/archtoys.AppImage --version 2>/dev/null | awk '{ print $2 }')" ;;
+    deb)
+      archtoys --update 2>&1 | tee /tmp/update.log || fail_log /tmp/update.log "archtoys --update failed:"
+      got="$(dpkg-query -W -f='${Version}' archtoys)"
+      ! ls /tmp/tmp.*.deb >/dev/null 2>&1 || fail "the downloaded .deb was left behind in /tmp" ;;
+    aur-bin|aur)
+      ARCHTOYS_UPDATE_USER=builder archtoys --update 2>&1 | tee /tmp/update.log || fail_log /tmp/update.log "archtoys --update failed:"
+      got="$(pacman -Q "archtoys${channel#aur}" | awk '{ print $2 }')"
+      got="${got%-*}" ;;
+    rpm)
+      archtoys --update 2>&1 | tee /tmp/update.log || fail_log /tmp/update.log "archtoys --update failed:"
+      got="$(rpm -q --qf '%{VERSION}' archtoys)" ;;
+    *) fail "unknown channel $channel" ;;
+  esac
+  [ "$got" = "$VERSION" ] || fail_log /tmp/update.log "after archtoys --update the installed version is ${got:-unknown}, not $VERSION:"
+  echo "$PREV updated itself to $VERSION: OK"
+}
+
 case "$cmd" in
-  install|start) "$cmd" ;;
+  install|start|update) "$cmd" ;;
   *) fail "unknown command $cmd" ;;
 esac

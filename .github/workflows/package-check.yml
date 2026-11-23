@@ -81,6 +81,59 @@ jobs:
         if: always()
         run: docker rm -f clean || true
 
+  # The update path (v0.8.1): the release before, installed like a user's,
+  # must update itself to this one with `archtoys --update`, which runs the
+  # same steps as the app's Update button. Releases before 0.8.1 have no
+  # updater, so there is nothing to check until the release after 0.8.1.
+  update:
+    name: Update from the release before (${{ matrix.channel }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { channel: deb, image: "ubuntu:22.04" }
+          - { channel: appimage, image: "ubuntu:22.04" }
+          - { channel: aur-bin, image: "archlinux:latest" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+
+      # this release as the app reads it, saved with the workflow's token
+      # (the container's own requests could hit GitHub's hourly limit)
+      - name: Find the release before
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName -q '.[].tagName' | { cat; echo "$TAG"; } | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -V -u | awk -v t="$TAG" '$0 == t { exit } { p = $0 } END { print p }')"
+          if [ -z "$prev" ] || [ "$(printf '%s\n' "$prev" v0.8.1 | sort -V | head -n 1)" != v0.8.1 ]; then
+            echo "The release before (${prev:-none}) has no updater yet: nothing to check." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          echo "prev=${prev#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Start a clean container
+        if: steps.prev.outputs.prev != ''
+        run: |
+          docker run -d --name clean -e VERSION="${TAG#v}" -e PREV="${{ steps.prev.outputs.prev }}" -e REPO="$GITHUB_REPOSITORY" \
+            -e ARCHTOYS_UPDATE_API=file:///release.json -v "$RUNNER_TEMP/release.json:/release.json:ro" \
+            -v "$PWD/.github/scripts:/scripts:ro" "${{ matrix.image }}" sleep 7200
+
+      - name: Install the release before and update it
+        if: steps.prev.outputs.prev != ''
+        run: docker exec clean bash /scripts/package-test.sh update "${{ matrix.channel }}"
+
+      - name: Clean up
+        if: always()
+        run: docker rm -f clean || true
+
   # The published binary (the release tarball, also used by archtoys-bin)
   # against the previous release's: size, time until the window shows, CPU and
   # memory. A report, not a gate: the table and any warnings go to this run's
@@ -137,7 +190,7 @@ jobs:
   report:
     name: Report
     if: always()
-    needs: [plan, check]
+    needs: [plan, check, update]
     runs-on: ubuntu-latest
     permissions:
       contents: read
