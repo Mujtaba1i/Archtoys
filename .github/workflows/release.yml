@@ -3,11 +3,13 @@
 #     git tag v1.2.3
 #     git push origin main v1.2.3
 #
-#   wait-for-ci ── prepare ──┬─ build-tarball ──┐
-#                            ├─ build-appimage ─┴─ publish-release ─┬─ aur-bin
-#                            │                                      ├─ aur-source
-#                            ├─ trigger-copr ───────────────────────┴─ copr-watch
-#                            └─ build-deb ── (optional) ─ attach-deb (after publish-release)
+#   wait-for-ci ── prepare ──┬─ build-tarball ─┬─ build-appimage ─┬─ publish-release ─┬─ aur-bin
+#                            │                 │  (+ tarball) ────┘                   ├─ aur-source
+#                            ├─ trigger-copr ──┼──────────────────────────────────────┴─ copr-watch
+#                            │                 └─ build-deb ── (optional) ─ attach-deb (after publish-release)
+#
+# build-tarball builds the app once (from main's CI cache); the AppImage and
+# the .deb pack that same binary.
 #   report (always runs last: summary table; opens an issue if anything failed)
 #
 # Required parts stop the release if they fail. Optional parts (the .deb) never
@@ -78,6 +80,8 @@ jobs:
           fetch-depth: 0     # full history + tags, for the changelog
 
       - id: prepare
+        env:
+          MAIN_PUSH_KEY: ${{ secrets.MAIN_PUSH_KEY }}   # past the Require CI rule (push-main.sh)
         run: bash .github/scripts/prepare-release.sh
 
   build-tarball:
@@ -99,18 +103,26 @@ jobs:
         with:
           toolchain: stable
 
-      # A release runs on a tag, and a tag can never read an earlier tag's cache, so
-      # saving one here only fills GitHub's 10 GB cache storage.
+      # A tag can't read an earlier tag's cache, but it reads main's: CI's Build
+      # job saves one under the same shared key on the same Ubuntu. Saving one
+      # here would only fill GitHub's 10 GB cache storage.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
+          shared-key: release-2204
           save-if: false
 
       # No `cargo test` here: CI already ran the tests on this code, and the
       # release waits for CI to pass first (the wait-for-ci job).
       # The licence list shown in Settings > About, made for exactly this build.
+      # cargo-about's own ready-made build, checked against its SHA-256
+      # (compiling it took over 2 minutes).
       - name: Licence list
         run: |
-          cargo install --locked cargo-about --version 0.9.3 --features cli
+          curl -fsSL -o cargo-about.tar.gz \
+            https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.3/cargo-about-0.9.3-x86_64-unknown-linux-musl.tar.gz
+          echo "3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4  cargo-about.tar.gz" | sha256sum -c -
+          tar -xzf cargo-about.tar.gz --strip-components=1 -C "$HOME/.cargo/bin" --wildcards '*/cargo-about'
+          rm cargo-about.tar.gz
           cargo about generate about.hbs -o data/third-party-licenses.html
 
       - name: Build release binary
@@ -147,9 +159,16 @@ jobs:
           path: archtoys-linux-x86_64.tar.gz
           if-no-files-found: error
 
+      # The one build every package ships: the AppImage and .deb jobs take it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: binary
+          path: target/release/archtoys
+          if-no-files-found: error
+
   build-appimage:
     name: Build + smoke-test AppImage
-    needs: prepare
+    needs: [prepare, build-tarball]
     # Oldest supported Ubuntu LTS: the AppImage catalog tests on 22.04.
     runs-on: ubuntu-22.04
     steps:
@@ -165,19 +184,16 @@ jobs:
           sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev curl \
             libxkbcommon0 libxkbcommon-x11-0 libxcursor1 libxi6 libxrender1 xvfb
 
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          toolchain: stable
-
-      # A release runs on a tag, and a tag can never read an earlier tag's cache, so
-      # saving one here only fills GitHub's 10 GB cache storage.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: false
+          name: binary
+          path: target/release
 
       - name: Build AppImage
+        env:
+          ARCHTOYS_PREBUILT: "1"
         run: |
-          chmod +x packaging/build-appimage.sh
+          chmod +x packaging/build-appimage.sh target/release/archtoys
           ./packaging/build-appimage.sh "${{ needs.prepare.outputs.version }}"
 
       # The AppImage catalog (and older distros) run on Ubuntu 22.04 = glibc 2.35.
@@ -228,7 +244,7 @@ jobs:
   # the failure report explains each one.
   build-deb:
     name: Build + test the .deb (optional)
-    needs: prepare
+    needs: [prepare, build-tarball]
     # Oldest supported Ubuntu LTS, so one .deb works on Ubuntu 22.04+ and Debian 12+.
     runs-on: ubuntu-22.04
     steps:
@@ -236,47 +252,25 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev
-
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           toolchain: stable
 
-      # A release runs on a tag, and a tag can never read an earlier tag's cache, so
-      # saving one here only fills GitHub's 10 GB cache storage.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: false
-
       - name: Install the packaging tool
         run: cargo install cargo-deb --locked --version 3.8.0
 
-      # The licence list shown in Settings > About, made for exactly this build.
-      - name: Licence list
-        run: |
-          cargo install --locked cargo-about --version 0.9.3 --features cli
-          cargo about generate about.hbs -o data/third-party-licenses.html
-
-      - name: Build the app
-        run: cargo build --release --locked
-
-      # Same rule as the other builds: nothing newer than Ubuntu 22.04's glibc.
-      - name: Check required glibc (max 2.35)
-        run: |
-          NEED="$(objdump -T target/release/archtoys | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -uV | tail -n 1)"
-          echo "Binary requires glibc $NEED"
-          if [ "$(printf '%s\n' "$NEED" 2.35 | sort -V | tail -n 1)" != "2.35" ]; then
-            echo "::error::Binary needs glibc $NEED, newer than 2.35 (Ubuntu 22.04)."
-            exit 1
-          fi
+      # The build the tarball job made (and checked for glibc 2.35).
+      - name: Get the built app
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: binary
+          path: target/release
 
       - name: Create the .deb
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
+          chmod +x target/release/archtoys
           cargo deb --no-build --deb-revision "" --output "archtoys_${VERSION}_amd64.deb"
           ls -la archtoys_*.deb
 
@@ -288,7 +282,9 @@ jobs:
         run: |
           docker run -d --name clean ubuntu:22.04 sleep 3600
           docker cp archtoys_*.deb clean:/tmp/archtoys.deb
-          docker exec clean bash -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/archtoys.deb xvfb'
+          # mirror_try: a slow Ubuntu server switches to Azure's mirror
+          docker cp .github/scripts/mirror-try.sh clean:/tmp/mirror-try.sh
+          docker exec clean bash -c '. /tmp/mirror-try.sh && mirror_try apt-get update -qq && DEBIAN_FRONTEND=noninteractive mirror_try apt-get install -y -qq /tmp/archtoys.deb xvfb'
 
       # The installed app must still be running after 10 seconds, like the
       # AppImage smoke test.

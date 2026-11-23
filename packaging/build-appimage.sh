@@ -20,8 +20,15 @@ mkdir -p \
   "${APPDIR}/usr/share/applications" \
   "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
 
-echo "[1/5] Building release binary..."
-cargo build --release --locked
+# The release builds the binary once and passes it to every package
+# (ARCHTOYS_PREBUILT=1 with target/release/archtoys already there).
+if [ -n "${ARCHTOYS_PREBUILT:-}" ]; then
+  echo "[1/5] Using the prebuilt target/release/archtoys"
+  test -x target/release/archtoys
+else
+  echo "[1/5] Building release binary..."
+  cargo build --release --locked
+fi
 
 echo "[2/5] Preparing AppDir..."
 install -Dm755 "${ROOT_DIR}/target/release/archtoys" "${APPDIR}/usr/bin/archtoys-bin"

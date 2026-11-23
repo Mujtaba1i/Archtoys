@@ -33,7 +33,7 @@ OPTIONAL = {j for j, _, k in JOBS if k == "optional"}
 WHAT_HAPPENED = {
     "wait-for-ci":     "CI didn't pass for the commit you tagged (or never ran for it), so the release stopped at the very start.",
     "prepare":         "The release stopped while checking the tag and bumping the version. The error lines below say exactly why (for example, the tag isn't on your newest commit).",
-    "build-tarball":   "The app failed to build (or failed the glibc check).",
+    "build-tarball":   "The app failed to build (or failed the glibc check). The AppImage and .deb pack this build, so they wait for it.",
     "build-appimage":  "The AppImage failed to build, failed the glibc check, or crashed in the smoke test.",
     "publish-release": "Creating the GitHub release failed.",
     "trigger-copr":    "COPR refused the webhook (usually a wrong or missing COPR_WEBHOOK_URL secret).",
@@ -49,12 +49,9 @@ STEP_ADVICE = {
     "Install the packaging tool": (
         "A network hiccup, or the pinned cargo-deb version needs a newer Rust.",
         "Re-run failed jobs. If it fails again, change the cargo-deb version in .github/workflows/release.yml."),
-    "Build the app": (
-        "A compile error, so the other builds usually fail too.",
-        "Read the error lines and fix the code the same way as for the other builds."),
-    "Check required glibc (max 2.35)": (
-        "Something now needs a newer glibc than Ubuntu 22.04 has.",
-        "Find what changed (usually a new dependency) and avoid it, as for the AppImage."),
+    "Get the built app": (
+        "The .deb packs the app the tarball job built, and that build is missing.",
+        "Re-run failed jobs. If the tarball job failed too, fix that first: its error lines say why."),
     "Create the .deb": (
         "A packaging setting is wrong: a file path, icon or the desktop file.",
         "Check [package.metadata.deb] in Cargo.toml: the assets paths must exist, and the error names the first one that doesn't."),

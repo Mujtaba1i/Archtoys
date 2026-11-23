@@ -51,13 +51,14 @@ jobs:
         if: steps.add.outputs.changed == 'true'
         env:
           SUPPORTER: ${{ steps.add.outputs.name }}
+          MAIN_PUSH_KEY: ${{ secrets.MAIN_PUSH_KEY }}   # past the Require CI rule (push-main.sh)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add SUPPORTERS.md
           git commit -m "Add supporter: $SUPPORTER"
           git pull --rebase --quiet origin "${GITHUB_REF_NAME:-main}"
-          git push --quiet origin "HEAD:${GITHUB_REF_NAME:-main}"
+          bash .github/scripts/push-main.sh "HEAD:refs/heads/${GITHUB_REF_NAME:-main}"
 
       # A failure opens an issue (one at a time; it closes itself when a
       # later run passes), so a supporter is never silently missed.

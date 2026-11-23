@@ -99,8 +99,9 @@ if git diff --quiet; then
   echo "Files already say $VERSION; nothing to commit."
 else
   git commit --quiet -am "Release $TAG"
-  git push --quiet origin "HEAD:refs/heads/main" \
-    || fail "Could not push the release commit to main (did main change during the release?). Re-run this workflow."
+  # push-main.sh: the "Require CI" rule on main lets this commit in only through the deploy key
+  bash "$(dirname "$0")/push-main.sh" "HEAD:refs/heads/main" \
+    || fail "Could not push the release commit to main. Did main change during the release? Re-run this workflow. If it says GH013 (repository rule violations), the MAIN_PUSH_KEY secret or its deploy key in the Require CI bypass list is missing."
 fi
 
 SHA="$(git rev-parse HEAD)"
