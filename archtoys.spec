@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.8.0
+Version:        0.8.1
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,14 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Mon Nov 23 2026 Mujtaba1i <mujtaba1i@github> - 0.8.1-1
+- README: Updated Homepage image
+- Security: a library the app uses gets its fix for a reported flaw
+- CI: steadier and faster: slow Ubuntu servers switch to another mirror, downloaded packages are kept, and updates are tested
+- Release: the app is built once for every package, and the release commit gets past the Require CI rule
+- NEW! Archtoys tells you when a new version is out and updates itself the way you installed it
+- CI: skipping the screen ruler in Wayland, Plasma 6
+
 * Thu Nov 19 2026 Mujtaba1i <mujtaba1i@github> - 0.8.0-1
 - Small wording change in readme
 - Contributing: say that CodeRabbit reviews pull requests
