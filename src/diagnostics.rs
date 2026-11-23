@@ -2,7 +2,6 @@
 //! (no file paths, user names, color history or colors).
 
 use std::collections::VecDeque;
-use std::path::Path;
 use std::sync::Mutex;
 
 /// The last messages Archtoys printed (cleaned), for a report.
@@ -141,18 +140,6 @@ pub fn set_hotkey(method: &'static str) {
     *HOTKEY.lock().unwrap() = method;
 }
 
-fn install_method() -> &'static str {
-    if std::env::var_os("APPIMAGE").is_some() {
-        "AppImage"
-    } else if std::env::var_os("FLATPAK_ID").is_some() || Path::new("/.flatpak-info").exists() {
-        "Flatpak"
-    } else if std::env::current_exe().is_ok_and(|exe| exe.starts_with("/usr")) {
-        "package"
-    } else {
-        "built from source"
-    }
-}
-
 fn pretty_name(os_release: &str) -> Option<String> {
     os_release.lines().find_map(|line| line.strip_prefix("PRETTY_NAME=")).map(|value| value.trim_matches('"').to_string())
 }
@@ -196,7 +183,7 @@ fn info(screens: &Screens) -> String {
     format!(
         "- Archtoys: {}\n- Installed as: {}\n- Distro: {}\n- Desktop: {} ({})\n- Session: {}\n- Screens: {}\n- Archtoys scale: {:.0}%{}\n- Drawn with: {}\n- Picker: {}\n- Hotkey: {}\n- Text Extractor: {}\n",
         env!("CARGO_PKG_VERSION"),
-        install_method(),
+        crate::update::installed::installed().label(),
         distro,
         env_or_unknown("XDG_CURRENT_DESKTOP"),
         desktop_version(),

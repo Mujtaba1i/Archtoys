@@ -58,6 +58,7 @@ mod search;
 mod single_instance;
 mod tray;
 mod ui_state;
+mod update;
 mod verify;
 mod window;
 
@@ -223,6 +224,11 @@ fn main() -> Result<(), slint::PlatformError> {
     if args.iter().any(|a| a == "--check-tesseract") {
         std::process::exit(ocr::check_tesseract());
     }
+    // the running file, before an update can replace it
+    update::remember_exe();
+    if args.iter().any(|a| a == "--update") {
+        std::process::exit(update::cli(args.iter().any(|a| a == "--dry-run")));
+    }
     let autostart = std::env::args().any(|arg| arg == "--start-hidden" || arg == "--minimized");
     let pick_now = std::env::args().any(|arg| arg == "--pick");
     let extract_now = std::env::args().any(|arg| arg == "--extract");
@@ -334,6 +340,12 @@ fn main() -> Result<(), slint::PlatformError> {
         });
         let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
         fontfind::page::wire(&ui, &history_store, move || {
+            if let Some(ui) = save_ui.upgrade() {
+                persist_config(&ui, &save_history);
+            }
+        });
+        let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
+        update::page::install(&ui, move || {
             if let Some(ui) = save_ui.upgrade() {
                 persist_config(&ui, &save_history);
             }

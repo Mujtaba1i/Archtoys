@@ -1,0 +1,315 @@
+// Updates (v0.8.1): the bubble in the title bar and its dialog. Rust
+// (src/update/) checks once a day after the start and fills `Updater`.
+import { Skin, PillButton } from "common.slint";
+
+export global Updater {
+    // Settings: check for updates once a day
+    in-out property <bool> check: true;
+    // 0 nothing to show, 1 a new version is out, 2 updating, 3 updated (restart), 4 the update failed
+    in-out property <int> state;
+    in-out property <bool> dialog-open;
+    in property <string> version;
+    in property <string> current;
+    // the release notes' first lines
+    in property <[string]> notes;
+    // Archtoys can install it itself (package manager, .deb, AppImage); else only the release page
+    in property <bool> can-install;
+    // 0 to 1
+    in property <float> progress;
+    // what it does now: "Building from source"
+    in property <string> step;
+    // every step, and which one is running
+    in property <[string]> steps;
+    in property <int> step-index;
+    in property <string> error;
+    callback update();
+    callback skip();
+    callback release-page();
+    callback restart();
+    callback settings-changed();
+}
+
+// A ring that fills with the update's progress (the bubble while updating).
+component Ring inherits Rectangle {
+    in property <float> progress;
+    in property <color> fill;
+    width: 16px;
+    height: 16px;
+    property <float> p: Math.clamp(root.progress, 0.01, 0.999);
+    animate p { duration: 400ms; easing: ease-out; }
+    property <float> angle: root.p * 2 * 3.14159265;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: Skin.border;
+        stroke-width: 2.5px;
+        commands: "M 8 2 A 6 6 0 1 1 7.99 2";
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 16;
+        viewbox-height: 16;
+        stroke: root.fill;
+        stroke-width: 2.5px;
+        commands: "M 8 2 A 6 6 0 \{root.angle > 3.14159265 ? 1 : 0} 1 \{8 + 6 * Math.sin(root.angle * 1rad)} \{8 - 6 * Math.cos(root.angle * 1rad)}";
+    }
+}
+
+// Top right of the title bar: "Update available", or the progress while
+// updating. A click opens the dialog.
+export component UpdateBubble inherits Rectangle {
+    height: 28px;
+    width: row.preferred-width + 24px;
+    border-radius: 14px;
+    background: Skin.aurora-accent.mix(Skin.bg-color, touch.has-hover ? 0.32 : 0.22);
+    border-width: 1px;
+    border-color: Skin.aurora-accent.transparentize(0.25);
+    accessible-role: button;
+    accessible-label: row-text.text;
+    accessible-action-default => { Updater.dialog-open = true; }
+    row := HorizontalLayout {
+        x: 10px;
+        spacing: 7px;
+        VerticalLayout {
+            alignment: center;
+            if Updater.state == 2 : Ring {
+                progress: Updater.progress;
+                fill: Skin.aurora-accent;
+            }
+            if Updater.state != 2 : Image {
+                source: @image-url("download.svg");
+                width: 15px;
+                height: 15px;
+                colorize: Skin.aurora-accent;
+            }
+        }
+        row-text := Text {
+            text: Updater.state == 2 ? "Updating \{Math.round(Updater.progress * 100)}%"
+                : Updater.state == 3 ? "Restart to update"
+                : Updater.state == 4 ? "Update failed" : "Update available";
+            color: Skin.text-main;
+            font-size: 13px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { clicked => { Updater.dialog-open = true; } }
+}
+
+// The main button of the dialog, in the aurora's color.
+component AuroraButton inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+    height: 38px;
+    min-width: label.preferred-width + 36px;
+    border-radius: 10px;
+    background: touch.pressed ? Skin.aurora-accent.darker(0.15) : touch.has-hover ? Skin.aurora-accent.brighter(0.08) : Skin.aurora-accent;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    label := Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: Skin.aurora-ink;
+        font-size: 14px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// Over the whole window: the new version and what to do, or the progress.
+export component UpdateDialog inherits Rectangle {
+    background: #05060899;
+    // a click beside the card closes it (the update goes on, the bubble shows it)
+    TouchArea { clicked => { Updater.dialog-open = false; } }
+
+    card := Rectangle {
+        width: Math.min(560px, root.width - 32px);
+        height: body.preferred-height;
+        x: (root.width - self.width) / 2;
+        y: Math.max(16px, (root.height - self.height) / 2 - 20px);
+        background: Skin.surface;
+        border-radius: 18px;
+        border-width: 1px;
+        border-color: Skin.border;
+        drop-shadow-blur: Skin.real-shadows ? 30px : 0px;
+        drop-shadow-color: #00000080;
+        drop-shadow-offset-y: 12px;
+        TouchArea { }
+
+        body := VerticalLayout {
+            padding: 26px;
+            spacing: 18px;
+
+            // the new version
+            HorizontalLayout {
+                spacing: 16px;
+                Rectangle {
+                    width: 48px;
+                    height: 48px;
+                    border-radius: 13px;
+                    background: Skin.aurora-accent.transparentize(0.86);
+                    border-width: 1px;
+                    border-color: Skin.aurora-accent.transparentize(0.55);
+                    Image {
+                        source: @image-url("download.svg");
+                        width: 24px;
+                        height: 24px;
+                        colorize: Skin.aurora-accent;
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 3px;
+                    Text {
+                        text: Updater.state == 2 ? "Updating Archtoys"
+                            : Updater.state == 3 ? "Archtoys \{Updater.version} is installed"
+                            : Updater.state == 4 ? "The update didn't work" : "Archtoys \{Updater.version} is out";
+                        color: Skin.text-main;
+                        font-size: 21px;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: Updater.state == 2 ? "\{Updater.current} to \{Updater.version}"
+                            : Updater.state == 3 ? "Restart Archtoys to use it" : "You have \{Updater.current}";
+                        color: Skin.text-muted;
+                        font-size: 14px;
+                    }
+                }
+            }
+
+            // what's new
+            if Updater.state == 1 && Updater.notes.length > 0 : Rectangle {
+                background: Skin.bg-color;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Skin.border;
+                height: notes.preferred-height;
+                notes := VerticalLayout {
+                    padding: 14px;
+                    spacing: 6px;
+                    for line in Updater.notes : HorizontalLayout {
+                        spacing: 9px;
+                        Text {
+                            text: "•";
+                            color: Skin.text-muted;
+                            font-size: 14px;
+                        }
+                        Text {
+                            text: line;
+                            color: Skin.text-main;
+                            font-size: 14px;
+                            wrap: word-wrap;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+            }
+
+            // the progress, and each step
+            if Updater.state == 2 : VerticalLayout {
+                spacing: 10px;
+                Rectangle {
+                    height: 8px;
+                    border-radius: 4px;
+                    background: Skin.track;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * Math.clamp(Updater.progress, 0, 1);
+                        animate width { duration: 400ms; easing: ease-out; }
+                        border-radius: 4px;
+                        background: Skin.aurora-accent;
+                    }
+                }
+                HorizontalLayout {
+                    Text {
+                        text: Updater.step;
+                        color: Skin.text-muted;
+                        font-size: 13px;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: "\{Math.round(Updater.progress * 100)}%";
+                        color: Skin.text-muted;
+                        font-size: 13px;
+                    }
+                }
+                for name[i] in Updater.steps : Text {
+                    text: (i < Updater.step-index ? "✓  " : i == Updater.step-index ? "●  " : "○  ") + name;
+                    color: i < Updater.step-index ? #3fae66 : i == Updater.step-index ? Skin.text-main : Skin.text-muted;
+                    font-size: 14px;
+                }
+            }
+
+            if Updater.state == 4 : Text {
+                text: Updater.error;
+                color: Skin.text-main;
+                font-size: 14px;
+                wrap: word-wrap;
+            }
+
+            // the buttons
+            HorizontalLayout {
+                spacing: 10px;
+                if Updater.state == 1 : Text {
+                    text: "Skip this version";
+                    color: skip.has-hover ? Skin.text-main : Skin.text-muted;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                    accessible-role: button;
+                    accessible-action-default => { Updater.skip(); }
+                    skip := TouchArea { clicked => { Updater.skip(); } }
+                }
+                // pushes the buttons to the right
+                Rectangle { horizontal-stretch: 1; }
+                if Updater.state == 1 || Updater.state == 4 : PillButton {
+                    text: Updater.can-install ? "Release page" : "Later";
+                    height: 38px;
+                    clicked => {
+                        if Updater.can-install {
+                            Updater.release-page();
+                        } else {
+                            Updater.dialog-open = false;
+                        }
+                    }
+                }
+                if (Updater.state == 1 && Updater.can-install) || Updater.state == 4 : PillButton {
+                    text: "Later";
+                    height: 38px;
+                    clicked => { Updater.dialog-open = false; }
+                }
+                if Updater.state == 1 : AuroraButton {
+                    text: Updater.can-install ? "Update" : "Open the download page";
+                    clicked => {
+                        if Updater.can-install {
+                            Updater.update();
+                        } else {
+                            Updater.release-page();
+                        }
+                    }
+                }
+                if Updater.state == 2 : PillButton {
+                    text: "Hide";
+                    height: 38px;
+                    clicked => { Updater.dialog-open = false; }
+                }
+                if Updater.state == 3 : PillButton {
+                    text: "Later";
+                    height: 38px;
+                    clicked => { Updater.dialog-open = false; }
+                }
+                if Updater.state == 3 : AuroraButton {
+                    text: "Restart now";
+                    clicked => { Updater.restart(); }
+                }
+            }
+        }
+    }
+}

@@ -5,6 +5,7 @@ import { ScrollView, AboutSlint } from "std-widgets.slint";
 import { ComboBox } from "std-widgets.slint";
 import { Skin, HeaderButton, PillButton, Switch, Segmented, SettingCard, SectionLabel } from "common.slint";
 import { FontFinder } from "text.slint";
+import { Updater } from "update.slint";
 
 export component SettingsPage inherits ScrollView {
     in-out property <bool> about-open;
@@ -464,6 +465,15 @@ export component SettingsPage inherits ScrollView {
                     label: "Reduce motion";
                     checked: root.setting-reduce-motion;
                     toggled(on) => { root.setting-reduce-motion = on; root.settings-changed(); }
+                }
+            }
+            SettingCard {
+                title: "Check for updates";
+                subtitle: "Once a day, after Archtoys starts";
+                Switch {
+                    label: "Check for updates";
+                    checked: Updater.check;
+                    toggled(on) => { Updater.check = on; root.settings-changed(); }
                 }
             }
             SettingCard {

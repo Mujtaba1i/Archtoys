@@ -4,7 +4,9 @@ import { TextExtractorPage, TextEntry } from "text.slint";
 import { SettingsPage } from "settings.slint";
 import { RulerPage, RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.slint";
 import { FormatsPanel, ColorEditor, SearchBar, ColorPickerPage } from "picker.slint";
+import { Updater, UpdateBubble, UpdateDialog } from "update.slint";
 // Rust reaches these through this file
+export { Updater } from "update.slint";
 export { FieldRow, FormatOption, SearchCard, ShadeCell, Skin, Keys } from "common.slint";
 export { TextEntry, FontFinder } from "text.slint";
 export { RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.slint";
@@ -279,7 +281,7 @@ export component AppWindow inherits Window {
     // light <-> dark fades instead of jumping (see Skin.dark-t)
     property <float> theme-t: Skin.dark-mode ? 1 : 0;
     animate theme-t { duration: root.started ? 200ms : 0ms; easing: ease-in-out; }
-    init => { Skin.dark-t = self.theme-t; }
+    init => { Skin.dark-t = self.theme-t; Skin.aurora = self.aurora; }
     changed theme-t => { Skin.dark-t = self.theme-t; }
     callback search-changed(string);
     callback search-hovered(int);
@@ -305,6 +307,8 @@ export component AppWindow inherits Window {
     // the aurora follows the color smoothly
     property <color> aurora: root.current-color;
     animate aurora { duration: root.started ? 500ms : 0ms; easing: ease-in-out; }
+    // switches, Home icons and the update bubble follow it (Skin.aurora-accent)
+    changed aurora => { Skin.aurora = self.aurora; }
     // Colors and the theme only fade once the app is up: at startup the saved
     // theme and color replace the defaults at once, without a flash.
     property <bool> started: false;
@@ -886,6 +890,11 @@ export component AppWindow inherits Window {
             menu-clicked => { root.menu-clicked(); }
             start-move => { root.window-move(); }
         }
+        // a new version, or the update's progress (v0.8.1)
+        if Updater.state > 0 : UpdateBubble {
+            x: parent.width - self.width - 10px;
+            y: (root.title-h - self.height) / 2;
+        }
 
         // the sidebar: pinned beside the toy, or opened over it
         side := Sidebar {
@@ -953,6 +962,14 @@ export component AppWindow inherits Window {
                     root.formats-open = false;
                 }
             }
+        }
+
+        // the update dialog, over everything
+        if Updater.dialog-open && Updater.state > 0 : UpdateDialog {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
         }
     }
 }

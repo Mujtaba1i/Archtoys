@@ -69,6 +69,14 @@ export global Skin {
     out property <color> track: pick(#2c2f37, #e3e6ec);
     // how strong the aurora glow is
     out property <float> aurora-strength: 0.28 + 0.02 * dark-t;
+    // the aurora's color (the selected one), copied in by AppWindow (v0.8.1)
+    in-out property <color> aurora: #cbb6ac;
+    // The aurora as an accent (switches, Home icons, the update bubble and
+    // button): its hue, but always bright and colorful enough to see on the
+    // background, so a black, white or gray pick still shows.
+    out property <color> aurora-accent: hsv(aurora.to-hsv().hue, max(aurora.to-hsv().saturation, 0.45), Math.clamp(aurora.to-hsv().value, 0.5, 0.7 + 0.15 * dark-t));
+    // text on aurora-accent: dark on a light accent, else white
+    out property <color> aurora-ink: (0.2126 * aurora-accent.red + 0.7152 * aurora-accent.green + 0.0722 * aurora-accent.blue) / 255 > 0.6 ? #16181d : #ffffff;
     // Blurred shadows and rounded clipping need OpenGL. Drawn on the CPU (the
     // `cpu` build), Rust sets this off: `RingGlow` stands in for the shadows,
     // and rounded parts get their own corners instead of being clipped.
@@ -407,7 +415,7 @@ export component Switch inherits Rectangle {
     width: 44px;
     height: 26px;
     border-radius: 13px;
-    background: root.checked ? Skin.accent : Skin.track;
+    background: root.checked ? Skin.aurora-accent : Skin.track;
     animate background { duration: 120ms; }
     accessible-role: checkbox;
     accessible-checked: root.checked;
