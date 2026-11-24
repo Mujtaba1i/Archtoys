@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.8.1
+Version:        0.8.2
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Tue Nov 24 2026 Mujtaba1i <mujtaba1i@github> - 0.8.2-1
+- Home: the toy icons' corners are smooth again
+- Release: only the files users download are attached
+
 * Mon Nov 23 2026 Mujtaba1i <mujtaba1i@github> - 0.8.1-1
 - README: Updated Homepage image
 - Security: a library the app uses gets its fix for a reported flaw
