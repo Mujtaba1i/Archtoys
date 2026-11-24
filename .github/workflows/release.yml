@@ -325,10 +325,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      # only what users download: the run also holds the bare binary the
+      # AppImage and .deb jobs share (it was attached to v0.8.1 by mistake)
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          name: tarball
           path: artifacts
-          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: appimage
+          path: artifacts
 
       - run: ls -la artifacts
 
