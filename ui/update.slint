@@ -22,6 +22,9 @@ export global Updater {
     in property <[string]> steps;
     in property <int> step-index;
     in property <string> error;
+    // Settings' Check now: "Checking...", "You're up to date (0.8.3)", or why it couldn't
+    in property <string> check-status;
+    callback check-now();
     callback update();
     callback skip();
     callback release-page();

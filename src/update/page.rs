@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// The first check waits until Archtoys is up (never during the start).
-const FIRST_CHECK: Duration = Duration::from_secs(20);
+const FIRST_CHECK: Duration = Duration::from_secs(5);
 const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub(crate) fn install(ui: &AppWindow, persist: impl Fn() + Clone + 'static) {
@@ -44,6 +44,30 @@ pub(crate) fn install(ui: &AppWindow, persist: impl Fn() + Clone + 'static) {
     g.on_release_page(move || {
         let page = f.lock().unwrap().as_ref().map(|r| r.page.clone()).unwrap_or_default();
         crate::open_link(if page.is_empty() { "https://github.com/Mujtaba1i/Archtoys/releases/latest" } else { &page });
+    });
+
+    // Settings' Check now: asks right away, even with the daily check off or the version skipped
+    let (weak, f) = (ui.as_weak(), found.clone());
+    g.on_check_now(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        ui.global::<Updater>().set_check_status("Checking...".into());
+        let (weak, f) = (ui.as_weak(), f.clone());
+        std::thread::spawn(move || {
+            let answer = super::latest();
+            let _ = weak.upgrade_in_event_loop(move |ui| {
+                let g = ui.global::<Updater>();
+                match answer {
+                    Ok(release) if super::is_newer(&release.version, env!("CARGO_PKG_VERSION")) => {
+                        g.set_check_status("".into());
+                        *f.lock().unwrap() = Some(release.clone());
+                        show(&ui, &release);
+                        g.set_dialog_open(true);
+                    }
+                    Ok(_) => g.set_check_status(format!("You're up to date ({})", env!("CARGO_PKG_VERSION")).into()),
+                    Err(_) => g.set_check_status("Couldn't reach GitHub. Try again later.".into()),
+                }
+            });
+        });
     });
 
     let p = persist.clone();

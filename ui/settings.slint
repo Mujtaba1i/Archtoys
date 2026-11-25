@@ -469,11 +469,21 @@ export component SettingsPage inherits ScrollView {
             }
             SettingCard {
                 title: "Check for updates";
-                subtitle: "Once a day, after Archtoys starts";
-                Switch {
-                    label: "Check for updates";
-                    checked: Updater.check;
-                    toggled(on) => { Updater.check = on; root.settings-changed(); }
+                subtitle: Updater.check-status != "" ? Updater.check-status : "Once a day, after Archtoys starts";
+                HorizontalLayout {
+                    spacing: 10px;
+                    PillButton {
+                        text: "Check now";
+                        clicked => { Updater.check-now(); }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Switch {
+                            label: "Check for updates";
+                            checked: Updater.check;
+                            toggled(on) => { Updater.check = on; root.settings-changed(); }
+                        }
+                    }
                 }
             }
             SettingCard {
