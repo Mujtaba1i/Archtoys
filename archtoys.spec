@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.8.2
+Version:        0.8.3
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Wed Nov 25 2026 Mujtaba1i <mujtaba1i@github> - 0.8.3-1
+- Updates: a Check now button in Settings, and the first check comes 5 seconds after the start
+- CI: the search speed is timed in the real app, against a 5 ms budget
+- Release: the version bump and new supporters no longer run CI a second time
+- README: shorter, with the details moved to the wiki
+
 * Tue Nov 24 2026 Mujtaba1i <mujtaba1i@github> - 0.8.2-1
 - Home: the toy icons' corners are smooth again
 - Release: only the files users download are attached
