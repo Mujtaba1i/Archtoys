@@ -115,6 +115,6 @@ Bug reports, ideas, and PRs are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md) 
 ## Acknowledgements and license
 
 * **Inspiration:** [Microsoft PowerToys](https://github.com/microsoft/PowerToys) (independent project; unaffiliated with Microsoft) and [PixelKit](https://github.com/Kuucheen/PixelKit) (MIT).
-* **Libraries & Data:** [color-names](https://github.com/meodai/color-names) ([MIT](data/colornames-LICENSE.txt)), local [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) & [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache-2.0), [whatlang](https://github.com/greyblake/whatlang-rs) (MIT), and [Slint](https://slint.dev). Full license list in **Settings → About Archtoys → Open-source licences**.
+* **Libraries & Data:** [color-names](https://github.com/meodai/color-names) ([MIT](data/colornames-LICENSE.txt)), local [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) & [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache-2.0), [whatlang](https://github.com/greyblake/whatlang-rs) (MIT), and [Slint](https://slint.dev). Full license list in **Settings -> About Archtoys -> Open-source licences**.
 
 [MIT](LICENSE) © 2026 Mujtaba1i
