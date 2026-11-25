@@ -98,7 +98,10 @@ git --no-pager diff --stat
 if git diff --quiet; then
   echo "Files already say $VERSION; nothing to commit."
 else
-  git commit --quiet -am "Release $TAG"
+  # [skip ci] (in the body, so the title stays "Release vX" for the changelog):
+  # CI already passed on the tagged commit, and this one only changes the
+  # version and the changelog. The deploy key's push would start CI again.
+  git commit --quiet -am "Release $TAG" -m "[skip ci]"
   # push-main.sh: the "Require CI" rule on main lets this commit in only through the deploy key
   bash "$(dirname "$0")/push-main.sh" "HEAD:refs/heads/main" \
     || fail "Could not push the release commit to main. Did main change during the release? Re-run this workflow. If it says GH013 (repository rule violations), the MAIN_PUSH_KEY secret or its deploy key in the Require CI bypass list is missing."

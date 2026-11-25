@@ -72,6 +72,8 @@ class PrepareRelease(unittest.TestCase):
         self.assertIn("compare/v0.1.0...v0.1.1", notes)
         self.assertIn('version = "0.1.1"', Path(self.repo, "Cargo.toml").read_text())
         self.assertEqual(self.git("log", "-1", "--format=%s", "origin/main"), "Release v0.1.1")
+        # CI passed on the tagged commit already: the release commit doesn't start it again
+        self.assertIn("[skip ci]", self.git("log", "-1", "--format=%b", "origin/main"))
         self.assertEqual(self.git("rev-parse", "v0.1.1^{commit}"), self.git("rev-parse", "origin/main"))
 
     def test_retrying_a_tag_after_its_release_commit_was_pushed(self):

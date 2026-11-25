@@ -56,7 +56,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add SUPPORTERS.md
-          git commit -m "Add supporter: $SUPPORTER"
+          # [skip ci]: only SUPPORTERS.md changed, CI has nothing new to test
+          git commit -m "Add supporter: $SUPPORTER" -m "[skip ci]"
           git pull --rebase --quiet origin "${GITHUB_REF_NAME:-main}"
           bash .github/scripts/push-main.sh "HEAD:refs/heads/${GITHUB_REF_NAME:-main}"
 
