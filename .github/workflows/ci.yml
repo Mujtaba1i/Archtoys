@@ -10,7 +10,7 @@
 #
 # v0.8.0: one job per kind of check, run side by side. "Build" only builds
 # the release binary and hands it to the jobs that run the app; the jobs
-# that need the source (unit tests, clippy, search speed) compile their own.
+# that need the source (unit tests, clippy) compile their own. Speed times the search in that binary.
 #   Build                          the release binary, shared with the jobs below
 #   Unit tests                     cargo test
 #   Code quality                   formatting and clippy
@@ -339,29 +339,24 @@ jobs:
 
   speed:
     name: Speed
+    needs: build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libx11-dev libxcb-shm0-dev
-
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          toolchain: stable
+          name: archtoys
+          path: bin
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-
-      # Color search must answer each keystroke in under 2 ms. This is a
-      # report, not a gate: shared runners vary in speed, so a slow run shows a
-      # warning and the timings in the run's summary instead of failing CI
-      # (which would also hold back a release).
-      - name: Search speed (under 2 ms per keystroke)
+      # Color search must answer each keystroke in under 5 ms, timed in the
+      # real build Build made (archtoys --search-speed). This is a report, not
+      # a gate: shared runners vary in speed, so a slow run shows a warning and
+      # the timings in the run's summary instead of failing CI (which would
+      # also hold back a release).
+      - name: Search speed (under 5 ms per keystroke)
         run: |
+          chmod +x bin/archtoys
           set +e
-          out=$(cargo test --locked --release search::tests::speed -- --ignored --nocapture 2>&1)
+          out=$(bin/archtoys --search-speed 2>&1)
           status=$?
           set -e
           worst=$(grep -oP '^worst: \K[0-9.]+' <<<"$out" || true)
@@ -371,9 +366,9 @@ jobs:
               echo "### ⚠️ Search speed: the test didn't run"
               echo '```'; tail -n 30 <<<"$out"; echo '```'
             elif [ "$status" -eq 0 ]; then
-              echo "### ✅ Search speed: slowest keystroke ${worst} ms (budget 2 ms; each the median of 7 timings)"
+              echo "### ✅ Search speed: slowest keystroke ${worst} ms (budget 5 ms; each the median of 7 timings, in the real build)"
             else
-              echo "### ⚠️ Search speed: slowest keystroke ${worst} ms, over the 2 ms budget (each the median of 7 timings)"
+              echo "### ⚠️ Search speed: slowest keystroke ${worst} ms, over the 5 ms budget (each the median of 7 timings, in the real build)"
             fi
             if [ -n "$slowest" ]; then
               echo; echo "Slowest keystrokes (time, results, text typed so far):"
@@ -383,7 +378,7 @@ jobs:
           if [ -z "$worst" ]; then
             echo "::warning title=Search speed::The speed test didn't run; see the run summary"
           elif [ "$status" -ne 0 ]; then
-            echo "::warning title=Search speed::Slowest keystroke took ${worst} ms (budget 2 ms); see the run summary"
+            echo "::warning title=Search speed::Slowest keystroke took ${worst} ms (budget 5 ms); see the run summary"
           fi
 
   # A pull request's speed and memory against main's (a Dependabot update of

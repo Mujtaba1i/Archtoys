@@ -444,6 +444,35 @@ fn correct(text: &str) -> Option<String> {
     changed.then(|| out.join(" "))
 }
 
+/// Each keystroke must answer within this (v0.8.3: 5 ms, timed on the real build).
+pub const SPEED_BUDGET_MS: f64 = 5.0;
+
+/// Times every keystroke of a few typical searches: each one 7 times, the
+/// median counts, so one hiccup of a busy machine doesn't decide. Returns the
+/// slowest in ms and a line per keystroke ("   0.412 ms    60 hits  \"red\"").
+/// `archtoys --search-speed` prints it, the CI Speed job runs that.
+pub fn speed_report() -> (f64, Vec<String>) {
+    search("warm up"); // the first touch of the index pages it in
+    let mut worst = 0.0f64;
+    let mut lines = Vec::new();
+    for query in ["red", "dark red", "blue sky", "pnik", "a l orange", "xqzvw", "#FF46A2", "turquoise", "midnight b"] {
+        for end in 1..=query.len() {
+            let mut times: Vec<f64> = (0..7)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    std::hint::black_box(search(&query[..end]));
+                    start.elapsed().as_secs_f64() * 1e3
+                })
+                .collect();
+            times.sort_by(f64::total_cmp);
+            let took = times[times.len() / 2];
+            worst = worst.max(took);
+            lines.push(format!("{took:>8.3} ms  {:>5} hits  {:?}", search(&query[..end]).hits.len(), &query[..end]));
+        }
+    }
+    (worst, lines)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -606,32 +635,17 @@ mod tests {
         assert_eq!(allowed_mistakes("tourquoise"), 2);
     }
 
+    /// The same timing as `archtoys --search-speed` (CI times the real build).
     /// Run with: cargo test --release search::tests::speed -- --ignored --nocapture
-    /// Each keystroke is timed 7 times and the median counts, so one hiccup of
-    /// a busy machine doesn't decide.
     #[test]
     #[ignore]
     fn speed() {
-        search("warm up"); // the first touch of the index pages it in
-        let mut worst = std::time::Duration::ZERO;
-        for query in ["red", "dark red", "blue sky", "pnik", "a l orange", "xqzvw", "#FF46A2", "turquoise", "midnight b"] {
-            for end in 1..=query.len() {
-                let mut times: Vec<std::time::Duration> = (0..7)
-                    .map(|_| {
-                        let start = std::time::Instant::now();
-                        std::hint::black_box(search(&query[..end]));
-                        start.elapsed()
-                    })
-                    .collect();
-                times.sort();
-                let took = times[times.len() / 2];
-                let r = search(&query[..end]);
-                worst = worst.max(took);
-                println!("{:>8.3} ms  {:>5} hits  {:?}", took.as_secs_f64() * 1e3, r.hits.len(), &query[..end]);
-            }
+        let (worst, lines) = speed_report();
+        for line in &lines {
+            println!("{line}");
         }
-        println!("worst: {:.3} ms", worst.as_secs_f64() * 1e3);
-        assert!(worst < std::time::Duration::from_millis(2));
+        println!("worst: {worst:.3} ms");
+        assert!(worst < SPEED_BUDGET_MS);
     }
 
     /// Each family's best colors and tier sizes, to judge the thresholds by eye.

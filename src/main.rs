@@ -226,6 +226,14 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     // the running file, before an update can replace it
     update::remember_exe();
+    if args.iter().any(|a| a == "--search-speed") {
+        let (worst, lines) = search::speed_report();
+        for line in &lines {
+            println!("{line}");
+        }
+        println!("worst: {worst:.3} ms (budget {} ms)", search::SPEED_BUDGET_MS);
+        std::process::exit(if worst < search::SPEED_BUDGET_MS { 0 } else { 1 });
+    }
     if args.iter().any(|a| a == "--update") {
         std::process::exit(update::cli(args.iter().any(|a| a == "--dry-run")));
     }

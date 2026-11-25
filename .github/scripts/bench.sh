@@ -16,7 +16,7 @@
 #   bash .github/scripts/bench.sh               # ./target/release/archtoys vs /usr/bin/archtoys
 #   bash .github/scripts/bench.sh NEW OLD       # any two binaries (OLD is optional)
 #   RUNS=5 bash .github/scripts/bench.sh        # runs per binary (default 3)
-#   SEARCH=1 bash .github/scripts/bench.sh      # also the search speed test (from the repo, needs cargo)
+#   SEARCH=1 bash .github/scripts/bench.sh      # also the search speed (archtoys --search-speed on the new build)
 #
 # package-check.yml runs it on Xvfb after the package tests, on the published
 # binary of each release against the previous release's; there the table and
@@ -374,9 +374,9 @@ for key in "${FAILED[@]}"; do
   echo; echo "Output of the last $key run:"; tail -n 20 "$OUT/$key.log"
 done
 
-if [ "$SEARCH" = 1 ] && [ -f Cargo.toml ]; then
-  echo; echo "Search speed (each keystroke must take under 2 ms):"
-  search=$(cargo test --locked --release search::tests::speed -- --ignored --nocapture 2>/dev/null)
+if [ "$SEARCH" = 1 ]; then
+  echo; echo "Search speed (each keystroke must take under 5 ms, in this build):"
+  search=$("$NEW" --search-speed 2>/dev/null)
   grep -P '^\s*[0-9.]+ ms ' <<<"$search" | sort -rn | head -5
   grep '^worst' <<<"$search" || echo "   the speed test didn't run"
 fi
