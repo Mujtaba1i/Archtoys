@@ -367,4 +367,4 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 - Vendor crate dependencies for offline mock buildroot compatibility
 
 * Thu Jun 12 2025 Mujtaba1i <mujtaba1i@github> - 0.2.1-1
-- Initial Fedora Copr release
+-  Initial Fedora Copr release
