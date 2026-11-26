@@ -23,6 +23,7 @@ from report import api_jobs, gh, log_excerpt  # noqa: E402
 CHANNELS = {
     "appimage": "AppImage",
     "deb": ".deb",
+    "apt": "APT repository",
     "aur-bin": "AUR archtoys-bin",
     "aur": "AUR archtoys",
     "rpm": "Fedora RPM",
@@ -30,6 +31,7 @@ CHANNELS = {
 FIXED = [
     ("appimage", "ubuntu:22.04"), ("appimage", "fedora:latest"), ("appimage", "archlinux:latest"),
     ("deb", "ubuntu:22.04"), ("deb", "ubuntu:24.04"), ("deb", "debian:12"),
+    ("apt", "ubuntu:24.04"), ("apt", "debian:12"),
     ("aur-bin", "archlinux:latest"), ("aur", "archlinux:latest"),
 ]
 
@@ -43,6 +45,11 @@ ADVICE = {
     (INSTALL, "appimage"): (
         "The AppImage could not be downloaded from the release. This points to the pipeline.",
         "Check that the release has `Archtoys-<version>-x86_64.AppImage`. If it is missing, look at the release run."),
+    (INSTALL, "apt"): (
+        "apt could not install archtoys from the APT repository: the release's apt-repo job failed or was "
+        "skipped (its secrets), GitHub Pages didn't publish it, or the signature didn't check out.",
+        "Look at the release run's \"Update the APT repository\" job and at https://mujtaba1i.github.io/archtoys-apt. "
+        "Re-run that job, then this check."),
     (INSTALL, "deb"): (
         "apt could not install the .deb: a dependency is missing or misnamed on this distro, or the .deb is "
         "not on the release. This points to the packaging.",

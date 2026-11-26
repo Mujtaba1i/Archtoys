@@ -152,6 +152,7 @@ pub fn steps(how: &Installed) -> Vec<&'static str> {
         Installed::AurBin => vec!["Downloading", "Preparing", "Installing"],
         Installed::Rpm => vec!["Downloading and installing"],
         Installed::Deb => vec!["Downloading", "Checking the download", "Installing"],
+        Installed::Apt => vec!["Checking the package lists", "Installing"],
         Installed::AppImage(_) => vec!["Downloading", "Checking the download", "Replacing the AppImage"],
         Installed::Flatpak | Installed::Other => vec![],
     }
@@ -230,6 +231,17 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y "$f"
                 url = quote(url)
             ))
         }
+        // the APT repository: apt checks its signature and the package's hash itself
+        Installed::Apt => Ok(format!(
+            r#"set -e
+export DEBIAN_FRONTEND=noninteractive
+echo "@@step 0"
+apt-get update
+echo "@@step 1"
+apt-get install -y --only-upgrade archtoys
+[ "$(dpkg-query -W -f='${{Version}}' archtoys)" = {v} ] || exit 3
+"#
+        )),
         _ => Err("Archtoys can't update this install itself".into()),
     }
 }
@@ -497,6 +509,15 @@ mod tests {
         let s = script(&Installed::Rpm, &release(), "me", None).unwrap();
         assert!(s.contains("dnf upgrade -y --refresh archtoys"));
         assert!(s.contains("= 0.8.1 ] || exit 3"));
+    }
+
+    #[test]
+    fn apt_upgrades_only_archtoys_and_checks_the_version() {
+        let s = script(&Installed::Apt, &release(), "me", None).unwrap();
+        assert!(s.contains("apt-get install -y --only-upgrade archtoys"));
+        assert!(s.contains("dpkg-query -W -f='${Version}' archtoys)\" = 0.8.1 ] || exit 3"), "{s}");
+        assert_eq!(steps(&Installed::Apt).len(), 2);
+        assert!(can_install(&Installed::Apt));
     }
 
     #[test]

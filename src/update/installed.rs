@@ -16,6 +16,8 @@ pub enum Installed {
     Rpm,
     /// The .deb from the release page
     Deb,
+    /// The .deb from the APT repository (v0.9.0): apt updates it
+    Apt,
     /// The AppImage: the file to replace when updating
     AppImage(PathBuf),
     Flatpak,
@@ -31,6 +33,7 @@ impl Installed {
             Installed::AurBin => "AUR (archtoys-bin)".into(),
             Installed::Rpm => "RPM (Fedora COPR)".into(),
             Installed::Deb => ".deb".into(),
+            Installed::Apt => "APT repository".into(),
             Installed::AppImage(_) => "AppImage".into(),
             Installed::Flatpak => "Flatpak".into(),
             Installed::Other => "tarball or built from source".into(),
@@ -61,7 +64,7 @@ fn detect() -> Installed {
         return Installed::Rpm;
     }
     if ask("dpkg", &["-S", &exe]).is_some_and(|out| from_dpkg(&out)) {
-        return Installed::Deb;
+        return if apt_repo_added() { Installed::Apt } else { Installed::Deb };
     }
     Installed::Other
 }
@@ -79,6 +82,23 @@ fn from_pacman(name: &str) -> Installed {
         n if n.starts_with("archtoys") => Installed::Aur(n.to_string()),
         _ => Installed::Other,
     }
+}
+
+/// The APT repository's address.
+pub const APT_REPO: &str = "mujtaba1i.github.io/archtoys-apt";
+
+/// Is the APT repository in apt's sources (one-line or deb822 files)?
+fn apt_repo_added() -> bool {
+    let mut files = vec![PathBuf::from("/etc/apt/sources.list")];
+    if let Ok(dir) = std::fs::read_dir("/etc/apt/sources.list.d") {
+        files.extend(dir.flatten().map(|e| e.path()));
+    }
+    files.iter().any(|f| std::fs::read_to_string(f).is_ok_and(|text| lists_repo(&text)))
+}
+
+/// A sources file that uses the repository (not in a comment).
+fn lists_repo(text: &str) -> bool {
+    text.lines().map(str::trim).any(|l| !l.starts_with('#') && l.to_ascii_lowercase().contains(APT_REPO))
 }
 
 /// `dpkg -S` prints "archtoys: /usr/bin/archtoys".
@@ -104,6 +124,14 @@ mod tests {
         assert!(from_dpkg("archtoys: /usr/bin/archtoys"));
         assert!(!from_dpkg("archtoys-other: /usr/bin/archtoys"));
         assert!(!from_dpkg("dpkg-query: no path found matching pattern /home/me/archtoys"));
+    }
+
+    #[test]
+    fn the_apt_repository_is_found_in_either_sources_format() {
+        assert!(lists_repo("deb [signed-by=/usr/share/keyrings/archtoys.gpg] https://mujtaba1i.github.io/archtoys-apt stable main\n"));
+        assert!(lists_repo("Types: deb\nURIs: https://Mujtaba1i.github.io/archtoys-apt\nSuites: stable\n"));
+        assert!(!lists_repo("# deb https://mujtaba1i.github.io/archtoys-apt stable main"));
+        assert!(!lists_repo("deb http://archive.ubuntu.com/ubuntu noble main"));
     }
 
     #[test]

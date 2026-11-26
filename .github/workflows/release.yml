@@ -6,13 +6,13 @@
 #   wait-for-ci ── prepare ──┬─ build-tarball ─┬─ build-appimage ─┬─ publish-release ─┬─ aur-bin
 #                            │                 │  (+ tarball) ────┘                   ├─ aur-source
 #                            ├─ trigger-copr ──┼──────────────────────────────────────┴─ copr-watch
-#                            │                 └─ build-deb ── (optional) ─ attach-deb (after publish-release)
+#                            │                 └─ build-deb ── (optional) ─ attach-deb (after publish-release) ─ apt-repo
 #
 # build-tarball builds the app once (from main's CI cache); the AppImage and
 # the .deb pack that same binary.
 #   report (always runs last: summary table; opens an issue if anything failed)
 #
-# Required parts stop the release if they fail. Optional parts (the .deb) never
+# Required parts stop the release if they fail. Optional parts (the .deb, the APT repository) never
 # do: the release is still published, and the report tells you what is missing.
 # COPR can queue for hours, so "copr-watch" only starts a separate workflow
 # (copr-watch.yml) that follows COPR's build and attaches the RPMs by itself.
@@ -382,6 +382,71 @@ jobs:
           cat sums/SHA256SUMS
           gh release upload "$GITHUB_REF_NAME" sums/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
 
+  # OPTIONAL (v0.9.0). Adds the .deb to the APT repository: the repo
+  # Mujtaba1i/archtoys-apt, served by GitHub Pages, signed with the
+  # APT_GPG_PRIVATE_KEY secret (APT_GPG_PASSPHRASE if the key has one) and
+  # pushed with the APT_REPO_KEY deploy key. Skipped until those secrets exist.
+  apt-repo:
+    name: Update the APT repository (optional)
+    needs: [attach-deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      APT_REPO_KEY: ${{ secrets.APT_REPO_KEY }}
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+    steps:
+      - name: Check the secrets
+        id: secrets
+        run: |
+          if [ -z "$APT_REPO_KEY" ] || [ -z "$APT_GPG_PRIVATE_KEY" ]; then
+            echo "The APT repository isn't set up yet (APT_REPO_KEY and APT_GPG_PRIVATE_KEY secrets), so it was skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: .github/scripts
+          path: archtoys
+
+      - name: Get the APT repository
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Mujtaba1i/archtoys-apt
+          ssh-key: ${{ secrets.APT_REPO_KEY }}
+          path: apt
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.secrets.outputs.ready == 'true'
+        with:
+          name: deb
+          path: deb
+
+      - name: Add the .deb and sign the index
+        if: steps.secrets.outputs.ready == 'true'
+        env:
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          command -v apt-ftparchive >/dev/null || sudo apt-get install -y -qq apt-utils
+          printf '%s\n' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          bash archtoys/.github/scripts/apt-repo.sh deb/*.deb apt
+
+      - name: Publish it
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          cd apt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Archtoys ${GITHUB_REF_NAME#v}"
+          git push origin HEAD
+          echo "APT repository updated to ${GITHUB_REF_NAME#v}: https://mujtaba1i.github.io/archtoys-apt" >> "$GITHUB_STEP_SUMMARY"
+
   # Starts COPR's build once the release commit and tag exist. It first looks
   # at COPR's queue: a build of this release that is already queued or running
   # (for example you pressed Rebuild yourself) means no second build is sent, and
@@ -492,7 +557,7 @@ jobs:
   report:
     name: Report
     if: always()
-    needs: [wait-for-ci, prepare, build-tarball, build-appimage, build-deb, publish-release, trigger-copr, aur-bin, aur-source, copr-watch, attach-deb]
+    needs: [wait-for-ci, prepare, build-tarball, build-appimage, build-deb, publish-release, trigger-copr, aur-bin, aur-source, copr-watch, attach-deb, apt-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: read

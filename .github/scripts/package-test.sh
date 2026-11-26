@@ -103,6 +103,27 @@ rpm_install() {
   fail "archtoys $VERSION never showed up in COPR's repository for $PRETTY_NAME (waited 15 minutes)"
 }
 
+# The APT repository (v0.9.0), added the way its page says.
+apt_install() {
+  local apt_url=${APT_URL:-https://mujtaba1i.github.io/archtoys-apt}
+  pkgs curl ca-certificates xvfb xdotool
+  curl -fsSL -o /usr/share/keyrings/archtoys.gpg "$apt_url/archtoys.gpg" \
+    || fail "could not download the APT repository's key from $apt_url/archtoys.gpg"
+  echo "deb [signed-by=/usr/share/keyrings/archtoys.gpg] $apt_url stable main" > /etc/apt/sources.list.d/archtoys.list
+  # GitHub Pages can take a few minutes to publish the push
+  for i in $(seq 1 20); do
+    mirror_try apt-get update -qq || fail "apt-get update failed with the APT repository added (a bad signature?)"
+    if apt-cache madison archtoys | grep -q "| *$VERSION *|"; then
+      mirror_try apt-get install -y -qq archtoys
+      [ "$(dpkg-query -W -f='${Version}' archtoys)" = "$VERSION" ] || fail "apt did not install archtoys $VERSION"
+      return
+    fi
+    echo "The APT repository doesn't list $VERSION yet ($i/20); waiting 30 s"
+    sleep 30
+  done
+  fail "archtoys $VERSION never showed up in the APT repository (waited 10 minutes)"
+}
+
 install() {
   local url="https://github.com/$REPO/releases/download/v$VERSION"
   case "$channel" in
@@ -117,6 +138,7 @@ install() {
         || fail "could not download archtoys_${VERSION}_amd64.deb from the release"
       mirror_try apt-get install -y -qq /tmp/archtoys.deb
       [ "$(dpkg-query -W -f='${Version}' archtoys)" = "$VERSION" ] || fail "apt did not install archtoys $VERSION" ;;
+    apt) apt_install ;;
     aur-bin) aur_install archtoys-bin ;;
     aur) aur_install archtoys ;;
     rpm) rpm_install ;;

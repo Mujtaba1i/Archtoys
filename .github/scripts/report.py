@@ -22,6 +22,7 @@ JOBS = [
     ("build-deb",       "Build + test the .deb",          "optional"),
     ("publish-release", "Publish GitHub release",         "required"),
     ("attach-deb",      "Attach the .deb to the release", "optional"),
+    ("apt-repo",        "Update the APT repository",      "optional"),
     ("trigger-copr",    "Start COPR build",               "required"),
     ("aur-bin",         "Deploy archtoys-bin to AUR",     "required"),
     ("aur-source",      "Deploy archtoys to AUR",         "required"),
@@ -42,6 +43,7 @@ WHAT_HAPPENED = {
     "copr-watch":      "The COPR watcher could not be started (usually a GitHub permission problem). COPR's build itself was already requested.",
     "build-deb":       "The .deb file failed to build or failed its tests. It is an optional part, so nothing else was held back.",
     "attach-deb":      "The .deb was built, but adding it to the release failed. It is an optional part.",
+    "apt-repo":        "Adding the .deb to the APT repository (Mujtaba1i/archtoys-apt) failed: usually the APT_REPO_KEY deploy key (no write access) or the APT_GPG_PRIVATE_KEY secret. It is an optional part.",
 }
 
 # What each step of the optional .deb job means when it fails.
