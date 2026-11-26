@@ -15,7 +15,13 @@ repo=$2
 keep=${APT_KEEP:-3}
 url=${APT_URL:-https://mujtaba1i.github.io/archtoys-apt}
 
-[ -f "$deb" ] || { echo "no .deb at $deb" >&2; exit 1; }
+[ -f "$deb" ] || {
+  echo "no .deb at $deb" >&2
+  exit 1
+}
+
+# Resolve the package path before changing directories.
+deb=$(realpath "$deb"){ echo "no .deb at $deb" >&2; exit 1; }
 key=$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1 == "fpr" { print $10; exit }')
 [ -n "$key" ] || { echo "no signing key in gpg's keyring (the APT_GPG_PRIVATE_KEY secret)" >&2; exit 1; }
 sign=(gpg --batch --yes --pinentry-mode loopback --local-user "$key")
