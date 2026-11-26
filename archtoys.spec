@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.8.4
+Version:        0.9.0
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Thu Nov 26 2026 Mujtaba1i <mujtaba1i@github> - 0.9.0-1
+- Fixed readme
+- Awake: keep your computer awake for as long as you choose, from its page or the tray (inspired by Vorssaint)
+- Debian and Ubuntu: an APT repository, so updates come with apt
+- CI: the end-to-end test also opens Awake and resizes a picture with Image Resizer
+- README and the app's description: Awake, Image Resizer and the APT repository
+
 * Wed Nov 25 2026 Mujtaba1i <mujtaba1i@github> - 0.8.4-1
 - Maintenance release
 
