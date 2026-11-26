@@ -32,9 +32,19 @@
       <li>Measure a box, the space around a point, a width or a height, in px, cm or inches</li>
       <li>Keep up to three boxes on the screen and copy their sizes at once</li>
     </ul>
+    <p>Awake:</p>
+    <ul>
+      <li>Keep the computer from sleeping for a set time, until a time of day, or until you turn it off</li>
+      <li>Keep the screen on too, or only the computer, from its page or the tray</li>
+    </ul>
+    <p>Micro-toys:</p>
+    <ul>
+      <li>Screenshot to clipboard: drag over an area and it is copied as a picture</li>
+      <li>Image Resizer: resize and convert pictures from the file manager's right-click menu</li>
+    </ul>
     <p>
-      Archtoys works offline. Text Extractor uses Tesseract, which Archtoys installs from
-      your system's packages when you turn it on, and downloads a language's data the
+      Archtoys works offline. Text Extractor uses Tesseract and Image Resizer uses ImageMagick,
+      installed when you turn them on, and Text Extractor downloads a language's data the
       first time it is needed.
     </p>
   </description>
@@ -60,6 +70,9 @@
     <keyword>text</keyword>
     <keyword>ruler</keyword>
     <keyword>measure</keyword>
+    <keyword>awake</keyword>
+    <keyword>resize</keyword>
+    <keyword>image</keyword>
     <keyword>PowerToys</keyword>
   </keywords>
   <provides>

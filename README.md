@@ -6,14 +6,14 @@
 
 **PowerToys-style tools for Linux, inspired by Microsoft PowerToys.**
 
-**Color Picker** | **Text Extractor** | **Screen Ruler** | **Micro-toys**<br>
+**Color Picker** | **Text Extractor** | **Screen Ruler** | **Awake** | **Micro-toys**<br>
 Wayland and X11 | at home on KDE Plasma | works offline
 
 [![Latest release](https://img.shields.io/github/v/release/Mujtaba1i/Archtoys?label=release)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
 [![AUR](https://img.shields.io/aur/version/archtoys?label=AUR)](https://aur.archlinux.org/packages/archtoys)
 [![AUR-bin](https://img.shields.io/aur/version/archtoys-bin?label=AUR-bin)](https://aur.archlinux.org/packages/archtoys-bin)
 [![Fedora COPR](https://img.shields.io/badge/Fedora-COPR-51A2DA?logo=fedora&logoColor=white)](https://copr.fedorainfracloud.org/coprs/mujtaba1i/archtoys/)
-[![Debian / Ubuntu](https://img.shields.io/badge/Debian%20%2F%20Ubuntu-.deb-A81D33?logo=debian&logoColor=white)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
+[![Debian / Ubuntu](https://img.shields.io/badge/Debian%20%2F%20Ubuntu-APT-A81D33?logo=debian&logoColor=white)](https://mujtaba1i.github.io/archtoys-apt)
 [![AppImage](https://img.shields.io/badge/AppImage-any%20distro-informational)](https://github.com/Mujtaba1i/Archtoys/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/Mujtaba1i/Archtoys)](LICENSE)
 
@@ -34,10 +34,12 @@ Each toy has its own hotkey and works from anywhere. Archtoys lives in the tray,
 | [**Color Picker**](https://github.com/Mujtaba1i/Archtoys/wiki/Color-Picker) | Pick any pixel, see it magnified and named, find colors by name, copy them in the format you need | `Ctrl+Super+C` |
 | [**Text Extractor**](https://github.com/Mujtaba1i/Archtoys/wiki/Text-Extractor) | Copy the text in any part of the screen, even from images and videos, and find which font it's in | `Ctrl+Super+T` |
 | [**Screen Ruler**](https://github.com/Mujtaba1i/Archtoys/wiki/Screen-Ruler) | Measure anything on screen: a box, the space around a point, a width or a height | `Ctrl+Super+M` |
+| [**Awake**](https://github.com/Mujtaba1i/Archtoys/wiki/Awake) | Keep your computer from sleeping for as long as you choose, with the screen on or off | from the tray |
 
 | Micro-toy | What it does | Hotkey |
 | --- | --- | --- |
 | **Screenshot to clipboard** | Drag over an area of the screen and it's copied as a picture, never saved | `Ctrl+Super+S` |
+| **Image Resizer** | Right-click pictures in your file manager to resize them or change their format, many at once | right-click |
 
 <div align="center">
 
@@ -65,13 +67,21 @@ Freeze the screen and measure a button, the gap between two boxes, or a line of 
 
 ![The Screen Ruler measuring the space around the cursor: lines reach to the edges each way, with the size next to them](docs/screenshots/ruler.png)
 
+### Awake
+
+Downloading something big, or reading without touching the mouse? Pick 15 minutes, a few hours, until a time, or until you turn it off. Add or take time while it runs, and choose whether the screen stays on too. The cup in the tray opens it in one click.
+
+### Image Resizer
+
+Select pictures in Dolphin, Nautilus, Nemo or Thunar and right-click: resize them to a size or a percent, fit them in 1920 px, turn them into PNG, JPG or WebP, or make them smaller to send. **Custom...** has the rest: centimeters and inches, fit, fill or stretch, a size estimate before you start, removing the location and camera details, and presets you save. The originals stay as they were unless you choose to replace them.
+
 ## Install
 
 | Distribution             | How                                                                                                                                                                  |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Fedora**               | `sudo dnf copr enable mujtaba1i/archtoys && sudo dnf install archtoys`                                                                                               |
 | **Arch** and derivatives | `paru -S archtoys-bin` (prebuilt) or `paru -S archtoys` (from source). `yay` works too.                                                                              |
-| **Debian, Ubuntu, Mint** | Download `archtoys_<version>_amd64.deb` from [Releases](https://github.com/Mujtaba1i/Archtoys/releases/latest), then `sudo apt install ./archtoys_*_amd64.deb`       |
+| **Debian, Ubuntu, Mint** | Add the [APT repository](https://mujtaba1i.github.io/archtoys-apt) (three commands on that page), then `sudo apt install archtoys`. Updates come with your system's. Or install the `.deb` from [Releases](https://github.com/Mujtaba1i/Archtoys/releases/latest) |
 | **Any distribution**     | Download `Archtoys-<version>-x86_64.AppImage` from [Releases](https://github.com/Mujtaba1i/Archtoys/releases/latest), then `chmod +x Archtoys-*.AppImage` and run it |
 
 More about each package, and how updates work, in the wiki: [Install](https://github.com/Mujtaba1i/Archtoys/wiki/Install) and [Updates](https://github.com/Mujtaba1i/Archtoys/wiki/Updates).
@@ -84,7 +94,7 @@ KDE Plasma and GNOME on Wayland, and any desktop on X11. Every change is tested 
 
 The **[wiki](https://github.com/Mujtaba1i/Archtoys/wiki)** has everything else:
 
-- every toy in detail: [Color Picker](https://github.com/Mujtaba1i/Archtoys/wiki/Color-Picker), [Text Extractor](https://github.com/Mujtaba1i/Archtoys/wiki/Text-Extractor), [Screen Ruler](https://github.com/Mujtaba1i/Archtoys/wiki/Screen-Ruler), [Micro-toys](https://github.com/Mujtaba1i/Archtoys/wiki/Micro-toys)
+- every toy in detail: [Color Picker](https://github.com/Mujtaba1i/Archtoys/wiki/Color-Picker), [Text Extractor](https://github.com/Mujtaba1i/Archtoys/wiki/Text-Extractor), [Screen Ruler](https://github.com/Mujtaba1i/Archtoys/wiki/Screen-Ruler), [Awake](https://github.com/Mujtaba1i/Archtoys/wiki/Awake), [Micro-toys](https://github.com/Mujtaba1i/Archtoys/wiki/Micro-toys) (with Image Resizer)
 - [Using Archtoys](https://github.com/Mujtaba1i/Archtoys/wiki/Using-Archtoys): the sidebar, Settings and the terminal commands
 - [Troubleshooting](https://github.com/Mujtaba1i/Archtoys/wiki/Troubleshooting) and [Building from source](https://github.com/Mujtaba1i/Archtoys/wiki/Building-from-Source)
 
@@ -100,7 +110,10 @@ Archtoys is growing into a **PowerToys-style toolkit for Linux**, one tool at a 
 - [x] **Screen Ruler**: measure things on screen
 - [x] **Font finder** in Text Extractor: which font a text is in, and its size
 - [x] **Micro-toys**: small hotkey helpers, starting with Screenshot to clipboard 
-- [ ] **Awake**: keep your PC from sleeping for as long as you choose
+- [x] **Awake**: keep your PC from sleeping for as long as you choose
+- [x] **Image Resizer**: resize and convert pictures from the file manager
+- [x] **An APT repository** for Debian and Ubuntu
+- [ ] **Flathub**
 
 Which PowerToys feature do you miss most on Linux? [Open an issue](https://github.com/Mujtaba1i/Archtoys/issues) and say so.
 
@@ -114,7 +127,7 @@ Bug reports, ideas, and PRs are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 ## Acknowledgements and license
 
-* **Inspiration:** [Microsoft PowerToys](https://github.com/microsoft/PowerToys) (independent project; unaffiliated with Microsoft) and [PixelKit](https://github.com/Kuucheen/PixelKit) (MIT).
-* **Libraries & Data:** [color-names](https://github.com/meodai/color-names) ([MIT](data/colornames-LICENSE.txt)), local [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) & [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache-2.0), [whatlang](https://github.com/greyblake/whatlang-rs) (MIT), and [Slint](https://slint.dev). Full license list in **Settings -> About Archtoys -> Open-source licences**.
+* **Inspiration:** [Microsoft PowerToys](https://github.com/microsoft/PowerToys) (independent project, unaffiliated with Microsoft), [PixelKit](https://github.com/Kuucheen/PixelKit) (MIT) for the Screen Ruler and [Vorssaint](https://github.com/vorssaint/vorssaint-utils) for Awake.
+* **Libraries & Data:** [color-names](https://github.com/meodai/color-names) ([MIT](data/colornames-LICENSE.txt)), local [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) & [tessdata_fast](https://github.com/tesseract-ocr/tessdata_fast) (Apache-2.0), [ImageMagick](https://imagemagick.org) (installed from your system's packages for Image Resizer), [whatlang](https://github.com/greyblake/whatlang-rs) (MIT), and [Slint](https://slint.dev). Full license list in **Settings -> About Archtoys -> Open-source licences**.
 
 [MIT](LICENSE) © 2026 Mujtaba1i
