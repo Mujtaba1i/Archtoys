@@ -156,6 +156,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 - Debian and Ubuntu: an APT repository, so updates come with apt
 - CI: the end-to-end test also opens Awake and resizes a picture with Image Resizer
 - README and the app's description: Awake, Image Resizer and the APT repository
+- Fix APT repository package path
 
 * Wed Nov 25 2026 Mujtaba1i <mujtaba1i@github> - 0.8.4-1
 - Maintenance release
