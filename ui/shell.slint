@@ -1,6 +1,8 @@
 // The app's frame (v0.7.0): the bar with the menu, the sidebar and the Home page.
 import { ScrollView } from "std-widgets.slint";
 import { Skin, Switch, Keycaps } from "common.slint";
+import { Awake, AwakeCup } from "awake.slint";
+import { Resizer } from "resize.slint";
 
 // A button in the bar (the menu).
 component BarButton inherits Rectangle {
@@ -105,6 +107,9 @@ component NavItem inherits Rectangle {
     in property <image> icon;
     in property <string> label;
     in property <bool> active;
+    // Awake's coffee cup instead of the icon: steam while it's on, and its
+    // brief puff (the easter egg)
+    in property <bool> cup;
     // only the icon (the sidebar pinned as icons)
     in property <bool> compact;
     out property <bool> hovered: touch.has-hover;
@@ -125,11 +130,17 @@ component NavItem inherits Rectangle {
         alignment: root.compact ? LayoutAlignment.center : LayoutAlignment.stretch;
         VerticalLayout {
             alignment: center;
-            Image {
+            if !root.cup : Image {
                 source: root.icon;
                 width: 20px;
                 height: 20px;
                 colorize: root.active ? Skin.accent : Skin.icon-tint;
+            }
+            if root.cup : AwakeCup {
+                size: 20px;
+                ink: root.active ? Skin.accent : Skin.icon-tint;
+                hot: Awake.running;
+                puff: Awake.running && Awake.puff;
             }
         }
         if !root.compact : Text {
@@ -155,7 +166,7 @@ export component Sidebar inherits Rectangle {
     // only the icons
     in property <bool> compact;
     // the mouse is over it (its buttons take the hover from the area below them)
-    out property <bool> hovered: hover.has-hover || home.hovered || picker.hovered || text.hovered || ruler.hovered || settings.hovered;
+    out property <bool> hovered: hover.has-hover || home.hovered || picker.hovered || text.hovered || ruler.hovered || awake.hovered || settings.hovered;
     callback navigate(int);
     callback open-settings();
     hover := TouchArea { }
@@ -191,6 +202,13 @@ export component Sidebar inherits Rectangle {
             active: root.page == 3 && !root.settings-open;
             clicked => { root.navigate(3); }
         }
+        awake := NavItem {
+            compact: root.compact;
+            cup: true;
+            label: "Awake";
+            active: root.page == 4 && !root.settings-open;
+            clicked => { root.navigate(4); }
+        }
         Rectangle { vertical-stretch: 1; }
         settings := NavItem {
             compact: root.compact;
@@ -210,6 +228,10 @@ component ToyRow inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
     in property <string> hotkey;
+    // a toy without a hotkey (Awake) shows no keys
+    in property <bool> no-hotkey;
+    // a pill instead, like Awake's "1:25 left"
+    in property <string> badge;
     in property <bool> first;
     in property <bool> last;
     callback clicked;
@@ -273,7 +295,26 @@ component ToyRow inherits Rectangle {
                 overflow: elide;
             }
         }
-        VerticalLayout {
+        if root.badge != "" : VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: badge-text.preferred-width + 24px;
+                height: 28px;
+                border-radius: 14px;
+                background: Skin.aurora-accent.mix(Skin.surface, 0.22);
+                border-width: 1px;
+                border-color: Skin.aurora-accent;
+                badge-text := Text {
+                    text: root.badge;
+                    color: Skin.text-main;
+                    font-size: 13px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        if !root.no-hotkey : VerticalLayout {
             alignment: center;
             Keycaps { hotkey: root.hotkey; }
         }
@@ -287,6 +328,8 @@ component MicroRow inherits Rectangle {
     in property <string> title;
     in property <string> subtitle;
     in property <string> hotkey;
+    // no keys to show (Image Resizer is used from the file manager)
+    in property <bool> no-hotkey;
     in property <bool> on;
     in property <bool> first;
     callback toggled(bool);
@@ -323,7 +366,7 @@ component MicroRow inherits Rectangle {
                 opacity: self.width >= min(self.preferred-width, 120px) ? 1 : 0;
             }
         }
-        VerticalLayout {
+        if !root.no-hotkey : VerticalLayout {
             alignment: center;
             opacity: root.on ? 1 : 0.4;
             animate opacity { duration: 120ms; }
@@ -395,8 +438,16 @@ export component HomePage inherits Rectangle {
                         title: "Screen Ruler";
                         subtitle: "Measure anything on screen";
                         hotkey: root.ruler-hotkey;
-                        last: true;
                         clicked => { root.open-toy(3); }
+                    }
+                    ToyRow {
+                        icon: @image-url("awake.svg");
+                        title: "Awake";
+                        subtitle: "Keep the computer awake for a while";
+                        no-hotkey: true;
+                        badge: Awake.running ? Awake.left-short : "";
+                        last: true;
+                        clicked => { root.open-toy(4); }
                     }
                 }
             }
@@ -420,6 +471,14 @@ export component HomePage inherits Rectangle {
                         hotkey: root.screenshot-hotkey;
                         on: root.micro-screenshot;
                         toggled(on) => { root.micro-toggled(on); }
+                    }
+                    // v0.9.0: from the file manager's right-click menu
+                    MicroRow {
+                        title: "Image Resizer";
+                        subtitle: "Right-click pictures in your file manager";
+                        no-hotkey: true;
+                        on: Resizer.on;
+                        toggled(on) => { Resizer.toggled(on); }
                     }
                 }
             }

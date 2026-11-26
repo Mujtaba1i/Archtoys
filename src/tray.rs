@@ -1,11 +1,11 @@
-//! System tray icon (StatusNotifierItem) with Open / Quit. Its dot takes the
-//! selected color.
+//! System tray icon (StatusNotifierItem) with Open / Quit and Awake's
+//! choices. Its dot takes the selected color. A click opens Awake's panel.
 
 use crate::color::Rgb;
 use crate::AppWindow;
 use image::ImageFormat;
 use ksni::blocking::Handle;
-use ksni::menu::StandardItem;
+use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::{Icon, MenuItem, Tray};
 use std::cell::RefCell;
 use std::sync::OnceLock;
@@ -27,6 +27,24 @@ thread_local! {
 /// Keeps the tray's handle so `set_dot` can reach it.
 pub fn install(handle: Handle<AppTray>) {
     HANDLE.with(|h| *h.borrow_mut() = Some(handle));
+}
+
+/// Awake's line in the menu: "1:25 left" while it runs, None when it's off.
+pub fn set_awake(left: Option<String>) {
+    HANDLE.with(|h| {
+        if let Some(handle) = h.borrow().as_ref() {
+            handle.update(|tray| tray.awake = left);
+        }
+    });
+}
+
+/// Awake's "Keep the screen on", as the tray's checkmark.
+pub fn set_awake_screen(on: bool) {
+    HANDLE.with(|h| {
+        if let Some(handle) = h.borrow().as_ref() {
+            handle.update(|tray| tray.awake_screen = on);
+        }
+    });
 }
 
 /// Gives the tray dot the selected color.
@@ -90,6 +108,10 @@ pub struct AppTray {
     pub ui: slint::Weak<AppWindow>,
     /// The selected color, shown as the dot.
     pub dot: Rgb,
+    /// Awake's time left while it runs ("1:25 left").
+    pub awake: Option<String>,
+    /// Awake keeps the screen on too (its checkmark).
+    pub awake_screen: bool,
 }
 
 impl Tray for AppTray {
@@ -111,14 +133,15 @@ impl Tray for AppTray {
         icon_with_dot(self.dot)
     }
 
-    fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.ui.upgrade_in_event_loop(|ui| {
-            crate::ui_state::show_window(&ui);
+    // a click: Awake's small window over the tray (Open Archtoys is in it)
+    fn activate(&mut self, x: i32, y: i32) {
+        let _ = self.ui.upgrade_in_event_loop(move |_ui| {
+            crate::awake::toggle_panel(x, y);
         });
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
-        vec![
+        let mut items = vec![
             StandardItem {
                 label: "Open".into(),
                 activate: Box::new(|this: &mut AppTray| {
@@ -139,6 +162,11 @@ impl Tray for AppTray {
                 ..Default::default()
             }
             .into(),
+            ksni::MenuItem::Separator,
+        ];
+        items.extend(self.awake_items());
+        items.push(ksni::MenuItem::Separator);
+        items.push(
             StandardItem {
                 label: "Quit".into(),
                 activate: Box::new(|_this: &mut AppTray| {
@@ -149,7 +177,69 @@ impl Tray for AppTray {
                 ..Default::default()
             }
             .into(),
-        ]
+        );
+        items
+    }
+}
+
+/// Runs `f` on the UI thread.
+fn on_ui(this: &AppTray, f: impl FnOnce() + Send + 'static) {
+    let _ = this.ui.upgrade_in_event_loop(move |_ui: AppWindow| f());
+}
+
+impl AppTray {
+    /// Awake in the plain tray menu: where its panel can't open, the same choices.
+    fn awake_items(&self) -> Vec<MenuItem<Self>> {
+        let lengths = ["15 minutes", "30 minutes", "1 hour", "2 hours", "4 hours", "8 hours", "Until turned off"];
+        let choices: Vec<MenuItem<Self>> = lengths
+            .iter()
+            .enumerate()
+            .map(|(i, label)| {
+                StandardItem {
+                    label: (*label).into(),
+                    activate: Box::new(move |this: &mut AppTray| on_ui(this, move || crate::awake::tray_start(i as i32))),
+                    ..Default::default()
+                }
+                .into()
+            })
+            .collect();
+        let mut items: Vec<MenuItem<Self>> = Vec::new();
+        if let Some(left) = &self.awake {
+            items.push(StandardItem { label: format!("Awake: {left}"), enabled: false, ..Default::default() }.into());
+        }
+        items.push(SubMenu { label: "Keep awake".into(), submenu: choices, ..Default::default() }.into());
+        if self.awake.is_some() {
+            items.push(
+                StandardItem {
+                    label: "Add 15 minutes".into(),
+                    activate: Box::new(|this: &mut AppTray| on_ui(this, || crate::awake::tray_add(15))),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            items.push(
+                StandardItem {
+                    label: "Stop keeping awake".into(),
+                    activate: Box::new(|this: &mut AppTray| on_ui(this, crate::awake::tray_stop)),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+        items.push(
+            CheckmarkItem {
+                label: "Keep the screen on".into(),
+                checked: self.awake_screen,
+                activate: Box::new(|this: &mut AppTray| {
+                    let on = !this.awake_screen;
+                    this.awake_screen = on;
+                    on_ui(this, move || crate::awake::tray_screen(on));
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+        items
     }
 }
 

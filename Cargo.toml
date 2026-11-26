@@ -35,6 +35,8 @@ x11rb = { version = "0.14.0", features = ["randr"] }
 zbus = "5.13.2"
 # which language a text is in (Text Extractor); pure Rust, MIT
 whatlang = "0.18"
+# local time for Awake (localtime_r, mktime); already built in for other crates
+libc = "0.2"
 
 [profile.release]
 # No symbol tables in the binary: 28% smaller (27.6 MB -> 19.8 MB) at no build

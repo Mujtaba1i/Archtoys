@@ -13,7 +13,7 @@
 pub(crate) mod capture;
 mod engine;
 pub(crate) mod history;
-mod install;
+pub(crate) mod install;
 pub(crate) mod lang;
 pub(crate) use lang::app_data_dir;
 pub(crate) mod page;

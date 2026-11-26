@@ -293,8 +293,32 @@ impl Parser {
 /// stops it; `on_progress` gets the card's text (on that thread).
 pub(crate) fn run(distro: &Distro, cancel: Arc<AtomicBool>, on_progress: impl Fn(Progress) + Send + 'static) -> Result<(), String> {
     let script = script_for(distro).ok_or_else(|| "Archtoys can't install software here".to_string())?;
+    run_script(distro, &script, cancel, on_progress)
+}
+
+/// What installs ImageMagick (Image Resizer, v0.9.0). It's left alone when it's there.
+pub(crate) fn imagemagick_script(distro: &Distro) -> Option<String> {
+    let tty = |cmd: &str| format!("if command -v script >/dev/null 2>&1; then script -qfec '{cmd}' /dev/null; else {cmd}; fi");
+    match distro {
+        Distro::Arch(_) => Some(tty("pacman -S --needed --noconfirm imagemagick")),
+        Distro::Fedora(_) => Some(tty("dnf install -y ImageMagick")),
+        Distro::Debian(_) => {
+            Some("export DEBIAN_FRONTEND=noninteractive; apt-get update && apt-get install -y -o APT::Status-Fd=1 imagemagick".to_string())
+        }
+        Distro::Other(..) => None,
+    }
+}
+
+/// Runs an install script as administrator (the desktop asks for the password),
+/// reporting the package manager's progress.
+pub(crate) fn run_script(
+    distro: &Distro,
+    script: &str,
+    cancel: Arc<AtomicBool>,
+    on_progress: impl Fn(Progress) + Send + 'static,
+) -> Result<(), String> {
     let mut child = Command::new("pkexec")
-        .args(["/bin/sh", "-c", &script])
+        .args(["/bin/sh", "-c", script])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -77,3 +77,22 @@ pub(crate) fn screen_count(ui: &AppWindow) -> usize {
     let monitors = ui.window().with_winit_window(|w| w.available_monitors().collect::<Vec<_>>()).unwrap_or_default();
     crate::freeze::one_per_place(monitors, |m| (m.position(), m.size())).len().max(1)
 }
+
+/// A small panel (Awake's, Image Resizer's) closes when the user clicks
+/// elsewhere: when its window loses the focus it had.
+pub(crate) fn close_when_unfocused(window: &slint::Window, close: std::rc::Rc<dyn Fn()>) {
+    let mut had_focus = false;
+    window.on_winit_window_event(move |_, event| {
+        if let winit::event::WindowEvent::Focused(focused) = event {
+            if *focused {
+                had_focus = true;
+            } else if had_focus {
+                had_focus = false;
+                // not while winit is still handling the event
+                let close = close.clone();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || close());
+            }
+        }
+        slint::winit_030::EventResult::Propagate
+    });
+}

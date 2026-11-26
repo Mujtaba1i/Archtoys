@@ -1,0 +1,548 @@
+// Awake (v0.9.0): keeps the computer awake for as long as you choose. Rust
+// (src/awake/) asks the desktop to stay awake and fills `Awake`. The page,
+// its "Until..." dialog and the tray panel all read it. Each window has its
+// own copy of a global, so Rust fills the panel's too.
+import { ScrollView } from "std-widgets.slint";
+import { Skin, PillButton, Switch } from "common.slint";
+
+export global Awake {
+    in-out property <bool> running;
+    // "1:25:40"
+    in property <string> left;
+    // "1:25 left" (Home's badge)
+    in property <string> left-short;
+    // "Awake until 4:30 PM", "Until you turn it off"
+    in property <string> until;
+    // what's left of the time, 1 to 0 (the ring)
+    in property <float> fraction: 1;
+    // the chosen length: 0 to 5 = 15m, 30m, 1h, 2h, 4h, 8h, 6 = until turned off, 7 = until a time
+    in property <int> choice: -1;
+    in-out property <bool> screen-on: true;
+    // the sidebar cup's brief steam (the easter egg)
+    in property <bool> puff;
+    // the system shows times with AM and PM
+    in property <bool> twelve-hour;
+    // the "Until..." dialog
+    in-out property <bool> until-open;
+    in-out property <string> until-hour: "18";
+    in-out property <string> until-minute: "30";
+    in-out property <bool> until-pm;
+    // "Awake for 3 h 4 min."
+    in property <string> until-preview;
+    // why it couldn't keep the computer awake
+    in property <string> error;
+    callback start(int);
+    callback stop();
+    // minutes to add (negative: take)
+    callback add(int);
+    callback until-changed();
+    callback start-until();
+    callback screen-changed();
+    // the tray panel's "Open Archtoys"
+    callback open-app();
+}
+
+// The coffee cup. `steaming`: the steam rises the whole time. `puff`: it
+// rises for a moment (the sidebar's easter egg). Neither: still steam when
+// `hot`, none when off.
+export component AwakeCup inherits Rectangle {
+    in property <length> size: 24px;
+    in property <color> ink: Skin.icon-tint;
+    in property <bool> hot;
+    in property <bool> steaming;
+    in property <bool> puff;
+    in property <length> stroke: 2px;
+    width: root.size;
+    height: root.size;
+    property <bool> moving: root.steaming || root.puff;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.ink;
+        stroke-width: root.stroke;
+        commands: "M 5 9 L 16 9 L 16 14 A 5 5 0 0 1 11 19 L 10 19 A 5 5 0 0 1 5 14 Z M 16 10 L 17.5 10 A 2.5 2.5 0 0 1 17.5 15 L 16 15";
+    }
+    // the three wisps of steam, each rising and fading a little after the one before
+    for i in [0, 1, 2] : Rectangle {
+        property <float> phase: root.moving ? Math.mod(animation-tick() / 2000ms + i * 0.3, 1) : 0.5;
+        visible: root.hot || root.moving;
+        x: root.size * (8 + 3 * i) / 24 - root.stroke / 2;
+        y: root.size * (2.5 + (root.moving ? 2 - 6 * self.phase : 0)) / 24;
+        width: root.stroke;
+        height: root.size * 3 / 24;
+        border-radius: root.stroke / 2;
+        background: root.ink;
+        opacity: !root.moving ? 1 : self.phase < 0.4 ? self.phase / 0.4 : (1 - self.phase) / 0.6;
+    }
+}
+
+// A ring that empties as the time runs out.
+component TimeRing inherits Rectangle {
+    in property <float> fraction;
+    in property <length> size: 96px;
+    width: root.size;
+    height: root.size;
+    property <float> f: Math.clamp(root.fraction, 0.001, 0.999);
+    property <float> angle: root.f * 2 * 3.14159265;
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: Skin.track;
+        stroke-width: 7px;
+        commands: "M 50 6 A 44 44 0 1 1 49.99 6";
+    }
+    Path {
+        width: 100%;
+        height: 100%;
+        viewbox-width: 100;
+        viewbox-height: 100;
+        stroke: Skin.aurora-accent;
+        stroke-width: 7px;
+        commands: "M 50 6 A 44 44 0 \{root.angle > 3.14159265 ? 1 : 0} 1 \{50 + 44 * Math.sin(root.angle * 1rad)} \{50 - 44 * Math.cos(root.angle * 1rad)}";
+    }
+    AwakeCup {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        size: root.size * 0.38;
+        ink: Skin.aurora-accent;
+        hot: true;
+        steaming: true;
+        stroke: 2px;
+    }
+}
+
+// One length to choose (15m, ..., ∞, Until...).
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected;
+    in property <length> font: 20px;
+    in property <length> tall: 64px;
+    callback clicked;
+    height: root.tall;
+    // equal columns, whatever the label
+    min-width: 0;
+    preferred-width: 0;
+    horizontal-stretch: 1;
+    border-radius: 14px;
+    background: root.selected ? Skin.aurora-accent.mix(Skin.surface, 0.2)
+        : touch.has-hover ? Skin.surface-hover : Skin.surface;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Skin.aurora-accent : Skin.border;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.text == "∞" ? "Until turned off" : root.text;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.clicked(); }
+    Text {
+        text: root.text;
+        color: Skin.text-main;
+        font-size: root.font;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component SectionTitle inherits Text {
+    color: Skin.text-muted;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+// A number field of the "Until..." dialog.
+component TimeField inherits Rectangle {
+    in property <string> label;
+    in-out property <string> value;
+    callback edited();
+    width: 104px;
+    height: 80px;
+    border-radius: 14px;
+    background: Skin.bg-color;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? Skin.aurora-accent : Skin.border;
+    input := TextInput {
+        text <=> root.value;
+        font-size: 40px;
+        font-weight: 700;
+        color: Skin.text-main;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        input-type: number;
+        accessible-label: root.label;
+        edited => { root.edited(); }
+    }
+}
+
+// The "Until..." dialog: hour and minute (and AM or PM on a 12-hour clock).
+component UntilDialog inherits Rectangle {
+    background: #05060899;
+    TouchArea { clicked => { Awake.until-open = false; } }
+    // Esc closes it, also while typing in a field (the key comes up to here)
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                Awake.until-open = false;
+                return accept;
+            }
+            reject
+        }
+        card := Rectangle {
+            width: Math.min(500px, root.width - 32px);
+            height: body.preferred-height;
+            x: (root.width - self.width) / 2;
+            y: Math.max(16px, (root.height - self.height) / 2 - 20px);
+            background: Skin.surface;
+            border-radius: 18px;
+            border-width: 1px;
+            border-color: Skin.border;
+            TouchArea { }
+            body := VerticalLayout {
+                padding: 26px;
+                spacing: 18px;
+                Text {
+                    text: "Keep awake until";
+                    color: Skin.text-main;
+                    font-size: 21px;
+                    font-weight: 700;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 12px;
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: "Hour"; color: Skin.text-muted; font-size: 13px; horizontal-alignment: center; }
+                        TimeField {
+                            label: "Hour";
+                            value <=> Awake.until-hour;
+                            edited => { Awake.until-changed(); }
+                        }
+                    }
+                    // the colon sits halfway down the fields, under an empty label
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: " "; font-size: 13px; }
+                        Text { text: ":"; color: Skin.text-main; font-size: 40px; font-weight: 700; vertical-alignment: center; }
+                    }
+                    VerticalLayout {
+                        spacing: 6px;
+                        Text { text: "Minute"; color: Skin.text-muted; font-size: 13px; horizontal-alignment: center; }
+                        TimeField {
+                            label: "Minute";
+                            value <=> Awake.until-minute;
+                            edited => { Awake.until-changed(); }
+                        }
+                    }
+                    if Awake.twelve-hour : VerticalLayout {
+                        alignment: end;
+                        spacing: 6px;
+                        Chip {
+                            text: "AM";
+                            font: 15px;
+                            tall: 37px;
+                            width: 64px;
+                            selected: !Awake.until-pm;
+                            clicked => { Awake.until-pm = false; Awake.until-changed(); }
+                        }
+                        Chip {
+                            text: "PM";
+                            font: 15px;
+                            tall: 37px;
+                            width: 64px;
+                            selected: Awake.until-pm;
+                            clicked => { Awake.until-pm = true; Awake.until-changed(); }
+                        }
+                    }
+                }
+                Text {
+                    text: Awake.until-preview;
+                    color: Skin.text-muted;
+                    font-size: 15px;
+                    horizontal-alignment: center;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    PillButton {
+                        text: "Cancel";
+                        height: 38px;
+                        clicked => { Awake.until-open = false; }
+                    }
+                    Rectangle {
+                        width: start-text.preferred-width + 40px;
+                        height: 38px;
+                        border-radius: 10px;
+                        background: start-touch.has-hover ? Skin.aurora-accent.brighter(0.08) : Skin.aurora-accent;
+                        accessible-role: button;
+                        accessible-label: "Start";
+                        accessible-action-default => { Awake.start-until(); }
+                        start-text := Text {
+                            text: "Start";
+                            color: Skin.aurora-ink;
+                            font-size: 14px;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        start-touch := TouchArea { clicked => { Awake.start-until(); } }
+                    }
+                }
+            }
+        }
+    }
+    init => { keys.focus(); }
+}
+
+// The toy's page.
+export component AwakePage inherits Rectangle {
+    ScrollView {
+        content-width: self.visible-width;
+        content-height: list.preferred-height;
+        list := VerticalLayout {
+            width: parent.visible-width;
+            padding: 20px;
+            padding-top: 10px;
+            spacing: 14px;
+
+            // what it's doing now
+            Rectangle {
+                border-radius: 16px;
+                background: Skin.surface;
+                border-width: 1px;
+                border-color: Awake.running ? Skin.aurora-accent.mix(Skin.border, 0.45) : Skin.border;
+                height: status.preferred-height;
+                status := HorizontalLayout {
+                    padding: 22px;
+                    spacing: 20px;
+                    if Awake.running : TimeRing {
+                        fraction: Awake.fraction;
+                        size: 96px;
+                    }
+                    if !Awake.running : VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 72px;
+                            height: 72px;
+                            border-radius: 18px;
+                            background: Skin.pick(#24262d, #f1f2f5);
+                            border-width: 1px;
+                            border-color: Skin.border;
+                            AwakeCup {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                size: 38px;
+                                ink: Skin.text-muted;
+                                stroke: 2px;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        horizontal-stretch: 1;
+                        Text {
+                            text: Awake.running ? Awake.left : "Awake is off";
+                            color: Skin.text-main;
+                            font-size: Awake.running && Awake.choice != 6 ? 38px : 24px;
+                            font-weight: 700;
+                        }
+                        Text {
+                            text: Awake.running ? Awake.until : "Your computer sleeps as usual. Choose how long to keep it awake.";
+                            color: Skin.text-muted;
+                            font-size: 15px;
+                            wrap: word-wrap;
+                        }
+                        if Awake.error != "" : Text {
+                            text: Awake.error;
+                            color: #e2554b;
+                            font-size: 14px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    if Awake.running : VerticalLayout {
+                        alignment: center;
+                        PillButton {
+                            text: "Stop";
+                            height: 42px;
+                            clicked => { Awake.stop(); }
+                        }
+                    }
+                }
+            }
+
+            // add or take time (a set length only: until turned off has no end)
+            if Awake.running && Awake.choice != 6 : SectionTitle { text: "ADD OR TAKE TIME"; }
+            if Awake.running && Awake.choice != 6 : HorizontalLayout {
+                spacing: 10px;
+                Chip { text: "−15m"; font: 17px; tall: 48px; clicked => { Awake.add(-15); } }
+                Chip { text: "+15m"; font: 17px; tall: 48px; clicked => { Awake.add(15); } }
+                Chip { text: "+30m"; font: 17px; tall: 48px; clicked => { Awake.add(30); } }
+                Chip { text: "+1h"; font: 17px; tall: 48px; clicked => { Awake.add(60); } }
+            }
+
+            SectionTitle { text: "HOW LONG"; }
+            GridLayout {
+                spacing: 10px;
+                Row {
+                    Chip { text: "15m"; selected: Awake.running && Awake.choice == 0; clicked => { Awake.start(0); } }
+                    Chip { text: "30m"; selected: Awake.running && Awake.choice == 1; clicked => { Awake.start(1); } }
+                    Chip { text: "1h"; selected: Awake.running && Awake.choice == 2; clicked => { Awake.start(2); } }
+                    Chip { text: "2h"; selected: Awake.running && Awake.choice == 3; clicked => { Awake.start(3); } }
+                }
+                Row {
+                    Chip { text: "4h"; selected: Awake.running && Awake.choice == 4; clicked => { Awake.start(4); } }
+                    Chip { text: "8h"; selected: Awake.running && Awake.choice == 5; clicked => { Awake.start(5); } }
+                    Chip { text: "∞"; font: 26px; selected: Awake.running && Awake.choice == 6; clicked => { Awake.start(6); } }
+                    Chip { text: "Until..."; font: 18px; selected: Awake.running && Awake.choice == 7; clicked => { Awake.start(7); } }
+                }
+            }
+
+            SectionTitle { text: "OPTIONS"; }
+            Rectangle {
+                border-radius: 16px;
+                background: Skin.surface;
+                border-width: 1px;
+                border-color: Skin.border;
+                height: option.preferred-height;
+                option := HorizontalLayout {
+                    padding-left: 18px;
+                    padding-right: 14px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 12px;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+                        Text { text: "Keep the screen on"; color: Skin.text-main; font-size: 15px; font-weight: 700; }
+                        Text {
+                            text: "Off: the screen can sleep, the computer keeps going (downloads, music)";
+                            color: Skin.text-muted;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Switch {
+                            label: "Keep the screen on";
+                            checked: Awake.screen-on;
+                            toggled(on) => { Awake.screen-on = on; Awake.screen-changed(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if Awake.until-open : UntilDialog {
+        width: parent.width;
+        height: parent.height;
+    }
+}
+
+// The tray panel: Archtoys' own small window, opened by a click on the tray
+// icon, so Awake works without opening Archtoys. Square corners: rounded
+// see-through corners show black with the CPU renderer on Wayland.
+export component AwakePanel inherits Window {
+    title: "Archtoys Awake";
+    width: 380px;
+    height: body.preferred-height;
+    no-frame: true;
+    always-on-top: true;
+    background: Skin.surface;
+    callback closed();
+    // Esc or a click elsewhere (losing focus) closes it
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.closed();
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        border-width: 1px;
+        border-color: Skin.border;
+    }
+    body := VerticalLayout {
+        padding: 18px;
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                AwakeCup {
+                    size: 28px;
+                    ink: Awake.running ? Skin.aurora-accent : Skin.text-muted;
+                    hot: Awake.running;
+                    steaming: Awake.running;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text {
+                    text: Awake.running ? Awake.left : "Awake is off";
+                    color: Skin.text-main;
+                    font-size: Awake.running && Awake.choice != 6 ? 24px : 18px;
+                    font-weight: 700;
+                }
+                if Awake.running : Text { text: Awake.until; color: Skin.text-muted; font-size: 13px; }
+            }
+            if Awake.running : VerticalLayout {
+                alignment: center;
+                PillButton { text: "Stop"; clicked => { Awake.stop(); } }
+            }
+        }
+        GridLayout {
+            spacing: 8px;
+            Row {
+                Chip { text: "15m"; font: 15px; tall: 40px; selected: Awake.running && Awake.choice == 0; clicked => { Awake.start(0); } }
+                Chip { text: "30m"; font: 15px; tall: 40px; selected: Awake.running && Awake.choice == 1; clicked => { Awake.start(1); } }
+                Chip { text: "1h"; font: 15px; tall: 40px; selected: Awake.running && Awake.choice == 2; clicked => { Awake.start(2); } }
+                Chip { text: "2h"; font: 15px; tall: 40px; selected: Awake.running && Awake.choice == 3; clicked => { Awake.start(3); } }
+            }
+            Row {
+                Chip { text: "4h"; font: 15px; tall: 40px; selected: Awake.running && Awake.choice == 4; clicked => { Awake.start(4); } }
+                Chip { text: "8h"; font: 15px; tall: 40px; selected: Awake.running && Awake.choice == 5; clicked => { Awake.start(5); } }
+                Chip { text: "∞"; font: 19px; tall: 40px; selected: Awake.running && Awake.choice == 6; clicked => { Awake.start(6); } }
+                Chip { text: "Until..."; font: 13px; tall: 40px; selected: Awake.running && Awake.choice == 7; clicked => { Awake.open-app(); Awake.start(7); } }
+            }
+        }
+        if Awake.running && Awake.choice != 6 : HorizontalLayout {
+            spacing: 8px;
+            Chip { text: "−15m"; font: 14px; tall: 38px; clicked => { Awake.add(-15); } }
+            Chip { text: "+15m"; font: 14px; tall: 38px; clicked => { Awake.add(15); } }
+            Chip { text: "+1h"; font: 14px; tall: 38px; clicked => { Awake.add(60); } }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: "Keep the screen on";
+                color: Skin.text-main;
+                font-size: 14px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            Switch {
+                label: "Keep the screen on";
+                checked: Awake.screen-on;
+                toggled(on) => { Awake.screen-on = on; Awake.screen-changed(); }
+            }
+        }
+        Text {
+            text: "Open Archtoys";
+            color: open-touch.has-hover ? Skin.text-main : Skin.text-muted;
+            font-size: 13px;
+            accessible-role: button;
+            accessible-action-default => { Awake.open-app(); }
+            open-touch := TouchArea { clicked => { Awake.open-app(); } }
+        }
+    }
+}

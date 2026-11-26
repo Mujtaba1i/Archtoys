@@ -1,0 +1,843 @@
+// Image Resizer (v0.9.0), a Micro-toy used from the file manager's
+// right-click menu. Rust (src/resize/) does the work with ImageMagick. Here:
+// the Turn on dialog on Home, the quick panel (Nautilus, Nemo), the Custom...
+// window and the progress window that ends with a summary.
+import { ComboBox, ScrollView } from "std-widgets.slint";
+import { Skin, PillButton, Switch } from "common.slint";
+
+// Home's switch and its Turn on dialog (the main window's copy).
+export global Resizer {
+    in-out property <bool> on;
+    // 0 closed, 1 asking, 2 installing, 3 it didn't work
+    in-out property <int> dialog;
+    in property <string> stage;
+    in property <string> stats;
+    // 0-1, or below 0 while the size isn't known
+    in property <float> fraction: -1;
+    in property <string> message;
+    callback toggled(bool);
+    callback turn-on();
+    callback cancel-install();
+}
+
+// The red of Replace originals (it overwrites).
+global Danger {
+    out property <color> border: Skin.pick(#8a3a3a, #e2a3a3);
+    out property <color> fill: Skin.pick(#2a1f22, #fdf0f0);
+    out property <color> text: Skin.pick(#f0b4b4, #b42323);
+}
+
+component Logo inherits Image {
+    source: @image-url("../packaging/archtoys-64.png");
+    image-rendering: smooth;
+}
+
+component Bar inherits Rectangle {
+    in property <float> fraction;
+    height: 10px;
+    border-radius: 5px;
+    background: Skin.track;
+    // not known yet: a short piece going round
+    property <float> moving: Math.mod(animation-tick() / 1600ms, 1);
+    Rectangle {
+        x: root.fraction < 0 ? (root.width * 1.3 * root.moving - root.width * 0.3) : 0;
+        width: root.fraction < 0 ? root.width * 0.3 : root.width * Math.clamp(root.fraction, 0, 1);
+        height: parent.height;
+        border-radius: 5px;
+        background: Skin.aurora-accent;
+    }
+}
+
+// A button: plain, filled with the aurora (`primary`) or red (`danger`).
+component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> danger;
+    in property <bool> selected;
+    in property <length> tall: 42px;
+    in property <length> font: 15px;
+    callback clicked;
+    height: root.tall;
+    min-width: label.preferred-width + 34px;
+    border-radius: 10px;
+    background: root.primary ? (touch.has-hover ? Skin.aurora-accent.brighter(0.08) : Skin.aurora-accent)
+        : root.danger ? Danger.fill
+        : root.selected ? Skin.aurora-accent.mix(Skin.surface-hover, 0.18)
+        : touch.has-hover ? Skin.border : Skin.surface-hover;
+    border-width: root.primary ? 0 : root.selected ? 2px : 1px;
+    border-color: root.danger ? Danger.border : root.selected ? Skin.aurora-accent : Skin.pick(#383c46, #d3d7df);
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    label := Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.primary ? Skin.aurora-ink : root.danger ? Danger.text : Skin.text-main;
+        font-size: root.font;
+        font-weight: root.primary ? 700 : 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+component SectionTitle inherits Text {
+    color: Skin.text-muted;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+}
+
+component Card inherits Rectangle {
+    border-radius: 14px;
+    background: Skin.surface;
+    border-width: 1px;
+    border-color: Skin.border;
+}
+
+// ---- Home: Turn on ----
+
+// Over the main window: asks before installing ImageMagick, then shows the
+// install, or why it didn't work.
+export component ResizerTurnOn inherits Rectangle {
+    background: #05060899;
+    TouchArea { }
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape && Resizer.dialog != 2 {
+                Resizer.dialog = 0;
+                return accept;
+            }
+            reject
+        }
+        Rectangle {
+            width: Math.min(560px, root.width - 32px);
+            height: body.preferred-height;
+            x: (root.width - self.width) / 2;
+            y: Math.max(16px, (root.height - self.height) / 2 - 30px);
+            background: Skin.surface;
+            border-radius: 18px;
+            border-width: 1px;
+            border-color: Skin.pick(#3a3e48, #d3d7df);
+            body := VerticalLayout {
+                padding: 28px;
+                spacing: 18px;
+                HorizontalLayout {
+                    spacing: 14px;
+                    Logo { width: 40px; height: 40px; }
+                    Text {
+                        text: "Turn on Image Resizer";
+                        color: Skin.text-main;
+                        font-size: 22px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+                if Resizer.dialog == 1 : Text {
+                    text: "Adds Image Resizer to your context menu. It needs to install ImageMagick, from your system's packages. Requires password to install it.";
+                    color: Skin.pick(#c9ccd4, #3a3e48);
+                    font-size: 16px;
+                    wrap: word-wrap;
+                }
+                if Resizer.dialog == 2 : VerticalLayout {
+                    spacing: 10px;
+                    Text { text: Resizer.stage; color: Skin.text-main; font-size: 16px; font-weight: 600; }
+                    Bar { fraction: Resizer.fraction; }
+                    Text { text: Resizer.stats; color: Skin.text-muted; font-size: 14px; }
+                }
+                if Resizer.dialog == 3 : Text {
+                    text: Resizer.message;
+                    color: Skin.pick(#f0b4b4, #b42323);
+                    font-size: 15px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    if Resizer.dialog == 1 : Button { text: "Not now"; clicked => { Resizer.dialog = 0; } }
+                    if Resizer.dialog == 1 : Button { text: "Turn on"; primary: true; clicked => { Resizer.turn-on(); } }
+                    if Resizer.dialog == 2 : Button { text: "Cancel"; clicked => { Resizer.cancel-install(); } }
+                    if Resizer.dialog == 3 : Button { text: "Close"; clicked => { Resizer.dialog = 0; } }
+                    if Resizer.dialog == 3 : Button { text: "Try again"; primary: true; clicked => { Resizer.turn-on(); } }
+                }
+            }
+        }
+    }
+    init => { keys.focus(); }
+}
+
+// ---- The quick panel (Nautilus and Nemo: one menu entry opens it) ----
+
+export component ResizePanel inherits Window {
+    title: "Image Resizer";
+    icon: @image-url("../packaging/archtoys-64.png");
+    width: 400px;
+    height: body.preferred-height;
+    no-frame: true;
+    always-on-top: true;
+    background: Skin.surface;
+    in property <string> count-text: "3 pictures";
+    in property <[string]> presets;
+    callback act(string);
+    callback act-preset(int);
+    callback closed();
+    // Esc, or a click elsewhere (Rust: losing focus), closes it
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.closed();
+                return accept;
+            }
+            reject
+        }
+    }
+    Rectangle {
+        border-width: 1px;
+        border-color: Skin.border;
+    }
+    body := VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            Logo { width: 26px; height: 26px; }
+            Text { text: "Image Resizer"; color: Skin.text-main; font-size: 17px; font-weight: 700; vertical-alignment: center; }
+            Text {
+                text: root.count-text;
+                color: Skin.text-muted;
+                font-size: 14px;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                horizontal-stretch: 1;
+            }
+        }
+        SectionTitle { text: "RESIZE"; }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "25%"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("r25"); } }
+            Button { text: "50%"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("r50"); } }
+            Button { text: "150%"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("r150"); } }
+            Button { text: "200%"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("r200"); } }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "Fit in 1920 px"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("fit1920"); } }
+            Button { text: "Fit in 1280 px"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("fit1280"); } }
+        }
+        SectionTitle { text: "CONVERT TO"; }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "PNG"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("png"); } }
+            Button { text: "JPG"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("jpg"); } }
+            Button { text: "WebP"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("webp"); } }
+        }
+        if root.presets.length > 0 : SectionTitle { text: "MY PRESETS"; }
+        for preset[i] in root.presets : Button { text: preset; tall: 38px; clicked => { root.act-preset(i); } }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "Make smaller"; tall: 38px; horizontal-stretch: 1; clicked => { root.act("smaller"); } }
+            Button { text: "Custom..."; tall: 38px; horizontal-stretch: 1; clicked => { root.act("custom"); } }
+        }
+    }
+}
+
+// ---- Custom... ----
+
+component Field inherits Rectangle {
+    in property <string> label;
+    in-out property <string> value;
+    // takes the keyboard when it appears (the preset's name)
+    in property <bool> autofocus;
+    callback edited();
+    callback accepted();
+    init => {
+        if root.autofocus {
+            input.focus();
+        }
+    }
+    height: 42px;
+    border-radius: 9px;
+    background: Skin.bg-color;
+    border-width: input.has-focus ? 2px : 1px;
+    border-color: input.has-focus ? Skin.aurora-accent : Skin.pick(#383c46, #d3d7df);
+    input := TextInput {
+        x: 12px;
+        width: parent.width - 24px;
+        text <=> root.value;
+        font-size: 16px;
+        color: Skin.text-main;
+        vertical-alignment: center;
+        accessible-label: root.label;
+        edited => { root.edited(); }
+        accepted => { root.accepted(); }
+    }
+}
+
+// A chain link: on = the proportions stay.
+component LockButton inherits Rectangle {
+    in-out property <bool> on;
+    callback toggled();
+    width: 44px;
+    height: 42px;
+    border-radius: 9px;
+    background: root.on ? Skin.aurora-accent.mix(Skin.surface, 0.18) : Skin.surface;
+    border-width: 1px;
+    border-color: root.on ? Skin.aurora-accent : Skin.pick(#383c46, #d3d7df);
+    accessible-role: checkbox;
+    accessible-label: "Keep the proportions";
+    accessible-checked: root.on;
+    accessible-action-default => { root.toggled(); }
+    Path {
+        width: 20px;
+        height: 20px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: root.on ? Skin.text-main : Skin.text-muted;
+        stroke-width: 2px;
+        fill: transparent;
+        // two links, joined when on
+        commands: root.on
+            ? "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7 M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"
+            : "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7 M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7";
+    }
+    TouchArea { clicked => { root.toggled(); } }
+}
+
+component ModeButton inherits Rectangle {
+    in property <string> title;
+    in property <string> line;
+    in property <bool> selected;
+    callback clicked;
+    height: 74px;
+    border-radius: 10px;
+    background: touch.has-hover && !root.selected ? Skin.border : Skin.surface-hover;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Skin.aurora-accent : Skin.pick(#383c46, #d3d7df);
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.clicked(); }
+    VerticalLayout {
+        alignment: center;
+        spacing: 2px;
+        Text { text: root.title; color: Skin.text-main; font-size: 15px; font-weight: 700; horizontal-alignment: center; }
+        Text { text: root.line; color: Skin.text-muted; font-size: 13px; horizontal-alignment: center; }
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// 1 to 100, in the aurora color (the standard slider has its own blue).
+component QualitySlider inherits Rectangle {
+    in-out property <float> value;
+    callback changed();
+    height: 28px;
+    horizontal-stretch: 1;
+    property <float> f: (Math.clamp(root.value, 1, 100) - 1) / 99;
+    accessible-role: slider;
+    accessible-label: "Quality";
+    accessible-value: Math.round(root.value);
+    accessible-value-minimum: 1;
+    accessible-value-maximum: 100;
+    accessible-action-increment => { root.value = Math.min(100, root.value + 5); root.changed(); }
+    accessible-action-decrement => { root.value = Math.max(1, root.value - 5); root.changed(); }
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 6px;
+        border-radius: 3px;
+        background: Skin.track;
+    }
+    Rectangle {
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        width: 9px + (root.width - 18px) * root.f;
+        height: 6px;
+        border-radius: 3px;
+        background: Skin.aurora-accent;
+    }
+    Rectangle {
+        x: (root.width - self.width) * root.f;
+        y: (parent.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: Skin.aurora-accent;
+        border-width: 2px;
+        border-color: Skin.surface;
+    }
+    touch := TouchArea {
+        function set(x: length) {
+            root.value = Math.round(Math.clamp(1 + (x - 9px) / Math.max(1px, root.width - 18px) * 99, 1, 100));
+            root.changed();
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                self.set(self.mouse-x);
+            }
+        }
+        moved => {
+            if self.pressed {
+                self.set(self.mouse-x);
+            }
+        }
+    }
+}
+
+export component ResizeCustom inherits Window {
+    title: "Image Resizer";
+    icon: @image-url("../packaging/archtoys-64.png");
+    preferred-width: 680px;
+    min-width: 520px;
+    preferred-height: Math.min(list.preferred-height + 80px, 900px);
+    min-height: 420px;
+    background: Skin.bg-color;
+
+    // "3 pictures: beach.jpg, hills.jpg, sunset.png"
+    in property <string> files-text;
+    in property <int> count: 1;
+    in property <[string]> presets;
+    in-out property <int> preset: 0;
+    // 0 px, 1 %, 2 cm, 3 in
+    in-out property <int> unit;
+    in-out property <string> width-text;
+    in-out property <string> height-text;
+    in-out property <bool> lock: true;
+    // 0 Fit, 1 Fill, 2 Stretch
+    in-out property <int> mode;
+    // 0 keep each, 1 PNG, 2 JPG, 3 WebP
+    in-out property <int> format;
+    in-out property <float> quality: 85;
+    // "9.6 MB", "2.1 MB" ("" while it's worked out)
+    in property <string> estimate-from;
+    in property <string> estimate-to;
+    // 0 next to the originals, 1 a folder, 2 replace
+    in-out property <int> dest;
+    in property <string> dest-text;
+    // "beach.jpg and hills.jpg have metadata" ("" = none has)
+    in property <string> meta-text;
+    in-out property <bool> strip;
+    in-out property <bool> replace-asking;
+    in-out property <bool> naming-preset;
+    in-out property <string> preset-name;
+    in property <string> error;
+
+    callback unit-picked(int);
+    callback width-edited();
+    callback height-edited();
+    callback lock-toggled();
+    callback changed();
+    callback preset-picked(int);
+    callback choose-folder();
+    callback save-preset();
+    callback start();
+    callback cancel();
+
+
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                if root.replace-asking || root.naming-preset {
+                    root.replace-asking = false;
+                    root.naming-preset = false;
+                } else {
+                    root.cancel();
+                }
+                return accept;
+            }
+            reject
+        }
+    }
+
+    VerticalLayout {
+        scroll := ScrollView {
+            content-width: self.visible-width;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                width: scroll.visible-width;
+                padding: 26px;
+                padding-left: 30px;
+                padding-right: 30px;
+                spacing: 18px;
+
+                HorizontalLayout {
+                    spacing: 14px;
+                    Logo { width: 34px; height: 34px; y: 4px; }
+                    VerticalLayout {
+                        spacing: 2px;
+                        horizontal-stretch: 1;
+                        Text { text: "Image Resizer"; color: Skin.text-main; font-size: 24px; font-weight: 700; }
+                        Text { text: root.files-text; color: Skin.text-muted; font-size: 15px; overflow: elide; }
+                    }
+                    if root.presets.length > 0 : HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Preset"; color: Skin.icon-tint; font-size: 14px; vertical-alignment: center; }
+                        VerticalLayout {
+                            alignment: center;
+                            ComboBox {
+                                width: 170px;
+                                model: root.presets;
+                                current-index <=> root.preset;
+                                selected => { root.preset-picked(self.current-index); }
+                            }
+                        }
+                    }
+                }
+
+                // SIZE
+                Card {
+                    height: size-box.preferred-height;
+                    size-box := VerticalLayout {
+                        padding: 18px;
+                        spacing: 14px;
+                        SectionTitle { text: "SIZE"; }
+                        Rectangle {
+                            height: 44px;
+                            border-radius: 10px;
+                            background: Skin.track;
+                            HorizontalLayout {
+                                padding: 3px;
+                                spacing: 3px;
+                                for name[i] in ["Pixels", "Percent", "Centimeters", "Inches"] : Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 8px;
+                                    background: i == root.unit ? Skin.aurora-accent : unit-touch.has-hover ? Skin.surface-hover : transparent;
+                                    accessible-role: button;
+                                    accessible-label: name;
+                                    accessible-checked: i == root.unit;
+                                    accessible-action-default => { root.unit-picked(i); }
+                                    Text {
+                                        text: name;
+                                        color: i == root.unit ? Skin.aurora-ink : Skin.text-main;
+                                        font-size: 15px;
+                                        font-weight: 600;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    unit-touch := TouchArea { clicked => { root.unit-picked(i); } }
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                spacing: 6px;
+                                horizontal-stretch: 1;
+                                Text { text: "Width"; color: Skin.text-muted; font-size: 14px; }
+                                Field { label: "Width"; value <=> root.width-text; edited => { root.width-edited(); } }
+                            }
+                            VerticalLayout {
+                                alignment: end;
+                                LockButton { on: root.lock; toggled => { root.lock-toggled(); } }
+                            }
+                            VerticalLayout {
+                                spacing: 6px;
+                                horizontal-stretch: 1;
+                                Text { text: "Height"; color: Skin.text-muted; font-size: 14px; }
+                                Field { label: "Height"; value <=> root.height-text; edited => { root.height-edited(); } }
+                            }
+                        }
+                        Text { text: "Fit"; color: Skin.text-muted; font-size: 14px; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            ModeButton { title: "Fit"; line: "all of it, inside"; selected: root.mode == 0; horizontal-stretch: 1; clicked => { root.mode = 0; root.changed(); } }
+                            ModeButton { title: "Fill"; line: "fills it, edges cut"; selected: root.mode == 1; horizontal-stretch: 1; clicked => { root.mode = 1; root.changed(); } }
+                            ModeButton { title: "Stretch"; line: "fills it, squashed"; selected: root.mode == 2; horizontal-stretch: 1; clicked => { root.mode = 2; root.changed(); } }
+                        }
+                    }
+                }
+
+                // FORMAT
+                Card {
+                    height: format-box.preferred-height;
+                    format-box := VerticalLayout {
+                        padding: 18px;
+                        spacing: 14px;
+                        SectionTitle { text: "FORMAT"; }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            ComboBox {
+                                width: 220px;
+                                model: ["Keep each format", "PNG", "JPG", "WebP"];
+                                current-index <=> root.format;
+                                selected => { root.changed(); }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: LayoutAlignment.start;
+                                Text { text: "About"; color: Skin.icon-tint; font-size: 15px; vertical-alignment: center; }
+                                Text { text: root.estimate-from == "" ? "..." : root.estimate-from; color: Skin.text-main; font-size: 15px; font-weight: 700; vertical-alignment: center; }
+                                Text { text: "→"; color: Skin.icon-tint; font-size: 15px; vertical-alignment: center; }
+                                Text { text: root.estimate-to == "" ? "..." : root.estimate-to; color: Skin.aurora-accent; font-size: 15px; font-weight: 700; vertical-alignment: center; }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 8px;
+                            Text { text: "Quality (JPG and WebP)"; color: Skin.text-muted; font-size: 14px; }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                QualitySlider {
+                                value <=> root.quality;
+                                changed => { root.changed(); }
+                            }
+                                Text {
+                                    text: Math.round(root.quality) + "%";
+                                    color: Skin.text-main;
+                                    font-size: 16px;
+                                    font-weight: 700;
+                                    width: 48px;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // SAVE TO
+                Card {
+                    height: save-box.preferred-height;
+                    save-box := VerticalLayout {
+                        padding: 18px;
+                        spacing: 14px;
+                        SectionTitle { text: "SAVE TO"; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Rectangle {
+                                height: 42px;
+                                horizontal-stretch: 1;
+                                border-radius: 9px;
+                                background: root.dest == 2 ? Danger.fill : Skin.bg-color;
+                                border-width: 1px;
+                                border-color: root.dest == 2 ? Danger.border : Skin.pick(#383c46, #d3d7df);
+                                Text {
+                                    x: 12px;
+                                    width: parent.width - 24px;
+                                    text: root.dest-text;
+                                    color: root.dest == 2 ? Danger.text : Skin.icon-tint;
+                                    font-size: 15px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                // back to next to the originals
+                                TouchArea { clicked => { if root.dest != 0 { root.dest = 0; root.changed(); } } }
+                            }
+                            Button { text: "Choose folder"; font: 14px; selected: root.dest == 1; clicked => { root.choose-folder(); } }
+                            Button { text: "Replace originals"; font: 14px; danger: true; clicked => { root.dest = 2; root.changed(); } }
+                        }
+                        if root.meta-text != "" : Rectangle {
+                            height: 56px;
+                            border-radius: 10px;
+                            background: Skin.surface-hover;
+                            HorizontalLayout {
+                                padding-left: 14px;
+                                padding-right: 12px;
+                                spacing: 12px;
+                                Text {
+                                    text: root.strip ? "The metadata will be removed" : root.meta-text;
+                                    color: Skin.text-main;
+                                    font-size: 15px;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 30px;
+                                        height: 30px;
+                                        border-radius: 15px;
+                                        background: Skin.aurora-accent.mix(Skin.surface-hover, 0.18);
+                                        border-width: 1px;
+                                        border-color: Skin.aurora-accent;
+                                        accessible-role: button;
+                                        accessible-label: "What Remove it removes";
+                                        accessible-action-default => { tip.show(); }
+                                        Text { text: "i"; color: Skin.text-main; font-size: 14px; font-weight: 700; }
+                                        TouchArea { clicked => { tip.show(); } }
+                                        // above the i, like a tooltip; a click anywhere closes it
+                                        tip := PopupWindow {
+                                            x: parent.width - self.width + 40px;
+                                            y: -self.height - 8px;
+                                            width: 380px;
+                                            height: tip-text.preferred-height;
+                                            Rectangle {
+                                                border-radius: 10px;
+                                                background: Skin.pick(#2f333c, #ffffff);
+                                                border-width: 1px;
+                                                border-color: Skin.pick(#454a56, #d3d7df);
+                                            }
+                                            tip-text := VerticalLayout {
+                                                padding: 12px;
+                                                padding-left: 14px;
+                                                spacing: 3px;
+                                                Text { text: "Removes"; color: Skin.text-main; font-size: 14px; font-weight: 700; }
+                                                Text { text: "The place it was taken (GPS)"; color: Skin.icon-tint; font-size: 14px; }
+                                                Text { text: "The camera or phone, and its settings"; color: Skin.icon-tint; font-size: 14px; }
+                                                Text { text: "The date and time it was taken"; color: Skin.icon-tint; font-size: 14px; }
+                                                Text { text: "The program that made it, and a small preview copy"; color: Skin.icon-tint; font-size: 14px; wrap: word-wrap; }
+                                                Text { text: "Keeps which way up it is (the picture is turned first)"; color: Skin.icon-tint; font-size: 14px; wrap: word-wrap; }
+                                            }
+                                        }
+                                    }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Button {
+                                        text: root.strip ? "Keep it" : "Remove it";
+                                        tall: 36px;
+                                        font: 14px;
+                                        selected: root.strip;
+                                        clicked => { root.strip = !root.strip; root.changed(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+        // the buttons stay in sight however long the window is
+        VerticalLayout {
+            padding: 16px;
+            padding-left: 30px;
+            padding-right: 30px;
+            spacing: 10px;
+            if root.error != "" : Text { text: root.error; color: Danger.text; font-size: 14px; wrap: word-wrap; }
+
+            if !root.naming-preset : HorizontalLayout {
+                spacing: 10px;
+                Button { text: "Save as preset"; clicked => { root.naming-preset = true; root.preset-name = ""; } }
+                Rectangle { horizontal-stretch: 1; }
+                Button { text: "Cancel"; tall: 44px; clicked => { root.cancel(); } }
+                Button {
+                    text: (root.dest == 2 ? "Replace " : "Resize ") + root.count + (root.count == 1 ? " picture" : " pictures");
+                    tall: 44px;
+                    primary: true;
+                    clicked => {
+                        if root.dest == 2 {
+                            root.replace-asking = true;
+                        } else {
+                            root.start();
+                        }
+                    }
+                }
+            }
+            if root.naming-preset : HorizontalLayout {
+                spacing: 10px;
+                Field {
+                    label: "Preset name";
+                    value <=> root.preset-name;
+                    autofocus: true;
+                    horizontal-stretch: 1;
+                    accepted => {
+                        if root.preset-name != "" {
+                            root.save-preset();
+                            root.naming-preset = false;
+                        }
+                    }
+                }
+                Button { text: "Cancel"; clicked => { root.naming-preset = false; } }
+                Button {
+                    text: "Save preset";
+                    primary: true;
+                    clicked => {
+                        if root.preset-name != "" {
+                            root.save-preset();
+                            root.naming-preset = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Replace originals: asked once per job
+    if root.replace-asking : Rectangle {
+        background: #05060899;
+        TouchArea { }
+        Rectangle {
+            width: Math.min(480px, root.width - 32px);
+            height: ask.preferred-height;
+            background: Skin.surface;
+            border-radius: 18px;
+            border-width: 1px;
+            border-color: Danger.border;
+            ask := VerticalLayout {
+                padding: 26px;
+                spacing: 16px;
+                Text {
+                    text: "Replace " + root.count + (root.count == 1 ? " picture?" : " pictures?");
+                    color: Skin.text-main;
+                    font-size: 21px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: "The originals are overwritten with the new pictures. They can't be brought back.";
+                    color: Skin.icon-tint;
+                    font-size: 15px;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    Button { text: "Cancel"; clicked => { root.replace-asking = false; } }
+                    Button { text: "Replace"; danger: true; clicked => { root.replace-asking = false; root.start(); } }
+                }
+            }
+        }
+    }
+}
+
+// ---- Several pictures: progress, then a summary ----
+
+export component ResizeProgress inherits Window {
+    title: "Image Resizer";
+    icon: @image-url("../packaging/archtoys-64.png");
+    width: 520px;
+    height: body.preferred-height;
+    background: Skin.surface;
+    // "Resizing 7 of 12", then "12 resized, 1 skipped"
+    in property <string> heading;
+    in property <float> fraction;
+    // "beach-07.jpg · 1920 × 1440 · JPG 85%"
+    in property <string> line;
+    in property <bool> done;
+    // "notes.txt: not a picture" (one per line)
+    in property <string> skipped;
+    // "Saved next to the originals, with -resized added. 38.2 MB became 7.9 MB."
+    in property <string> saved;
+    in property <bool> can-open;
+    callback stop();
+    callback dismiss();
+    callback open-folder();
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape && root.done {
+                root.dismiss();
+                return accept;
+            }
+            reject
+        }
+    }
+    body := VerticalLayout {
+        padding: 28px;
+        spacing: 16px;
+        HorizontalLayout {
+            spacing: 12px;
+            Logo { width: 28px; height: 28px; }
+            Text { text: root.heading; color: Skin.text-main; font-size: 22px; font-weight: 700; vertical-alignment: center; }
+        }
+        if !root.done : Bar { fraction: root.fraction; }
+        if !root.done : Text { text: root.line; color: Skin.text-muted; font-size: 16px; overflow: elide; }
+        if root.done && root.skipped != "" : Text { text: root.skipped; color: Skin.icon-tint; font-size: 16px; wrap: word-wrap; }
+        if root.done && root.saved != "" : Text { text: root.saved; color: Skin.icon-tint; font-size: 16px; wrap: word-wrap; }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 10px;
+            if !root.done : Button { text: "Stop"; clicked => { root.stop(); } }
+            if root.done : Button { text: "Close"; clicked => { root.dismiss(); } }
+            if root.done && root.can-open : Button { text: "Open the folder"; primary: true; clicked => { root.open-folder(); } }
+        }
+    }
+}

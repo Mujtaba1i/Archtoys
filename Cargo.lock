@@ -142,6 +142,7 @@ dependencies = [
  "global-hotkey",
  "image",
  "ksni",
+ "libc",
  "serde",
  "serde_json",
  "slint",

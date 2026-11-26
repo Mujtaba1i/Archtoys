@@ -5,8 +5,12 @@ import { SettingsPage } from "settings.slint";
 import { RulerPage, RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.slint";
 import { FormatsPanel, ColorEditor, SearchBar, ColorPickerPage } from "picker.slint";
 import { Updater, UpdateBubble, UpdateDialog } from "update.slint";
+import { Awake, AwakePage } from "awake.slint";
+import { Resizer, ResizerTurnOn } from "resize.slint";
 // Rust reaches these through this file
 export { Updater } from "update.slint";
+export { Awake, AwakePanel } from "awake.slint";
+export { Resizer, ResizePanel, ResizeCustom, ResizeProgress } from "resize.slint";
 export { FieldRow, FormatOption, SearchCard, ShadeCell, Skin, Keys } from "common.slint";
 export { TextEntry, FontFinder } from "text.slint";
 export { RulerBar, RulerLabel, RulerFrame, RulerEntry } from "ruler.slint";
@@ -618,6 +622,11 @@ export component AppWindow inherits Window {
                     micro-toggled(on) => { root.micro-toggled(on); }
                 }
 
+                // --- Awake (v0.9.0) ---
+                if root.page == 4 && root.settings-t < 0.99 : AwakePage {
+                    opacity: 1 - root.settings-t;
+                }
+
                 // --- The Screen Ruler ---
                 if root.page == 3 && root.settings-t < 0.99 : RulerPage {
                     opacity: 1 - root.settings-t;
@@ -883,7 +892,7 @@ export component AppWindow inherits Window {
             y: 0;
             width: parent.width;
             title: root.settings-open ? (root.about-open ? "About Archtoys" : "Settings")
-                : root.page == 0 ? "Archtoys" : root.page == 1 ? "Color Picker" : root.page == 2 ? "Text Extractor" : "Screen Ruler";
+                : root.page == 0 ? "Archtoys" : root.page == 1 ? "Color Picker" : root.page == 2 ? "Text Extractor" : root.page == 3 ? "Screen Ruler" : "Awake";
             menu-active: root.sidebar-mode > 0;
             // the pages start 18 px in from the pinned sidebar
             title-x: root.toy-x + 18px;
@@ -962,6 +971,14 @@ export component AppWindow inherits Window {
                     root.formats-open = false;
                 }
             }
+        }
+
+        // Image Resizer's Turn on (v0.9.0)
+        if Resizer.dialog > 0 : ResizerTurnOn {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
         }
 
         // the update dialog, over everything

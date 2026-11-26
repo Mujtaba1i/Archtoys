@@ -115,6 +115,13 @@ pub struct AppConfig {
     pub update_check: bool,
     /// the version the user chose to skip ("" = none)
     pub update_skipped: String,
+    /// Awake keeps the screen on too (v0.9.0)
+    #[serde(default = "default_true")]
+    pub awake_screen_on: bool,
+    /// Image Resizer is on: ImageMagick is there and the menus are added (v0.9.0)
+    pub resize_on: bool,
+    /// Image Resizer's saved Custom... setups
+    pub resize_presets: Vec<crate::resize::Preset>,
 }
 
 fn default_screenshot_hotkey() -> String {
@@ -180,6 +187,9 @@ impl Default for AppConfig {
             screenshot_hotkey: default_screenshot_hotkey(),
             update_check: true,
             update_skipped: String::new(),
+            awake_screen_on: true,
+            resize_on: false,
+            resize_presets: Vec::new(),
         }
     }
 }
@@ -335,6 +345,9 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         screenshot_hotkey: ui.get_setting_screenshot_hotkey().to_string(),
         update_check: ui.global::<crate::Updater>().get_check(),
         update_skipped: update_skipped(),
+        awake_screen_on: ui.global::<crate::Awake>().get_screen_on(),
+        resize_on: ui.global::<crate::Resizer>().get_on(),
+        resize_presets: crate::resize::presets(),
     }
 }
 
@@ -365,7 +378,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
 
     crate::kwin::set_geometry(cfg.window_geometry);
     crate::diagnostics::set_last_picker(cfg.last_picker.clone());
-    ui.set_page(cfg.last_page.unwrap_or(0).clamp(0, 3));
+    ui.set_page(cfg.last_page.unwrap_or(0).clamp(0, 4));
     ui.set_sidebar_mode(cfg.sidebar_mode.clamp(0, 2));
     crate::ocr::set_enabled(cfg.text_enabled);
     if !cfg.text_hotkey.trim().is_empty() {
@@ -390,6 +403,10 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     ui.set_setting_reduce_motion(cfg.reduce_motion);
     ui.global::<crate::Updater>().set_check(cfg.update_check);
     set_update_skipped(&cfg.update_skipped);
+    ui.global::<crate::Awake>().set_screen_on(cfg.awake_screen_on);
+    crate::tray::set_awake_screen(cfg.awake_screen_on);
+    ui.global::<crate::Resizer>().set_on(cfg.resize_on);
+    crate::resize::set_presets(cfg.resize_presets.clone());
     ui.set_setting_micro_screenshot(cfg.micro_screenshot);
     if !cfg.screenshot_hotkey.trim().is_empty() {
         ui.set_setting_screenshot_hotkey(cfg.screenshot_hotkey.clone().into());

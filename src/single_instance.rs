@@ -78,6 +78,19 @@ pub fn send(method: &str) -> Result<(), String> {
     }
 }
 
+/// Hands an Image Resizer job to the running copy.
+pub fn send_resize(action: &str, files: &[String]) -> Result<(), String> {
+    let conn = Connection::session().map_err(|err| format!("session bus: {err}"))?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match conn.call_method(Some(BUS_NAME), OBJECT_PATH, Some(BUS_NAME), "Resize", &(action, files)) {
+            Ok(_) => return Ok(()),
+            Err(_) if Instant::now() < deadline => thread::sleep(Duration::from_millis(100)),
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,7 +119,11 @@ struct Remote {
     extract: Trigger,
     measure: Trigger,
     screenshot: Trigger,
+    resize: ResizeTrigger,
 }
+
+/// Image Resizer's start: the action and the files.
+pub type ResizeTrigger = std::sync::Arc<dyn Fn(String, Vec<String>) + Send + Sync>;
 
 #[zbus::interface(name = "io.github.Mujtaba1i.Archtoys")]
 impl Remote {
@@ -130,6 +147,11 @@ impl Remote {
         (self.screenshot)();
     }
 
+    /// Image Resizer from a file manager's menu: an action and the files (full paths).
+    fn resize(&self, action: &str, files: Vec<String>) {
+        (self.resize)(action.to_string(), files);
+    }
+
     /// The KWin script (kwin.rs): where the main window was, "x,y,w,h".
     fn save_geometry(&self, geometry: &str) {
         if let Some(g) = crate::kwin::parse_geometry(geometry) {
@@ -139,10 +161,17 @@ impl Remote {
 }
 
 /// Starts answering later launches. Keep the connection alive.
-pub fn serve(show: Trigger, pick: Trigger, extract: Trigger, measure: Trigger, screenshot: Trigger) -> Option<Connection> {
+pub fn serve(
+    show: Trigger,
+    pick: Trigger,
+    extract: Trigger,
+    measure: Trigger,
+    screenshot: Trigger,
+    resize: ResizeTrigger,
+) -> Option<Connection> {
     let result = zbus::blocking::connection::Builder::session()
         .and_then(|builder| builder.name(BUS_NAME))
-        .and_then(|builder| builder.serve_at(OBJECT_PATH, Remote { show, pick, extract, measure, screenshot }))
+        .and_then(|builder| builder.serve_at(OBJECT_PATH, Remote { show, pick, extract, measure, screenshot, resize }))
         .and_then(|builder| builder.build());
     match result {
         Ok(conn) => Some(conn),

@@ -3,6 +3,7 @@
 // AV1 video encoder among them), about 60 crates the app never uses.
 slint::slint! { export * from "ui/app.slint"; }
 
+mod awake;
 mod color;
 mod config;
 mod diagnostics;
@@ -53,6 +54,7 @@ mod names;
 mod ocr;
 mod picker;
 mod portal;
+mod resize;
 mod ruler;
 mod search;
 mod single_instance;
@@ -242,11 +244,24 @@ fn main() -> Result<(), slint::PlatformError> {
     let extract_now = std::env::args().any(|arg| arg == "--extract");
     let measure_now = std::env::args().any(|arg| arg == "--measure");
     let screenshot_now = std::env::args().any(|arg| arg == "--screenshot");
+    // Image Resizer from a file manager: `--resize ACTION FILE...`, the files made full paths here
+    // (the running copy has another working folder)
+    let resize_job: Option<(String, Vec<String>)> = args.iter().position(|a| a == "--resize").and_then(|i| {
+        let action = args.get(i + 1)?.clone();
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let files =
+            args[i + 2..].iter().map(|f| std::fs::canonicalize(f).unwrap_or_else(|_| cwd.join(f)).to_string_lossy().to_string()).collect();
+        Some((action, files))
+    });
 
     let _instance_lock = match single_instance::acquire() {
         single_instance::Lock::TakenByAnother => {
             // An autostart launch while a copy is running exits quietly.
-            if !autostart {
+            if let Some((action, files)) = &resize_job {
+                if let Err(err) = single_instance::send_resize(action, files) {
+                    eprintln!("Archtoys is already running, but it didn't answer: {err}");
+                }
+            } else if !autostart {
                 let method = if pick_now {
                     "Pick"
                 } else if extract_now {
@@ -271,7 +286,7 @@ fn main() -> Result<(), slint::PlatformError> {
     diagnostics::keep_recent_messages();
     // `archtoys --pick` / `--extract` with no copy running starts in the tray
     // and picks (or captures text), like the hotkey.
-    let start_hidden = autostart || pick_now || extract_now || measure_now || screenshot_now;
+    let start_hidden = autostart || pick_now || extract_now || measure_now || screenshot_now || resize_job.is_some();
 
     // each picker window opens full screen on its own monitor (freeze.rs)
     slint::BackendSelector::new().backend_name("winit".into()).with_winit_window_attributes_hook(freeze::window_attributes).select()?;
@@ -299,7 +314,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // The desktop's tray host may start after us (autostart at login): wait for
     // it instead of giving up, or a hidden start has no way back (issue #7).
     // The dot starts pink, like the logo, and takes the color once it is shown.
-    let tray = tray::AppTray { ui: ui_handle.clone(), dot: (0xff, 0x2e, 0x93) }.assume_sni_available(true);
+    let tray = tray::AppTray { ui: ui_handle.clone(), dot: (0xff, 0x2e, 0x93), awake: None, awake_screen: true }.assume_sni_available(true);
     match tray.spawn() {
         Ok(handle) => tray::install(handle),
         Err(err) => eprintln!("tray: failed to spawn: {err:?}"),
@@ -348,6 +363,19 @@ fn main() -> Result<(), slint::PlatformError> {
         });
         let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
         fontfind::page::wire(&ui, &history_store, move || {
+            if let Some(ui) = save_ui.upgrade() {
+                persist_config(&ui, &save_history);
+            }
+        });
+        let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
+        resize::install(&ui, move || {
+            if let Some(ui) = save_ui.upgrade() {
+                persist_config(&ui, &save_history);
+            }
+        });
+        resize::refresh_menus();
+        let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
+        awake::install(&ui, move || {
             if let Some(ui) = save_ui.upgrade() {
                 persist_config(&ui, &save_history);
             }
@@ -469,8 +497,23 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(|ui| bring_to_front(&ui));
         })
     };
-    let _remote =
-        single_instance::serve(show, trigger.clone(), extract_trigger.clone(), measure_trigger.clone(), screenshot_trigger.clone());
+    let resize_trigger: single_instance::ResizeTrigger = {
+        let ui_weak = Mutex::new(ui_handle.clone());
+        Arc::new(move |action: String, files: Vec<String>| {
+            let _ = ui_weak.lock().unwrap().upgrade_in_event_loop(move |_ui| resize::start(&action, files));
+        })
+    };
+    let _remote = single_instance::serve(
+        show,
+        trigger.clone(),
+        extract_trigger.clone(),
+        measure_trigger.clone(),
+        screenshot_trigger.clone(),
+        resize_trigger.clone(),
+    );
+    if let Some((action, files)) = resize_job {
+        resize_trigger(action, files);
+    }
     if pick_now {
         trigger();
     }
