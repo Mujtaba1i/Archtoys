@@ -614,7 +614,7 @@ def main():
 AT = {
     "menu": (30, 20),  # on the sidebar's icon column (v0.7.3)
     "home_picker_card": (127, 121),  # the Color Picker row (v0.8.0)
-    "home_micro_switch": (460, 396),  # Screenshot to clipboard's switch
+    "home_micro_switch": (460, 470),  # Screenshot to clipboard's switch (below Awake since v0.9.0)
     "pick": (66, 66),
     "history": [(143, 66), (175, 66), (207, 66), (239, 66)],
     "search": (442, 66),
@@ -632,6 +632,7 @@ AT = {
     "rail_picker": (30, 110),
     "rail_text": (30, 156),
     "rail_ruler": (30, 202),
+    "rail_awake": (30, 248),
     "rail_settings": (30, 532),
     # Settings (rail): at the top
     "s_autocopy": (486, 226),
@@ -1030,6 +1031,31 @@ def micro_checks(wm):
         from PIL import Image
         size = Image.open(io.BytesIO(out)).size
         return size == (320, 160), f"picture {size[0]}x{size[1]} (dragged 320x160)"
+
+    @test("Image Resizer", "archtoys --resize r50 makes a half-size copy next to the picture, and skips what isn't one")
+    def _():
+        if not (shutil.which("convert") or shutil.which("magick")):
+            raise Skip("ImageMagick isn't installed")
+        from PIL import Image
+        folder = tempfile.mkdtemp(prefix="archtoys-resize-")
+        Image.new("RGB", (640, 480), (200, 40, 90)).save(os.path.join(folder, "pic.png"))
+        with open(os.path.join(folder, "notes.txt"), "w") as f:
+            f.write("not a picture")
+        # as a file manager starts it: names relative to the folder, the running copy does the work
+        subprocess.run([BIN, "--resize", "r50", "pic.png", "notes.txt"], cwd=folder, env=app.env, timeout=10)
+        made = os.path.join(folder, "pic-resized.png")
+        if not wait_for(lambda: os.path.exists(made), 15):
+            return False, f"no pic-resized.png: {sorted(os.listdir(folder))} " + app.output()[-300:]
+        time.sleep(0.5)
+        size = Image.open(made).size
+        others = sorted(n for n in os.listdir(folder) if n not in ("pic.png", "notes.txt", "pic-resized.png"))
+        return size == (320, 240) and not others, f"pic-resized.png {size[0]}x{size[1]} (want 320x240), other files {others}"
+
+    @test("Awake", "the sidebar's cup opens its page")
+    def _():
+        app.click(*AT["menu"], wait=1.0)  # pins the icons
+        app.click(*AT["rail_awake"])
+        return bool(wait_for(lambda: app.config().get("last_page") == 4, 3)), f"last_page {app.config().get('last_page')}"
     app.quit()
 
 
