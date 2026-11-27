@@ -26,6 +26,19 @@ pub enum Outcome {
     Cancelled,
 }
 
+/// A desktop notification (org.freedesktop.Notifications). Blocking, but short.
+pub fn notify(summary: &str, body: &str) {
+    let Ok(conn) = Connection::session() else { return };
+    let hints: HashMap<&str, Value> = HashMap::new();
+    let _ = conn.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.Notifications"),
+        "Notify",
+        &("Archtoys", 0u32, "archtoys", summary, body, Vec::<&str>::new(), hints, -1i32),
+    );
+}
+
 /// A unique token for `handle_token` / `session_handle_token`.
 pub fn new_token(prefix: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);

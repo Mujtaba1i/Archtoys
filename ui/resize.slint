@@ -8,6 +8,8 @@ import { Skin, PillButton, Switch } from "common.slint";
 // Home's switch and its Turn on dialog (the main window's copy).
 export global Resizer {
     in-out property <bool> on;
+    // a notification when a job is done (Settings, Micro-toys)
+    in-out property <bool> notify: true;
     // 0 closed, 1 asking, 2 installing, 3 it didn't work
     in-out property <int> dialog;
     in property <string> stage;
@@ -797,29 +799,12 @@ export component ResizeProgress inherits Window {
     width: 520px;
     height: body.preferred-height;
     background: Skin.surface;
-    // "Resizing 7 of 12", then "12 resized, 1 skipped"
+    // "Resizing 7 of 12"
     in property <string> heading;
     in property <float> fraction;
     // "beach-07.jpg · 1920 × 1440 · JPG 85%"
     in property <string> line;
-    in property <bool> done;
-    // "notes.txt: not a picture" (one per line)
-    in property <string> skipped;
-    // "Saved next to the originals, with -resized added. 38.2 MB became 7.9 MB."
-    in property <string> saved;
-    in property <bool> can-open;
     callback stop();
-    callback dismiss();
-    callback open-folder();
-    FocusScope {
-        key-pressed(event) => {
-            if event.text == Key.Escape && root.done {
-                root.dismiss();
-                return accept;
-            }
-            reject
-        }
-    }
     body := VerticalLayout {
         padding: 28px;
         spacing: 16px;
@@ -828,16 +813,11 @@ export component ResizeProgress inherits Window {
             Logo { width: 28px; height: 28px; }
             Text { text: root.heading; color: Skin.text-main; font-size: 22px; font-weight: 700; vertical-alignment: center; }
         }
-        if !root.done : Bar { fraction: root.fraction; }
-        if !root.done : Text { text: root.line; color: Skin.text-muted; font-size: 16px; overflow: elide; }
-        if root.done && root.skipped != "" : Text { text: root.skipped; color: Skin.icon-tint; font-size: 16px; wrap: word-wrap; }
-        if root.done && root.saved != "" : Text { text: root.saved; color: Skin.icon-tint; font-size: 16px; wrap: word-wrap; }
+        Bar { fraction: root.fraction; }
+        Text { text: root.line; color: Skin.text-muted; font-size: 16px; overflow: elide; }
         HorizontalLayout {
             alignment: end;
-            spacing: 10px;
-            if !root.done : Button { text: "Stop"; clicked => { root.stop(); } }
-            if root.done : Button { text: "Close"; clicked => { root.dismiss(); } }
-            if root.done && root.can-open : Button { text: "Open the folder"; primary: true; clicked => { root.open-folder(); } }
+            Button { text: "Stop"; clicked => { root.stop(); } }
         }
     }
 }

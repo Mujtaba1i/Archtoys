@@ -122,6 +122,9 @@ pub struct AppConfig {
     pub resize_on: bool,
     /// Image Resizer's saved Custom... setups
     pub resize_presets: Vec<crate::resize::Preset>,
+    /// Image Resizer: a notification when a job is done (v0.9.3)
+    #[serde(default = "default_true")]
+    pub resize_notify: bool,
 }
 
 fn default_screenshot_hotkey() -> String {
@@ -190,6 +193,7 @@ impl Default for AppConfig {
             awake_screen_on: true,
             resize_on: false,
             resize_presets: Vec::new(),
+            resize_notify: true,
         }
     }
 }
@@ -352,6 +356,7 @@ fn snapshot_config(ui: &AppWindow, history_store: &HistoryStore) -> AppConfig {
         awake_screen_on: ui.global::<crate::Awake>().get_screen_on(),
         resize_on: ui.global::<crate::Resizer>().get_on(),
         resize_presets: crate::resize::presets(),
+        resize_notify: ui.global::<crate::Resizer>().get_notify(),
     }
 }
 
@@ -411,6 +416,7 @@ pub fn apply_config(ui: &AppWindow, history_store: &HistoryStore, cfg: &AppConfi
     crate::tray::set_awake_screen(cfg.awake_screen_on);
     ui.global::<crate::Resizer>().set_on(cfg.resize_on);
     crate::resize::set_presets(cfg.resize_presets.clone());
+    ui.global::<crate::Resizer>().set_notify(cfg.resize_notify);
     ui.set_setting_micro_screenshot(cfg.micro_screenshot);
     if !cfg.screenshot_hotkey.trim().is_empty() {
         ui.set_setting_screenshot_hotkey(cfg.screenshot_hotkey.clone().into());

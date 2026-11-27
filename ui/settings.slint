@@ -2,6 +2,7 @@
 // those of the toy they were opened from (opened from Home: every toy's).
 // Everything it shows and changes belongs to AppWindow, bound below.
 import { ScrollView, AboutSlint } from "std-widgets.slint";
+import { Resizer } from "resize.slint";
 import { ComboBox } from "std-widgets.slint";
 import { Skin, HeaderButton, PillButton, Switch, Segmented, SettingCard, SectionLabel } from "common.slint";
 import { FontFinder } from "text.slint";
@@ -430,6 +431,16 @@ export component SettingsPage inherits ScrollView {
         if !root.about-open : VerticalLayout {
             spacing: 10px;
             SectionLabel { text: "MICRO-TOYS"; }
+
+            SettingCard {
+                title: "Image Resizer: a notification when it's done";
+                subtitle: "How many pictures were resized, and where they were saved";
+                Switch {
+                    label: "Image Resizer notification";
+                    checked: Resizer.notify;
+                    toggled(on) => { Resizer.notify = on; root.settings-changed(); }
+                }
+            }
 
             SettingCard {
                 title: "Screenshot to clipboard hotkey";

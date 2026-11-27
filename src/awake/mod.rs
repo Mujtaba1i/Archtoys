@@ -231,15 +231,7 @@ fn schedule_puff() {
 
 /// "Time's up", through the desktop's notifications.
 fn notify_time_up() {
-    let Ok(conn) = zbus::blocking::Connection::session() else { return };
-    let hints: HashMap<&str, Value> = HashMap::new();
-    let _ = conn.call_method(
-        Some("org.freedesktop.Notifications"),
-        "/org/freedesktop/Notifications",
-        Some("org.freedesktop.Notifications"),
-        "Notify",
-        &("Archtoys", 0u32, "archtoys", "Time's up", "Awake stopped. Your computer can sleep again.", Vec::<&str>::new(), hints, -1i32),
-    );
+    crate::portal::notify("Time's up", "Awake stopped. Your computer can sleep again.");
 }
 
 fn start_choice(choice: i32) {

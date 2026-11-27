@@ -30,7 +30,8 @@ thread_local! {
     static PRESETS: RefCell<Vec<Preset>> = const { RefCell::new(Vec::new()) };
     static PANEL: RefCell<Option<(ResizePanel, Vec<PathBuf>)>> = const { RefCell::new(None) };
     static CUSTOM: RefCell<Option<Custom>> = const { RefCell::new(None) };
-    static JOBS: RefCell<Vec<ResizeProgress>> = const { RefCell::new(Vec::new()) };
+    // the running jobs' progress windows, by job number
+    static JOBS: RefCell<Vec<(u64, ResizeProgress)>> = const { RefCell::new(Vec::new()) };
     static CANCEL: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
 }
 
@@ -664,7 +665,6 @@ struct Tally {
     skipped: Vec<String>,
     bytes_in: u64,
     bytes_out: u64,
-    folder: Option<PathBuf>,
     stopped: bool,
 }
 
@@ -745,12 +745,24 @@ fn one(tool: Tool, spec: &Spec, dest: &Dest, input: &Path, on_start: &dyn Fn(Str
     Ok((bytes_in, bytes_out, output))
 }
 
-fn open_folder(folder: &Path) {
-    let mut command = crate::launch::outside_command("xdg-open");
-    command.arg(folder);
-    if let Err(err) = crate::launch::spawn_and_reap(command) {
-        eprintln!("image resizer: couldn't open the folder: {err}");
-    }
+/// A job longer than this shows its progress window. A quicker one shows
+/// nothing but its notification.
+const SHOW_AFTER: Duration = Duration::from_secs(1);
+
+static JOB_NUMBER: AtomicU64 = AtomicU64::new(0);
+
+/// The job is over: its progress window goes.
+fn job_over(number: u64) {
+    let _ = slint::invoke_from_event_loop(move || {
+        JOBS.with(|j| {
+            j.borrow_mut().retain(|(n, w)| {
+                if *n == number {
+                    let _ = w.hide();
+                }
+                *n != number
+            })
+        });
+    });
 }
 
 fn run_job(files: Vec<PathBuf>, spec: Spec, dest: Dest) {
@@ -763,41 +775,37 @@ fn run_job(files: Vec<PathBuf>, spec: Spec, dest: Dest) {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_button = stop.clone();
     w.on_stop(move || stop_button.store(true, Ordering::SeqCst));
-    let weak = w.as_weak();
-    let close = move || {
-        if let Some(w) = weak.upgrade() {
-            let _ = w.hide();
-            JOBS.with(|j| j.borrow_mut().retain(|x| x.as_weak().upgrade().is_some_and(|x| x.window().is_visible())));
-        }
-    };
-    w.on_dismiss(close.clone());
     w.window().on_close_requested({
         let stop = stop.clone();
         move || {
             stop.store(true, Ordering::SeqCst);
-            close();
             slint::CloseRequestResponse::HideWindow
         }
     });
-    let folder_slot: Arc<std::sync::Mutex<Option<PathBuf>>> = Arc::default();
-    let slot = folder_slot.clone();
-    w.on_open_folder(move || {
-        if let Some(f) = slot.lock().unwrap().as_ref() {
-            open_folder(f);
+    let number = JOB_NUMBER.fetch_add(1, Ordering::SeqCst);
+    let finished = Arc::new(AtomicBool::new(false));
+    let (later, over) = (w.as_weak(), finished.clone());
+    slint::Timer::single_shot(SHOW_AFTER, move || {
+        if !over.load(Ordering::SeqCst) {
+            if let Some(w) = later.upgrade() {
+                let _ = w.show();
+            }
         }
     });
-    let _ = w.show();
+    let notify = main_ui().is_none_or(|ui| ui.global::<Resizer>().get_notify());
     let weak = w.as_weak();
-    JOBS.with(|j| j.borrow_mut().push(w));
+    JOBS.with(|j| j.borrow_mut().push((number, w)));
 
     std::thread::spawn(move || {
         let mut t = Tally::default();
         let Some(tool) = magick::tool() else {
-            let _ = weak.upgrade_in_event_loop(|w| {
-                w.set_heading("ImageMagick isn't installed".into());
-                w.set_saved("Turn Image Resizer on again in Archtoys (Home, Micro-toys), and it installs it.".into());
-                w.set_done(true);
-            });
+            finished.store(true, Ordering::SeqCst);
+            job_over(number);
+            // said even with the notification off: otherwise nothing at all happens
+            crate::portal::notify(
+                "ImageMagick isn't installed",
+                "Turn Image Resizer on again in Archtoys (Home, Micro-toys), and it installs it.",
+            );
             return;
         };
         for (i, file) in files.iter().enumerate() {
@@ -817,30 +825,22 @@ fn run_job(files: Vec<PathBuf>, spec: Spec, dest: Dest) {
                 });
             };
             match one(tool, &spec, &dest, file, &on_start) {
-                Ok((bytes_in, bytes_out, output)) => {
+                Ok((bytes_in, bytes_out, _)) => {
                     t.done += 1;
                     t.bytes_in += bytes_in;
                     t.bytes_out += bytes_out;
-                    if t.folder.is_none() {
-                        t.folder = output.parent().map(Path::to_path_buf);
-                    }
                 }
                 Err(why) => t.skipped.push(format!("{}: {why}", file_name(file))),
             }
         }
-        let heading = summary_heading(&spec, total, t.done, t.skipped.len(), t.stopped);
-        let skipped = skipped_text(&t.skipped);
-        let saved = saved_text(&dest, &t);
-        let folder = t.folder.clone();
-        let _ = weak.upgrade_in_event_loop(move |w| {
-            w.set_fraction(1.0);
-            w.set_heading(heading.into());
-            w.set_skipped(skipped.into());
-            w.set_saved(saved.into());
-            w.set_can_open(folder.is_some());
-            *folder_slot.lock().unwrap() = folder;
-            w.set_done(true);
-        });
+        finished.store(true, Ordering::SeqCst);
+        job_over(number);
+        // nothing resized and not stopped: something's wrong, so it's said even with the notification off
+        if notify || (t.done == 0 && !t.stopped) {
+            let heading = summary_heading(&spec, total, t.done, t.skipped.len(), t.stopped);
+            let body = [skipped_text(&t.skipped), saved_text(&dest, &t)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>();
+            crate::portal::notify(&heading, &body.join("\n"));
+        }
     });
 }
 
