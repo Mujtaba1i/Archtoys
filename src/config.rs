@@ -217,6 +217,10 @@ fn autostart_entry_contents() -> &'static str {
 }
 
 pub fn sync_autostart_entry(enabled: bool) {
+    if crate::sandbox::flatpak_id().is_some() {
+        crate::sandbox::request_autostart(enabled);
+        return;
+    }
     let path = autostart_path();
     if enabled {
         if let Some(parent) = path.parent() {

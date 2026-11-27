@@ -15,7 +15,9 @@ const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub(crate) fn install(ui: &AppWindow, persist: impl Fn() + Clone + 'static) {
     let found: Arc<Mutex<Option<Release>>> = Arc::new(Mutex::new(None));
-    let checking = Arc::new(AtomicBool::new(ui.global::<Updater>().get_check()));
+    // a Flatpak is updated by Flathub (the software center): no daily check of GitHub
+    let flatpak = *installed() == super::installed::Installed::Flatpak;
+    let checking = Arc::new(AtomicBool::new(ui.global::<Updater>().get_check() && !flatpak));
     let g = ui.global::<Updater>();
     g.set_current(env!("CARGO_PKG_VERSION").into());
 
@@ -23,7 +25,7 @@ pub(crate) fn install(ui: &AppWindow, persist: impl Fn() + Clone + 'static) {
     let weak = ui.as_weak();
     g.on_settings_changed(move || {
         if let Some(ui) = weak.upgrade() {
-            c.store(ui.global::<Updater>().get_check(), Ordering::Relaxed);
+            c.store(ui.global::<Updater>().get_check() && !flatpak, Ordering::Relaxed);
         }
         p();
     });
@@ -151,6 +153,16 @@ pub(crate) fn install(ui: &AppWindow, persist: impl Fn() + Clone + 'static) {
             });
         });
     });
+
+    // a Flatpak: Flathub has the update. Flatpak's portal says when, GitHub has its version and notes.
+    if flatpak {
+        let (weak, f) = (ui.as_weak(), found.clone());
+        super::flatpak::watch(move || {
+            let Some(release) = super::available(&crate::config::update_skipped()) else { return };
+            *f.lock().unwrap() = Some(release.clone());
+            let _ = weak.upgrade_in_event_loop(move |ui| show(&ui, &release));
+        });
+    }
 
     // the check: after the start, then once a day while Archtoys runs
     let weak = ui.as_weak();

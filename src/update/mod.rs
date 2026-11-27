@@ -7,6 +7,7 @@
 //! package manager or the .deb is one script run through pkexec, so the
 //! password is asked first; the AppImage replaces its own file (no password).
 
+pub mod flatpak;
 pub mod installed;
 pub mod page;
 
@@ -142,7 +143,11 @@ pub fn available(skipped: &str) -> Option<Release> {
 
 /// Can Archtoys install this update itself (else: the release page)?
 pub fn can_install(how: &Installed) -> bool {
-    !matches!(how, Installed::Flatpak | Installed::Other)
+    match how {
+        // through Flatpak's portal, from Flathub
+        Installed::Flatpak => flatpak::ready(),
+        _ => !matches!(how, Installed::Other),
+    }
 }
 
 /// The steps the dialog lists for this kind of install.
@@ -154,7 +159,8 @@ pub fn steps(how: &Installed) -> Vec<&'static str> {
         Installed::Deb => vec!["Downloading", "Checking the download", "Installing"],
         Installed::Apt => vec!["Checking the package lists", "Installing"],
         Installed::AppImage(_) => vec!["Downloading", "Checking the download", "Replacing the AppImage"],
-        Installed::Flatpak | Installed::Other => vec![],
+        Installed::Flatpak => vec!["Downloading and installing"],
+        Installed::Other => vec![],
     }
 }
 
@@ -272,6 +278,9 @@ pub fn run(how: &Installed, release: &Release, on_event: &dyn Fn(Event)) -> Resu
     if let Installed::AppImage(file) = how {
         return replace_appimage(file, release, on_event);
     }
+    if *how == Installed::Flatpak {
+        return flatpak::update(on_event);
+    }
     let deb_sum = match how {
         Installed::Deb => {
             let sums = release.asset("SHA256SUMS").ok_or("the release has no SHA256SUMS")?;
@@ -368,6 +377,7 @@ fn replace_appimage(file: &std::path::Path, release: &Release, on_event: &dyn Fn
 pub fn restart(how: &Installed) -> std::io::Error {
     use std::os::unix::process::CommandExt;
     let target = match how {
+        Installed::Flatpak => return flatpak::restart(),
         Installed::AppImage(file) => file.clone(),
         _ => exe().clone(),
     };

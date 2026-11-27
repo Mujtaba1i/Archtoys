@@ -124,6 +124,11 @@ pub(crate) fn refresh(ui: &AppWindow) {
 /// offers "Update" only then. `text-update`: 0 checking, 1 up to date,
 /// 2 an update is available, 3 couldn't tell.
 fn check_update(ui: &AppWindow, distro: install::Distro) {
+    // the Flatpak's Tesseract updates with the Flatpak
+    if crate::sandbox::flatpak_id().is_some() {
+        ui.set_text_update(1);
+        return;
+    }
     ui.set_text_update(0);
     let weak = ui.as_weak();
     std::thread::spawn(move || {
@@ -171,6 +176,22 @@ pub(crate) fn delete_languages(ui: &AppWindow) {
 /// "Turn on" (or "Update"): installs Tesseract with the user's password.
 pub(crate) fn turn_on(ui: &AppWindow) {
     if ui.get_text_state() == 1 {
+        return;
+    }
+    // the Flatpak has Tesseract inside it: nothing to install
+    if crate::sandbox::flatpak_id().is_some() {
+        match engine::installed_version() {
+            Some(v) if engine::version_ok(v) => {
+                let _ = lang::prepare_dir();
+                set_enabled(true);
+                save_config();
+                refresh(ui);
+            }
+            _ => {
+                ui.set_text_message("This Flatpak is missing its Tesseract. Please report it.".into());
+                ui.set_text_state(3);
+            }
+        }
         return;
     }
     let distro = install::detect();

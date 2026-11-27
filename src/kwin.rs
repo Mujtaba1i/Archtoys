@@ -131,7 +131,10 @@ function hook(w) {{
 }
 
 fn run(plugin: &str, name: &str, js: &str) -> Result<(), String> {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    // KWin reads the file: in a Flatpak, from the folder the desktop shares with it
+    let dir = crate::sandbox::shared_runtime_dir()
+        .or_else(|| std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir);
     let path = dir.join(format!("archtoys-kwin-{name}.js"));
     std::fs::write(&path, js).map_err(|err| format!("writing the KWin script: {err}"))?;
 

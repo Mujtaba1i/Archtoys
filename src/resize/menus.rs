@@ -29,28 +29,12 @@ const NEMO: &str = "nemo/actions/archtoys-image-resizer.nemo_action";
 const NAUTILUS: &str = "nautilus/scripts/Image Resizer...";
 const THUNAR_ID: &str = "archtoys-resize";
 
-fn home() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-}
-
 fn data_dir() -> PathBuf {
-    std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(|| home().join(".local/share"))
+    crate::sandbox::user_data_dir()
 }
 
 fn thunar_file() -> PathBuf {
-    let config = std::env::var_os("XDG_CONFIG_HOME").filter(|d| !d.is_empty()).map(PathBuf::from);
-    config.unwrap_or_else(|| home().join(".config")).join("Thunar/uca.xml")
-}
-
-/// What starts Archtoys from the menu: the AppImage itself (its path stays
-/// when it updates), else this binary.
-fn launch_command() -> Vec<String> {
-    let program = std::env::var("APPIMAGE")
-        .ok()
-        .filter(|p| !p.is_empty())
-        .or_else(|| std::env::current_exe().ok().map(|p| p.to_string_lossy().to_string()))
-        .unwrap_or_else(|| "archtoys".into());
-    vec![program]
+    crate::sandbox::user_config_dir().join("Thunar/uca.xml")
 }
 
 /// The command line that starts Archtoys, for a shell.
@@ -215,7 +199,7 @@ fn write(path: &Path, text: &str, executable: bool) -> Result<(), String> {
 /// Adds the menus of the file managers this computer has (all of them when it
 /// has none of them, so one installed later finds them). The names it added.
 pub fn install(presets: &[String]) -> Result<Vec<&'static str>, String> {
-    let program = launch_command();
+    let program = crate::sandbox::launch_command();
     let found: Vec<&str> = ["dolphin", "thunar", "nautilus", "nemo"].into_iter().filter(|p| installed(p)).collect();
     let want = |p: &str| found.is_empty() || found.contains(&p);
     let mut added = Vec::new();

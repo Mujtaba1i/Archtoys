@@ -31,6 +31,10 @@ fn user_id() -> u32 {
 }
 
 fn lock_path() -> PathBuf {
+    // a Flatpak's runtime folder is new for each run: the shared one
+    if let Some(dir) = crate::sandbox::shared_runtime_dir() {
+        return dir.join("archtoys.lock");
+    }
     match std::env::var_os("XDG_RUNTIME_DIR") {
         Some(dir) => PathBuf::from(dir).join("archtoys.lock"),
         // No private runtime folder: /tmp is shared by every user, so the

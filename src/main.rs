@@ -56,6 +56,7 @@ mod picker;
 mod portal;
 mod resize;
 mod ruler;
+mod sandbox;
 mod search;
 mod single_instance;
 mod tray;
@@ -296,7 +297,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // the desktop can't find our icon and shows a generic one instead.
     // (Slint doesn't read a SLINT_APP_ID variable; this is the real API, and
     // it must run after AppWindow::new() and before the window is shown.)
-    if let Err(err) = slint::set_xdg_app_id("archtoys") {
+    // a Flatpak's desktop file is named after its id (flatpak-builder renames it)
+    let app_id = sandbox::flatpak_id().unwrap_or_else(|| "archtoys".into());
+    if let Err(err) = slint::set_xdg_app_id(app_id.as_str()) {
         eprintln!("app id: couldn't set it: {err:?}");
     }
     ui.global::<Skin>().set_real_shadows(!cpu_drawn());
@@ -347,7 +350,10 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     // the size limits, with the sidebar's width if it was pinned
     window::apply_constraints(&ui);
-    sync_autostart_entry(ui.get_setting_autostart());
+    // a Flatpak asks the desktop's Background portal, only when the switch changes
+    if sandbox::flatpak_id().is_none() {
+        sync_autostart_entry(ui.get_setting_autostart());
+    }
     {
         let (save_ui, save_history) = (ui_handle.clone(), history_store.clone());
         ocr::install_ui(&ui, move || {
