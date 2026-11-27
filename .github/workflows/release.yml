@@ -5,6 +5,7 @@
 #
 #   wait-for-ci ── prepare ──┬─ update-flatpak-cargo-sources ─┬─ build-tarball ─┬─ build-appimage ─┬─ publish-release ─┬─ aur-bin
 #                            │                                │                │                 │                   ├─ aur-source
+#                            │                                │                │                 │                   ├─ flathub-update (starts flathub-update.yml)
 #                            │                                │                │                 │                   └─ attach-deb ─ apt-repo
 #                            │                                └─ trigger-copr ┴───────────────────────────────────── copr-watch
 #                            └─ build-tarball / trigger-copr also wait for prepare
@@ -578,12 +579,31 @@ jobs:
             -f tag="$TAG" -f sha="$SHA" -f started="$(date +%s)"
           echo "COPR watcher started for $TAG. It follows COPR's build, attaches the RPMs by itself, and opens an issue only if COPR needs your attention." >> "$GITHUB_STEP_SUMMARY"
 
+  # OPTIONAL. Starts flathub-update.yml, which sends this release to Flathub
+  # (a pull request on flathub/io.github.Mujtaba1i.Archtoys). A release made
+  # here can't start it through the release event: GitHub starts no workflow
+  # for events caused by GITHUB_TOKEN, but it does for workflow_dispatch.
+  flathub-update:
+    name: Start the Flathub update (optional)
+    needs: [publish-release]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write    # start another workflow
+    steps:
+      - name: Start it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh workflow run flathub-update.yml --repo "$GITHUB_REPOSITORY" --ref main -f tag="$TAG"
+          echo "Flathub update started for $TAG (the Flathub update workflow): it opens a pull request on Flathub's repo." >> "$GITHUB_STEP_SUMMARY"
+
   # Always runs last. Writes a summary table on the run page; if anything
   # failed, opens an issue naming the job + step, with the error log.
   report:
     name: Report
     if: always()
-    needs: [wait-for-ci, prepare, update-flatpak-cargo-sources, build-tarball, build-appimage, build-deb, publish-release, trigger-copr, aur-bin, aur-source, copr-watch, attach-deb, apt-repo]
+    needs: [wait-for-ci, prepare, update-flatpak-cargo-sources, build-tarball, build-appimage, build-deb, publish-release, trigger-copr, aur-bin, aur-source, copr-watch, attach-deb, apt-repo, flathub-update]
     runs-on: ubuntu-latest
     permissions:
       contents: read

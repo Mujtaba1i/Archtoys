@@ -1,0 +1,140 @@
+# Updates Archtoys on Flathub (the repo flathub/io.github.Mujtaba1i.Archtoys)
+# after a release: the manifest builds the release's tag and commit, with the
+# release's cargo-sources.json (release.yml's update-flatpak-cargo-sources job
+# regenerated it into the release commit, so it's current for that tag).
+#
+# How it starts:
+#   - release.yml starts it after publishing (gh workflow run). A release made
+#     by release.yml can't start it through the `release` event: GitHub starts
+#     no workflow for events caused by the built-in GITHUB_TOKEN.
+#   - `release: published` covers a release you publish by hand.
+#   - Run workflow (Actions tab) with a tag, to redo or backfill one.
+#
+# Needs the secret FLATHUB_REPO_TOKEN: a classic personal access token with the
+# public_repo scope, from the account that maintains the Flathub repo (Flathub's
+# org doesn't accept fine-grained tokens for its repos). Without it, it skips.
+#
+# pr (default): a branch and a pull request on the Flathub repo. Flathub's bot
+#   test-builds it, and merging it publishes the update. Recommended: a broken
+#   build never reaches users.
+# push: straight to the Flathub repo's default branch, which Flathub builds and
+#   publishes right away, untested.
+
+name: Flathub update
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (like v0.9.1)"
+        required: true
+        type: string
+      mode:
+        description: "pr: a pull request Flathub test-builds first (recommended). push: straight to the default branch."
+        required: false
+        default: pr
+        type: choice
+        options: [pr, push]
+
+permissions: {}
+
+concurrency:
+  group: flathub-update-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update the Flathub repo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # check out this repo at the tag; Flathub is reached with FLATHUB_REPO_TOKEN
+    env:
+      APP_ID: io.github.Mujtaba1i.Archtoys
+      FLATHUB_REPO: flathub/io.github.Mujtaba1i.Archtoys
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      MODE: ${{ inputs.mode || 'pr' }}
+      HAS_TOKEN: ${{ secrets.FLATHUB_REPO_TOKEN != '' }}
+    steps:
+      - name: Check the tag and the token
+        id: check
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$TAG' isn't a release tag like v0.9.1"
+            exit 1
+          fi
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "Flathub isn't set up yet (the FLATHUB_REPO_TOKEN secret), so $TAG wasn't sent to Flathub." >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.check.outputs.ready == 'true'
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Make the Flathub manifest
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          COMMIT="$(git rev-parse "refs/tags/${TAG}^{commit}")"
+          echo "$TAG is commit $COMMIT"
+          mkdir -p "$RUNNER_TEMP/flathub-files"
+          python3 .github/scripts/flathub_manifest.py \
+            "packaging/flatpak/${APP_ID}.yml" "$TAG" "$COMMIT" > "$RUNNER_TEMP/flathub-files/${APP_ID}.yml"
+          # the crate list from the release commit: it must exist and be a JSON list
+          python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d, list) and d, "empty"' \
+            packaging/flatpak/cargo-sources.json
+          cp packaging/flatpak/cargo-sources.json "$RUNNER_TEMP/flathub-files/"
+          echo "COMMIT=$COMMIT" >> "$GITHUB_ENV"
+
+      - name: Send it to Flathub
+        if: steps.check.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.FLATHUB_REPO_TOKEN }}
+        run: |
+          AUTH="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$AUTH"
+          git_auth() { git -c "http.extraheader=AUTHORIZATION: basic ${AUTH}" "$@"; }
+
+          # Flathub makes the app's repo when it accepts the first submission
+          if ! gh repo view "$FLATHUB_REPO" > /dev/null 2>&1; then
+            echo "Flathub has no ${FLATHUB_REPO} yet (it's made when Flathub accepts the submission), so $TAG wasn't sent." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git_auth clone --quiet "https://github.com/${FLATHUB_REPO}.git" flathub
+          cd flathub
+          DEFAULT="$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')"
+          echo "The Flathub repo's default branch: $DEFAULT"
+
+          cp "$RUNNER_TEMP/flathub-files/${APP_ID}.yml" "$RUNNER_TEMP/flathub-files/cargo-sources.json" .
+          git add "${APP_ID}.yml" cargo-sources.json
+          if git diff --cached --quiet; then
+            echo "Flathub already has $TAG ($COMMIT): nothing to change." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git diff --cached --stat
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --quiet -m "Update to ${TAG}" -m "Archtoys ${TAG}, commit ${COMMIT}: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+
+          if [ "$MODE" = "push" ]; then
+            git_auth push origin "HEAD:${DEFAULT}"
+            echo "Pushed $TAG to Flathub's ${DEFAULT}: Flathub builds and publishes it now." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          BRANCH="update-${TAG}"
+          # a re-run replaces the branch (the commit is the same content), and reuses its pull request
+          git_auth push --force origin "HEAD:refs/heads/${BRANCH}"
+          PR="$(gh pr list --repo "$FLATHUB_REPO" --head "$BRANCH" --state open --json url --jq '.[0].url')"
+          if [ -z "$PR" ]; then
+            PR="$(gh pr create --repo "$FLATHUB_REPO" --base "$DEFAULT" --head "$BRANCH" \
+              --title "Update to ${TAG}" \
+              --body "Archtoys ${TAG} (commit ${COMMIT}). Release notes: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}")"
+          fi
+          echo "Flathub pull request for $TAG: $PR (merge it after Flathub's test build passes)" >> "$GITHUB_STEP_SUMMARY"
