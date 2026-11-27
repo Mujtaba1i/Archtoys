@@ -46,7 +46,7 @@ docker run --rm -v "$here/tesseract-install:/scripts:ro" -v "$here/mirror-try.sh
     echo \"too old: \$v (Archtoys needs 4.1)\"; exit 1
   fi
   langs=\$(tesseract --list-langs 2>&1)
-  echo \"\$langs\" | grep -qx eng || { echo 'English is missing'; echo \"\$langs\"; exit 1; }
-  echo \"\$langs\" | grep -qx osd || { echo 'the script detector (osd) is missing'; echo \"\$langs\"; exit 1; }
+  echo \"\$langs\" | grep -x eng > /dev/null || { echo 'English is missing'; echo \"\$langs\"; exit 1; }
+  echo \"\$langs\" | grep -x osd > /dev/null || { echo 'the script detector (osd) is missing'; echo \"\$langs\"; exit 1; }
   echo 'ok: version, English and osd'
 "

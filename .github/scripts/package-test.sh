@@ -8,6 +8,9 @@
 # Channels: appimage, deb, aur-bin, aur, rpm. Needs VERSION (0.3.2) and REPO.
 # Every install checks it got exactly VERSION, so it can never test the old one.
 set -euo pipefail
+# In a pipe, grep reads all of its input (never grep -q): grep -q quits at the
+# first match, the command still writing gets SIGPIPE, and pipefail makes the
+# whole check fail (exit 141). That was issue #47: a race apt-cache madison lost.
 
 cmd="${1:?install or start}"
 channel="${2:?channel}"
@@ -72,7 +75,7 @@ aur_install() {
   # the update check installs the release before: its PKGBUILD from the AUR's history
   if [ "$aur_ver" != "$VERSION" ] && [ -n "${OLD_FROM_HISTORY:-}" ]; then
     for c in $(sudo -u builder git -C "/home/builder/$name" rev-list HEAD -- PKGBUILD); do
-      if sudo -u builder git -C "/home/builder/$name" show "$c:PKGBUILD" | grep -qx "pkgver=$VERSION"; then
+      if sudo -u builder git -C "/home/builder/$name" show "$c:PKGBUILD" | grep -x "pkgver=$VERSION" > /dev/null; then
         sudo -u builder git -C "/home/builder/$name" checkout -q "$c"
         aur_ver="$VERSION"
         break
@@ -81,7 +84,7 @@ aur_install() {
   fi
   [ "$aur_ver" = "$VERSION" ] || fail "the AUR has $name $aur_ver, not $VERSION"
   (cd "/home/builder/$name" && sudo -u builder makepkg -si --noconfirm)
-  pacman -Q "$name" | grep -q " $VERSION-" || fail "pacman did not install $name $VERSION"
+  pacman -Q "$name" | grep " $VERSION-" > /dev/null || fail "pacman did not install $name $VERSION"
 }
 
 rpm_install() {
@@ -92,7 +95,7 @@ rpm_install() {
   dnf copr enable -y mujtaba1i/archtoys
   # COPR needs a little time to publish a build; wait until dnf sees it.
   for i in $(seq 1 30); do
-    if dnf --refresh -q list --showduplicates archtoys 2>/dev/null | grep -q "[[:space:]]$VERSION-"; then
+    if dnf --refresh -q list --showduplicates archtoys 2>/dev/null | grep "[[:space:]]$VERSION-" > /dev/null; then
       dnf install -y "archtoys-$VERSION"
       [ "$(rpm -q --qf '%{VERSION}' archtoys)" = "$VERSION" ] || fail "dnf did not install archtoys $VERSION"
       return
@@ -117,7 +120,7 @@ apt_install() {
     mirror_try apt-get update -q > /tmp/apt-update.log 2>&1 \
       || { cat /tmp/apt-update.log; fail "apt-get update failed with the APT repository added (a bad signature?)"; }
     grep -E '^(W|E|Err):|archtoys-apt' /tmp/apt-update.log || true
-    if apt-cache madison archtoys | grep -q "| *$VERSION *|"; then
+    if apt-cache madison archtoys | grep "| *$VERSION *|" > /dev/null; then
       mirror_try apt-get install -y -qq archtoys
       [ "$(dpkg-query -W -f='${Version}' archtoys)" = "$VERSION" ] || fail "apt did not install archtoys $VERSION"
       return
