@@ -112,13 +112,18 @@ apt_install() {
   echo "deb [signed-by=/usr/share/keyrings/archtoys.gpg] $apt_url stable main" > /etc/apt/sources.list.d/archtoys.list
   # GitHub Pages can take a few minutes to publish the push
   for i in $(seq 1 20); do
-    mirror_try apt-get update -qq || fail "apt-get update failed with the APT repository added (a bad signature?)"
+    # apt-get update exits 0 even when a repository's index fails to download
+    # (it only warns), so its warnings are shown: they say why a version is missing
+    mirror_try apt-get update -q > /tmp/apt-update.log 2>&1 \
+      || { cat /tmp/apt-update.log; fail "apt-get update failed with the APT repository added (a bad signature?)"; }
+    grep -E '^(W|E|Err):|archtoys-apt' /tmp/apt-update.log || true
     if apt-cache madison archtoys | grep -q "| *$VERSION *|"; then
       mirror_try apt-get install -y -qq archtoys
       [ "$(dpkg-query -W -f='${Version}' archtoys)" = "$VERSION" ] || fail "apt did not install archtoys $VERSION"
       return
     fi
-    echo "The APT repository doesn't list $VERSION yet ($i/20); waiting 30 s"
+    echo "The APT repository doesn't list $VERSION yet ($i/20); waiting 30 s. apt sees:"
+    apt-cache policy archtoys | sed 's/^/  /'
     sleep 30
   done
   fail "archtoys $VERSION never showed up in the APT repository (waited 10 minutes)"
