@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.9.2
+Version:        0.9.3
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Fri Nov 27 2026 Mujtaba1i <mujtaba1i@github> - 0.9.3-1
+- CI: the package checks no longer fail at random when apt, dnf or pacman lists several versions
+- Archtoys starts fast again: the window shows about 5 times sooner than in v0.9.1 and v0.9.2
+- Image Resizer: a notification when it's done instead of a window (Settings, Micro-toys turns it off)
+- CI: the benchmark measures more times, for steadier numbers
+
 * Fri Nov 27 2026 Mujtaba1i <mujtaba1i@github> - 0.9.2-1
 - Release: each new version is sent to Flathub as a pull request
 - Software centers and Flathub: the app's description lists each release and its changes

@@ -80,6 +80,16 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.9.3" date="2026-11-27">
+      <description>
+        <ul>
+          <li>CI: the package checks no longer fail at random when apt, dnf or pacman lists several versions</li>
+          <li>Archtoys starts fast again: the window shows about 5 times sooner than in v0.9.1 and v0.9.2</li>
+          <li>Image Resizer: a notification when it's done instead of a window (Settings, Micro-toys turns it off)</li>
+          <li>CI: the benchmark measures more times, for steadier numbers</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.9.2" date="2026-11-27">
       <description>
         <ul>
