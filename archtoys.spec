@@ -1,5 +1,5 @@
 Name:           archtoys
-Version:        0.9.1
+Version:        0.9.2
 Release:        1%{?dist}
 Summary:        PowerToys-style tools for Linux: color picker, text extractor, screen ruler
 
@@ -150,6 +150,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/archtoys.desktop
 %{_datadir}/icons/hicolor/512x512/apps/archtoys.png
 
 %changelog
+* Fri Nov 27 2026 Mujtaba1i <mujtaba1i@github> - 0.9.2-1
+- Release: each new version is sent to Flathub as a pull request
+- Software centers and Flathub: the app's description lists each release and its changes
+- APT repository: its index no longer lists its own previous copy
+- CI: the APT package check shows apt's warnings when a version doesn't show up
+- Flatpak: built on the newer 26.08 runtime
+
 * Fri Nov 27 2026 Mujtaba1i <mujtaba1i@github> - 0.9.1-1
 - Flatpak: Archtoys runs as a Flatpak with every toy working, ready for Flathub
 - New CI job to automatically update cargo-sources.json + AppImage: it carries the app's description, for AppImageHub and app stores

@@ -80,6 +80,17 @@
   </provides>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.9.2" date="2026-11-27">
+      <description>
+        <ul>
+          <li>Release: each new version is sent to Flathub as a pull request</li>
+          <li>Software centers and Flathub: the app's description lists each release and its changes</li>
+          <li>APT repository: its index no longer lists its own previous copy</li>
+          <li>CI: the APT package check shows apt's warnings when a version doesn't show up</li>
+          <li>Flatpak: built on the newer 26.08 runtime</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.9.1" date="2026-11-27">
       <description>
         <ul>
