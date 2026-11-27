@@ -438,7 +438,10 @@ jobs:
         env:
           NEW_LABEL: this pull request
           OLD_LABEL: ${{ github.base_ref }}
-          RUNS: 5
+          # more samples, steadier medians on noisy shared runners (v0.9.3)
+          COLD: 5
+          RUNS: 6
+          PICKS: 5
         run: |
           xvfb-run -a -s "-screen 0 1280x1024x24" \
             bash .github/scripts/bench.sh "$PWD/bin/archtoys" "$PWD/main-bin/archtoys"
