@@ -89,6 +89,25 @@ class PrepareRelease(unittest.TestCase):
         spec = Path(self.repo, "archtoys.spec").read_text()
         self.assertEqual(spec.count("- 0.1.1-1"), 1)
 
+    def test_the_metainfo_lists_each_release_with_its_changes(self):
+        meta = "packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml"
+        os.makedirs(os.path.join(self.repo, "packaging"))
+        self.write(meta, '<component>\n  <releases>\n    <release version="0.1.0" date="2026-01-01"/>\n  </releases>\n</component>\n')
+        self.commit("Add metainfo")
+        self.release("v0.1.0")
+        self.commit("Colors & names <fast>")
+        self.release("v0.1.1")
+        text = Path(self.repo, meta).read_text()
+        self.assertEqual(text.count('version="0.1.0"'), 1, text)
+        self.assertLess(text.index('version="0.1.1"'), text.index('version="0.1.0"'), "newest first")
+        self.assertIn("<li>Colors &amp; names &lt;fast&gt;</li>", text)
+        # a retry of the same tag replaces its entry
+        self.commit("One more fix")
+        self.release("v0.1.1")
+        text = Path(self.repo, meta).read_text()
+        self.assertEqual(text.count('version="0.1.1"'), 1, text)
+        self.assertIn("<li>One more fix</li>", text)
+
     def test_first_release_has_no_previous_one(self):
         notes = self.release("v0.1.0")
         self.assertIn("## Changes\n", notes)

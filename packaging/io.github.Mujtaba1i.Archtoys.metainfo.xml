@@ -79,4 +79,34 @@
     <binary>archtoys</binary>
   </provides>
   <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.9.1" date="2026-11-27">
+      <description>
+        <ul>
+          <li>Archtoys runs as a Flatpak, with every toy working, and updates from Flathub</li>
+          <li>The AppImage carries the app's description</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.9.0" date="2026-11-26">
+      <description>
+        <ul>
+          <li>Awake: keep the computer awake for as long as you choose</li>
+          <li>Image Resizer: resize and convert pictures from the file manager's right-click menu</li>
+          <li>An APT repository for Debian and Ubuntu</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.8.4" date="2026-11-25"/>
+    <release version="0.8.3" date="2026-11-25"/>
+    <release version="0.8.2" date="2026-11-24"/>
+    <release version="0.8.1" date="2026-11-23"/>
+    <release version="0.8.0" date="2026-11-19"/>
+    <release version="0.7.5" date="2026-11-14"/>
+    <release version="0.7.4" date="2026-11-12"/>
+    <release version="0.7.3" date="2026-11-10"/>
+    <release version="0.7.2" date="2026-11-08"/>
+    <release version="0.7.1" date="2026-11-06"/>
+    <release version="0.7.0" date="2026-11-05"/>
+  </releases>
 </component>

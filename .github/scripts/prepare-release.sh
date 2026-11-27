@@ -94,6 +94,35 @@ fi
   rm entry.txt
 }
 
+# --- the AppStream metainfo: this version in <releases> -----------------------
+# Flathub's linter refuses a metainfo without releases, and software centers
+# (KDE Discover, GNOME Software) show them with their changes. A retry of the
+# same tag replaces its entry.
+META=packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml
+if [ -f "$META" ]; then
+  CHANGES="$CHANGES" python3 - "$VERSION" "$META" <<'PY'
+import datetime, os, re, sys
+from xml.sax.saxutils import escape
+v, path = sys.argv[1], sys.argv[2]
+s = open(path).read()
+today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+items = [l.strip() for l in os.environ.get("CHANGES", "").splitlines() if l.strip()]
+if items:
+    lis = "".join(f"          <li>{escape(i)}</li>\n" for i in items)
+    entry = (f'    <release version="{v}" date="{today}">\n      <description>\n        <ul>\n'
+             f'{lis}        </ul>\n      </description>\n    </release>\n')
+else:
+    entry = f'    <release version="{v}" date="{today}"/>\n'
+ver = re.escape(v)
+s = re.sub(r'[ \t]*<release version="%s"[^>]*/>\n' % ver, "", s)
+s = re.sub(r'[ \t]*<release version="%s"[^>]*[^/]>.*?</release>\n' % ver, "", s, flags=re.S)
+if "<releases>" not in s:
+    s = s.replace("</component>", "  <releases>\n  </releases>\n</component>", 1)
+s = s.replace("<releases>\n", "<releases>\n" + entry, 1)
+open(path, "w").write(s)
+PY
+fi
+
 git --no-pager diff --stat
 if git diff --quiet; then
   echo "Files already say $VERSION; nothing to commit."
