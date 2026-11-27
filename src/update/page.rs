@@ -15,8 +15,11 @@ const EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 pub(crate) fn install(ui: &AppWindow, persist: impl Fn() + Clone + 'static) {
     let found: Arc<Mutex<Option<Release>>> = Arc::new(Mutex::new(None));
-    // a Flatpak is updated by Flathub (the software center): no daily check of GitHub
-    let flatpak = *installed() == super::installed::Installed::Flatpak;
+    // a Flatpak is updated by Flathub (the software center): no daily check of GitHub.
+    // Not installed() here: it asks pacman, rpm and dpkg who owns the binary, and
+    // dpkg -S reads its whole file list. On the UI thread at startup that cost
+    // ~900 ms cold (v0.9.1's regression). FLATPAK_ID is what a Flatpak has.
+    let flatpak = crate::sandbox::flatpak_id().is_some();
     let checking = Arc::new(AtomicBool::new(ui.global::<Updater>().get_check() && !flatpak));
     let g = ui.global::<Updater>();
     g.set_current(env!("CARGO_PKG_VERSION").into());
