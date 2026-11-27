@@ -44,6 +44,8 @@ install -Dm644 "${ROOT_DIR}/packaging/archtoys.desktop" "${APPDIR}/usr/share/app
 install -Dm644 "${ROOT_DIR}/LICENSE" "${APPDIR}/usr/share/licenses/archtoys/LICENSE"
 install -Dm644 "${ROOT_DIR}/data/colornames-LICENSE.txt" "${APPDIR}/usr/share/licenses/archtoys/colornames-LICENSE.txt"
 install -Dm644 "${ROOT_DIR}/packaging/archtoys-256.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/archtoys.png"
+# AppStream metadata (v0.9.1): AppImageHub and software centers show its description
+install -Dm644 "${ROOT_DIR}/packaging/io.github.Mujtaba1i.Archtoys.metainfo.xml" "${APPDIR}/usr/share/metainfo/io.github.Mujtaba1i.Archtoys.metainfo.xml"
 
 cat > "${APPDIR}/AppRun" <<'SH'
 #!/usr/bin/env sh

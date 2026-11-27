@@ -3,13 +3,14 @@
 #     git tag v1.2.3
 #     git push origin main v1.2.3
 #
-#   wait-for-ci ── prepare ──┬─ build-tarball ─┬─ build-appimage ─┬─ publish-release ─┬─ aur-bin
-#                            │                 │  (+ tarball) ────┘                   ├─ aur-source
-#                            ├─ trigger-copr ──┼──────────────────────────────────────┴─ copr-watch
-#                            │                 └─ build-deb ── (optional) ─ attach-deb (after publish-release) ─ apt-repo
+#   wait-for-ci ── prepare ──┬─ update-flatpak-cargo-sources ─┬─ build-tarball ─┬─ build-appimage ─┬─ publish-release ─┬─ aur-bin
+#                            │                                │                │                 │                   ├─ aur-source
+#                            │                                │                │                 │                   └─ attach-deb ─ apt-repo
+#                            │                                └─ trigger-copr ┴───────────────────────────────────── copr-watch
+#                            └─ build-tarball / trigger-copr also wait for prepare
 #
-# build-tarball builds the app once (from main's CI cache); the AppImage and
-# the .deb pack that same binary.
+# build-tarball builds the app once (from the final release commit); the AppImage
+# and the .deb pack that same binary.
 #   report (always runs last: summary table; opens an issue if anything failed)
 #
 # Required parts stop the release if they fail. Optional parts (the .deb, the APT repository) never
@@ -22,7 +23,10 @@
 # "prepare" sets the version in Cargo.toml / Cargo.lock / archtoys.spec,
 # writes the changelog from your commit messages since the previous tag,
 # commits "Release v1.2.3" to main and moves the tag onto that commit.
-# Every later job builds that commit.
+# "update-flatpak-cargo-sources" regenerates the Flatpak cargo source list from
+# that updated Cargo.lock, commits it to main with [skip ci], and moves the tag
+# to the generated commit. Release builds use this final commit.
+# Every later job builds or deploys that final release commit.
 
 name: Release
 
@@ -84,15 +88,39 @@ jobs:
           MAIN_PUSH_KEY: ${{ secrets.MAIN_PUSH_KEY }}   # past the Require CI rule (push-main.sh)
         run: bash .github/scripts/prepare-release.sh
 
+  update-flatpak-cargo-sources:
+    name: Update Flatpak Cargo sources
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # pushes the generated file and updates the release tag
+    outputs:
+      sha: ${{ steps.update.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false  # the script uses MAIN_PUSH_KEY for main and GITHUB_TOKEN for the tag
+
+      - id: update
+        name: Generate, commit, and push Flatpak cargo sources
+        env:
+          MAIN_PUSH_KEY: ${{ secrets.MAIN_PUSH_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PREPARE_SHA: ${{ needs.prepare.outputs.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash .github/scripts/update-flatpak-cargo-sources.sh
+
   build-tarball:
     name: Build binary tarball
-    needs: prepare
+    needs: [prepare, update-flatpak-cargo-sources]
     # Oldest supported Ubuntu LTS, so the binary runs on older distros too.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.sha }}
+          ref: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
 
       - name: Install system dependencies
         run: |
@@ -168,13 +196,13 @@ jobs:
 
   build-appimage:
     name: Build + smoke-test AppImage
-    needs: [prepare, build-tarball]
+    needs: [prepare, update-flatpak-cargo-sources, build-tarball]
     # Oldest supported Ubuntu LTS: the AppImage catalog tests on 22.04.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.sha }}
+          ref: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
 
       - name: Install system dependencies
         run: |
@@ -244,13 +272,13 @@ jobs:
   # the failure report explains each one.
   build-deb:
     name: Build + test the .deb (optional)
-    needs: [prepare, build-tarball]
+    needs: [prepare, update-flatpak-cargo-sources, build-tarball]
     # Oldest supported Ubuntu LTS, so one .deb works on Ubuntu 22.04+ and Debian 12+.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.sha }}
+          ref: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
@@ -260,8 +288,7 @@ jobs:
         run: cargo install cargo-deb --locked --version 3.8.0
 
       # The build the tarball job made (and checked for glibc 2.35).
-      - name: Get the built app
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: binary
           path: target/release
@@ -320,7 +347,7 @@ jobs:
   # race to create it.
   publish-release:
     name: Publish GitHub release
-    needs: [prepare, build-tarball, build-appimage]
+    needs: [prepare, update-flatpak-cargo-sources, build-tarball, build-appimage]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -453,16 +480,15 @@ jobs:
   # an older build still in the queue is named in the summary.
   trigger-copr:
     name: Start COPR build
-    needs: prepare
+    needs: [prepare, update-flatpak-cargo-sources]
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # the pushed commit: "prepare" moves the tag to the release commit,
-          # and checkout v7 refuses a tag that moved since the run started
-          ref: ${{ github.sha }}
+          # checkout only the helper scripts; the webhook receives the final release SHA
+          ref: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
           sparse-checkout: .github/scripts
 
       - name: Check COPR's queue, then send the webhook
@@ -470,19 +496,19 @@ jobs:
           COPR_WEBHOOK_URL: ${{ secrets.COPR_WEBHOOK_URL }}
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          SHA: ${{ needs.prepare.outputs.sha }}
+          SHA: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
         run: python3 .github/scripts/copr_watch.py trigger
 
   aur-bin:
     name: Deploy archtoys-bin to AUR
-    needs: [prepare, publish-release]
+    needs: [prepare, update-flatpak-cargo-sources, publish-release]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.sha }}
+          ref: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
 
       - name: Set pkgver from tag
         run: |
@@ -505,14 +531,14 @@ jobs:
 
   aur-source:
     name: Deploy archtoys to AUR
-    needs: [prepare, publish-release]
+    needs: [prepare, update-flatpak-cargo-sources, publish-release]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.prepare.outputs.sha }}
+          ref: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
 
       - name: Set pkgver from tag
         run: |
@@ -537,7 +563,7 @@ jobs:
   # for hours, and waiting in here would keep this whole run open.
   copr-watch:
     name: Start the COPR watcher
-    needs: [prepare, publish-release, trigger-copr]
+    needs: [prepare, update-flatpak-cargo-sources, publish-release, trigger-copr]
     runs-on: ubuntu-latest
     permissions:
       actions: write    # start another workflow
@@ -546,7 +572,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          SHA: ${{ needs.prepare.outputs.sha }}
+          SHA: ${{ needs.update-flatpak-cargo-sources.outputs.sha }}
         run: |
           gh workflow run copr-watch.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f tag="$TAG" -f sha="$SHA" -f started="$(date +%s)"
@@ -557,7 +583,7 @@ jobs:
   report:
     name: Report
     if: always()
-    needs: [wait-for-ci, prepare, build-tarball, build-appimage, build-deb, publish-release, trigger-copr, aur-bin, aur-source, copr-watch, attach-deb, apt-repo]
+    needs: [wait-for-ci, prepare, update-flatpak-cargo-sources, build-tarball, build-appimage, build-deb, publish-release, trigger-copr, aur-bin, aur-source, copr-watch, attach-deb, apt-repo]
     runs-on: ubuntu-latest
     permissions:
       contents: read
