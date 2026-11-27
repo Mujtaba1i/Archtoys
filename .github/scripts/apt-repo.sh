@@ -38,6 +38,10 @@ ls "$pool"/archtoys_*_amd64.deb | sort -V | head -n -"$keep" | xargs -r rm -f
 
 apt-ftparchive --arch amd64 packages "$pool" > dists/stable/main/binary-amd64/Packages
 gzip -9nkf dists/stable/main/binary-amd64/Packages
+# The index of dists/stable must not list the previous run's Release files
+# (it did: every run since the first listed the old Release in the new one)
+rm -f dists/stable/Release dists/stable/InRelease dists/stable/Release.gpg
+release_tmp=$(mktemp)
 apt-ftparchive \
   -o APT::FTPArchive::Release::Origin=Archtoys \
   -o APT::FTPArchive::Release::Label=Archtoys \
@@ -46,8 +50,9 @@ apt-ftparchive \
   -o APT::FTPArchive::Release::Architectures=amd64 \
   -o APT::FTPArchive::Release::Components=main \
   -o "APT::FTPArchive::Release::Description=Archtoys, PowerToys-style tools for Linux" \
-  release dists/stable > dists/stable/Release.new
-mv dists/stable/Release.new dists/stable/Release
+  release dists/stable > "$release_tmp"
+mv "$release_tmp" dists/stable/Release
+chmod 644 dists/stable/Release
 "${sign[@]}" --clearsign -o dists/stable/InRelease dists/stable/Release
 "${sign[@]}" --armor --detach-sign -o dists/stable/Release.gpg dists/stable/Release
 
